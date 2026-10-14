@@ -1,5 +1,7 @@
 # Coreto
 
+[![CI](https://github.com/PedroRagazzo/coreto/actions/workflows/ci.yml/badge.svg)](https://github.com/PedroRagazzo/coreto/actions/workflows/ci.yml)
+
 Plataforma aberta de comunidades com chat em tempo real e salas de voz.
 Front-end em React + TypeScript + Tailwind CSS; tempo real em Node.js + socket.io; voz por WebRTC.
 
@@ -10,7 +12,7 @@ Front-end em React + TypeScript + Tailwind CSS; tempo real em Node.js + socket.i
 
 ## Rodando
 
-Requer Node.js 20.19+ e PostgreSQL.
+Requer Node.js 22.12+ e PostgreSQL.
 
 1. Copie `server/.env.example` para `server/.env` e ajuste a `DATABASE_URL` (usuário, senha, porta).
 2. Instale as dependências e crie as tabelas:
@@ -37,10 +39,29 @@ Abra duas janelas (uma anônima) com nomes diferentes para ver mensagens, digita
 | Variável | Onde | Padrão |
 |---|---|---|
 | `DATABASE_URL` | server (`server/.env`) | obrigatória: conexão PostgreSQL |
+| `TEST_DATABASE_URL` | server (`server/.env`) | banco dos testes de integração; nome terminado em `_test` |
 | `SERVER_PORT` | server | `3001` |
 | `CLIENT_ORIGIN` | server | `http://localhost:5173,http://127.0.0.1:5173` |
 | `ICE_SERVERS` | server | STUN público do Google (JSON de `RTCIceServer[]`) |
 | `VITE_SERVER_URL` | client | `http://localhost:3001` |
+
+## Testes
+
+```bash
+npm test
+```
+
+- **Unitários** (`server/test/unit`): regras de permissão e de nomes. Rodam sempre, sem banco.
+- **Integração** (`server/test/integration`): sobem o servidor de verdade numa porta livre e conversam com ele por
+  clientes socket.io, cobrindo sessão, presença, mensagens, permissões, conversas diretas, voz, gestão de espaços e
+  canais e persistência após reinício. Precisam de `TEST_DATABASE_URL` (em `server/.env` ou no ambiente); sem ela, são
+  pulados com um aviso.
+
+Os testes de integração **apagam o banco** a cada arquivo, por isso só aceitam um banco cujo nome termine em `_test`
+(por exemplo, `postgresql://postgres:SUA_SENHA@localhost:5432/coreto_test`). As migrations são aplicadas sozinhas.
+
+O CI (`.github/workflows/ci.yml`) roda a cada push e pull request no GitHub Actions, com PostgreSQL 17: checagem de tipos,
+todos os testes e o build de produção do client.
 
 ## Estrutura
 
@@ -53,8 +74,10 @@ coreto/
 ├── server/
 │   ├── prisma/              Esquema (schema.prisma) e migrations do PostgreSQL
 │   ├── prisma.config.ts     Configuração do Prisma (lê DATABASE_URL de server/.env)
+│   ├── test/                Testes unitários e de integração (Vitest)
 │   └── src/
-│       ├── index.ts         HTTP + socket.io + autenticação provisória
+│       ├── index.ts         Processo: banco, dados de demonstração e encerramento
+│       ├── app.ts           HTTP + socket.io + autenticação provisória (startServer)
 │       ├── store.ts         Estrutura em memória + leituras e escritas no banco
 │       ├── db/              Cliente Prisma e conversão linha ↔ modelo de domínio
 │       ├── generated/       Cliente gerado pelo `prisma generate` (fora do Git)

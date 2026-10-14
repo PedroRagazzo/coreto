@@ -9,7 +9,9 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "test": "prisma generate && vitest run",
+    "test:watch": "prisma generate && vitest"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.10.0",
@@ -20,7 +22,9 @@
   "devDependencies": {
     "@types/node": "^22.10.0",
     "prisma": "^7.10.0",
+    "socket.io-client": "^4.8.1",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "vitest": "^5.0.4"
   }
 }

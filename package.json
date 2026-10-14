@@ -10,7 +10,8 @@
   "scripts": {
     "dev": "concurrently -n server,client -c cyan,magenta \"npm run dev -w server\" \"npm run dev -w client\"",
     "typecheck": "npm run typecheck -w server && npm run typecheck -w client",
-    "build": "npm run build -w client"
+    "build": "npm run build -w client",
+    "test": "npm run test -w server"
   },
   "devDependencies": {
     "concurrently": "^9.1.0"

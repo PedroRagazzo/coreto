@@ -386,8 +386,19 @@ export class Store {
     return rows.reverse().map(toMessage);
   }
 
+  /**
+   * Horário estritamente crescente para mensagens. O banco guarda milissegundos;
+   * duas mensagens no mesmo milissegundo empatariam e o desempate pelo id (UUID
+   * aleatório) poderia inverter a ordem no histórico.
+   */
+  private nextMessageTime(): Date {
+    this.lastMessageTime = Math.max(Date.now(), this.lastMessageTime + 1);
+    return new Date(this.lastMessageTime);
+  }
+  private lastMessageTime = 0;
+
   async addMessage(targetId: Id, authorId: Id, content: string): Promise<Message> {
-    const createdAt = new Date();
+    const createdAt = this.nextMessageTime();
     const direct = this.directs.get(targetId);
     if (!direct) {
       return toMessage(await this.db.message.create({ data: { channelId: targetId, authorId, content, createdAt } }));
