@@ -52,12 +52,14 @@ export interface VoiceSession extends VoiceParticipant {
   socketId: string;
 }
 
-export const toParticipant = ({ userId, channelId, muted, deafened }: VoiceSession): VoiceParticipant => ({
+export const toParticipant = ({
   userId,
   channelId,
   muted,
   deafened,
-});
+  streaming,
+  watching,
+}: VoiceSession): VoiceParticipant => ({ userId, channelId, muted, deafened, streaming, watching });
 
 /** Um anexo do pedido não existe, é de outra pessoa ou já está em outra mensagem. */
 export class AttachmentUnavailableError extends Error {

@@ -28,7 +28,7 @@ import { createContext, useContext, useEffect, useMemo, useReducer, useRef, type
 import type { Identity } from '../lib/identity';
 import { createSocket, type AppSocket } from '../lib/socket';
 import { uploadImage, type UploadHandle } from '../lib/uploads';
-import { describeMediaError, VoiceManager } from '../lib/voice';
+import { describeMediaError, describeScreenError, VoiceManager, type ScreenShareOptions } from '../lib/voice';
 
 const TYPING_TTL_MS = 6_000;
 const TYPING_THROTTLE_MS = 3_000;
@@ -41,6 +41,10 @@ export interface MyVoiceState {
   muted: boolean;
   deafened: boolean;
   canSpeak: boolean;
+  /** Tem a permissão STREAM na sala (guardada ao entrar, vale mesmo em outro espaço). */
+  canStream: boolean;
+  /** Você está compartilhando a tela. */
+  streaming: boolean;
   error: string | null;
 }
 
@@ -72,6 +76,12 @@ export interface RealtimeState {
   mentions: Record<Id, MentionCount>;
   /** Quem está falando agora na sua chamada (medido localmente). */
   speaking: Record<Id, true>;
+  /** Sua tela, enquanto você transmite (para a prévia). */
+  myScreen: MediaStream | null;
+  /** Telas que chegam de outras pessoas da chamada, por quem transmite. */
+  screens: Record<Id, MediaStream>;
+  /** Transmissão aberta no painel central (a sua, para a prévia, ou a de quem você assiste). */
+  stage: Id | null;
 }
 
 const IDLE_VOICE: MyVoiceState = {
@@ -82,6 +92,8 @@ const IDLE_VOICE: MyVoiceState = {
   muted: false,
   deafened: false,
   canSpeak: true,
+  canStream: false,
+  streaming: false,
   error: null,
 };
 
@@ -105,6 +117,9 @@ const initialState: RealtimeState = {
   myVoice: IDLE_VOICE,
   mentions: {},
   speaking: {},
+  myScreen: null,
+  screens: {},
+  stage: null,
 };
 
 type Action =
@@ -139,7 +154,10 @@ type Action =
   | { type: 'voice:update'; channelId: Id; participants: VoiceParticipant[] }
   | { type: 'voice:self'; patch: Partial<MyVoiceState> }
   | { type: 'mentions:update'; mention: MentionCount }
-  | { type: 'speaking'; userIds: Id[] };
+  | { type: 'speaking'; userIds: Id[] }
+  | { type: 'screen:mine'; stream: MediaStream | null }
+  | { type: 'screen:remote'; userId: Id; stream: MediaStream | null }
+  | { type: 'stage'; userId: Id | null };
 
 function withoutKey<T>(record: Record<Id, T> | undefined, key: Id): Record<Id, T> {
   const { [key]: _removed, ...rest } = record ?? {};
@@ -253,6 +271,7 @@ function reducer(state: RealtimeState, action: Action): RealtimeState {
     case 'dm:select':
       return {
         ...state,
+        stage: null,
         activeSpaceId: null,
         activeDirectId: action.conversationId,
         unread: withoutKey(state.unread, action.conversationId),
@@ -261,6 +280,7 @@ function reducer(state: RealtimeState, action: Action): RealtimeState {
     case 'space:select':
       return {
         ...state,
+        stage: null,
         activeSpaceId: action.spaceId,
         snapshot: state.snapshot?.space.id === action.spaceId ? state.snapshot : null,
       };
@@ -277,6 +297,7 @@ function reducer(state: RealtimeState, action: Action): RealtimeState {
     case 'channel:select':
       return {
         ...state,
+        stage: null,
         activeChannelBySpace: { ...state.activeChannelBySpace, [action.spaceId]: action.channelId },
       };
 
@@ -368,8 +389,14 @@ function reducer(state: RealtimeState, action: Action): RealtimeState {
     case 'voice:update':
       return { ...state, voice: { ...state.voice, [action.channelId]: action.participants } };
 
-    case 'voice:self':
-      return { ...state, myVoice: { ...state.myVoice, ...action.patch } };
+    case 'voice:self': {
+      const myVoice = { ...state.myVoice, ...action.patch };
+      // Saiu da chamada: acabam a transmissão, as telas recebidas e o palco.
+      if (myVoice.channelId === null && state.myVoice.channelId !== null) {
+        return { ...state, myVoice: { ...myVoice, streaming: false }, myScreen: null, screens: {}, stage: null };
+      }
+      return { ...state, myVoice };
+    }
 
     case 'mentions:update': {
       const { mention } = action;
@@ -384,6 +411,25 @@ function reducer(state: RealtimeState, action: Action): RealtimeState {
 
     case 'speaking':
       return { ...state, speaking: Object.fromEntries(action.userIds.map((id) => [id, true as const])) };
+
+    case 'screen:mine':
+      return {
+        ...state,
+        myScreen: action.stream,
+        myVoice: { ...state.myVoice, streaming: action.stream !== null },
+        stage: action.stream === null && state.stage === state.me?.id ? null : state.stage,
+      };
+
+    case 'screen:remote':
+      return {
+        ...state,
+        screens: action.stream
+          ? { ...state.screens, [action.userId]: action.stream }
+          : withoutKey(state.screens, action.userId),
+      };
+
+    case 'stage':
+      return { ...state, stage: action.userId };
   }
 }
 
@@ -417,6 +463,16 @@ export interface RealtimeActions {
   deleteMessage(messageId: Id): Promise<string | null>;
   notifyTyping(targetId: Id): void;
   joinVoice(channelId: Id): void;
+  /** Abre o seletor de tela e começa a transmitir. Resolve com erro ou `null` (também se a pessoa cancelar). */
+  startScreenShare(options: ScreenShareOptions): Promise<string | null>;
+  stopScreenShare(): void;
+  /**
+   * Assiste à transmissão de alguém, entrando no canal de voz dela se preciso.
+   * Para você, abre a prévia. Falhas aparecem como aviso na barra de voz.
+   */
+  watchStream(userId: Id): void;
+  /** Fecha o palco (e para de receber a tela de quem você assistia). */
+  closeStage(): void;
   leaveVoice(): void;
   toggleMute(): void;
   toggleDeafen(): void;
@@ -474,6 +530,44 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
 
     const selectChannel = (channelId: Id) => openChannel(stateRef.current.snapshot, channelId);
 
+    /** Entra num canal de voz do espaço aberto; resolve `true` se ficou conectado a ele. */
+    const joinVoice = async (channelId: Id): Promise<boolean> => {
+      const { myVoice, snapshot, me } = stateRef.current;
+      const voice = voiceRef.current;
+      if (myVoice.channelId === channelId) return true;
+      if (!voice || !snapshot || !me || myVoice.connecting) return false;
+      const channel = snapshot.channels.find((c) => c.id === channelId);
+      const permissions = snapshot.permissions[channelId] ?? 0;
+      if (channel?.kind !== 'voice' || !hasPermission(permissions, Permission.CONNECT)) return false;
+      const canSpeak = hasPermission(permissions, Permission.SPEAK);
+
+      // Trocar de sala encerra a anterior (e a transmissão dela).
+      if (myVoice.channelId) dispatch({ type: 'voice:self', patch: IDLE_VOICE });
+      dispatch({ type: 'voice:self', patch: { connecting: true, error: null } });
+      try {
+        await voice.join(channelId, !canSpeak, me.id);
+        dispatch({
+          type: 'voice:self',
+          patch: {
+            channelId,
+            channelName: channel.name,
+            spaceName: snapshot.space.name,
+            connecting: false,
+            muted: !canSpeak,
+            deafened: false,
+            canSpeak,
+            canStream: hasPermission(permissions, Permission.STREAM),
+          },
+        });
+        voice.setDeafened(false);
+        if (!canSpeak) emitVoiceState(true, false);
+        return true;
+      } catch (err) {
+        dispatch({ type: 'voice:self', patch: { ...IDLE_VOICE, error: describeMediaError(err) } });
+        return false;
+      }
+    };
+
     const selectDirect = (conversationId: Id) => {
       dispatch({ type: 'dm:select', conversationId });
       void loadHistory(conversationId);
@@ -499,6 +593,32 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
       const target =
         res.data.channels.find((c) => c.id === remembered) ?? res.data.channels.find((c) => c.kind === 'text');
       if (target) openChannel(res.data, target.id);
+    };
+
+    /** Abre a transmissão de alguém; resolve com o erro ou `null`. */
+    const watchStream = async (userId: Id): Promise<string | null> => {
+      const socket = socketRef.current;
+      const { me, voice } = stateRef.current;
+      if (!socket || !me) return 'Sem conexão com o servidor.';
+      if (userId === me.id) {
+        dispatch({ type: 'stage', userId });
+        return null;
+      }
+      const channelId = Object.keys(voice).find((id) => voice[id].some((p) => p.userId === userId && p.streaming));
+      if (!channelId) return 'Essa transmissão já terminou.';
+      // Como no Discord: assistir entra na chamada de quem transmite.
+      if (stateRef.current.myVoice.channelId !== channelId && !(await joinVoice(channelId))) {
+        return stateRef.current.myVoice.error ?? 'Não foi possível entrar no canal de voz.';
+      }
+      // O palco abre antes do pedido: a lista da sala com você assistindo chega antes da resposta,
+      // e sem o palco aberto o efeito que cancela transmissões "esquecidas" pararia esta.
+      dispatch({ type: 'stage', userId });
+      const res = await socket.emitWithAck('stream:watch', { userId });
+      if (!res.ok) {
+        dispatch({ type: 'stage', userId: null });
+        return res.error;
+      }
+      return null;
     };
 
     return {
@@ -637,43 +757,50 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
       },
 
       joinVoice(channelId) {
-        void (async () => {
-          const { myVoice, snapshot } = stateRef.current;
-          const voice = voiceRef.current;
-          if (!voice || !snapshot || myVoice.connecting || myVoice.channelId === channelId) return;
-          const channel = snapshot.channels.find((c) => c.id === channelId);
-          const permissions = snapshot.permissions[channelId] ?? 0;
-          if (channel?.kind !== 'voice' || !hasPermission(permissions, Permission.CONNECT)) return;
-          const canSpeak = hasPermission(permissions, Permission.SPEAK);
-
-          dispatch({ type: 'voice:self', patch: { connecting: true, error: null } });
-          const me = stateRef.current.me;
-          if (!me) return;
-          try {
-            await voice.join(channelId, !canSpeak, me.id);
-            dispatch({
-              type: 'voice:self',
-              patch: {
-                channelId,
-                channelName: channel.name,
-                spaceName: snapshot.space.name,
-                connecting: false,
-                muted: !canSpeak,
-                deafened: false,
-                canSpeak,
-              },
-            });
-            voice.setDeafened(false);
-            if (!canSpeak) emitVoiceState(true, false);
-          } catch (err) {
-            dispatch({ type: 'voice:self', patch: { ...IDLE_VOICE, error: describeMediaError(err) } });
-          }
-        })();
+        void joinVoice(channelId);
       },
 
       leaveVoice() {
         voiceRef.current?.leave();
         dispatch({ type: 'voice:self', patch: IDLE_VOICE });
+      },
+
+      async startScreenShare(options) {
+        const voice = voiceRef.current;
+        const socket = socketRef.current;
+        if (!voice || !socket || !stateRef.current.myVoice.channelId) {
+          return 'Entre em um canal de voz para compartilhar a tela.';
+        }
+        let stream: MediaStream;
+        try {
+          stream = await voice.startScreen(options);
+        } catch (err) {
+          return describeScreenError(err);
+        }
+        const res = await socket.emitWithAck('stream:start');
+        if (!res.ok) {
+          voice.stopScreen();
+          return res.error;
+        }
+        dispatch({ type: 'screen:mine', stream });
+        dispatch({ type: 'stage', userId: stateRef.current.me?.id ?? null });
+        return null;
+      },
+
+      stopScreenShare() {
+        voiceRef.current?.stopScreen();
+        socketRef.current?.emit('stream:stop');
+        dispatch({ type: 'screen:mine', stream: null });
+      },
+
+      watchStream(userId) {
+        void watchStream(userId).then((error) => {
+          if (error) dispatch({ type: 'voice:self', patch: { error } });
+        });
+      },
+
+      closeStage() {
+        dispatch({ type: 'stage', userId: null });
       },
 
       toggleMute() {
@@ -713,7 +840,11 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
 
   useEffect(() => {
     const socket = createSocket(identity.token);
-    const voice = new VoiceManager(socket, (speaking) => dispatch({ type: 'speaking', userIds: [...speaking] }));
+    const voice = new VoiceManager(socket, {
+      onSpeaking: (speaking) => dispatch({ type: 'speaking', userIds: [...speaking] }),
+      onRemoteScreen: (userId, stream) => dispatch({ type: 'screen:remote', userId, stream }),
+      onScreenEnded: () => actions.stopScreenShare(),
+    });
     socketRef.current = socket;
     voiceRef.current = voice;
     firstSessionRef.current = true;
@@ -797,6 +928,20 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
     socketRef.current?.emit('mentions:ack', { channelId: openChannelId });
     dispatch({ type: 'mentions:update', mention: { ...stateRef.current.mentions[openChannelId], count: 0 } });
   }, [openChannelId, openChannelMentions]);
+
+  // Sua tela vai só para quem está assistindo, segundo a lista da sala.
+  const myRoom = state.myVoice.channelId ? state.voice[state.myVoice.channelId] : undefined;
+  const myId = state.me?.id;
+  useEffect(() => {
+    const viewers = (myRoom ?? []).filter((p) => p.watching === myId).map((p) => p.userId);
+    voiceRef.current?.setScreenViewers(viewers);
+  }, [myRoom, myId]);
+
+  // O servidor diz que você assiste a alguém, mas o palco não mostra essa pessoa: pare de receber.
+  const watchingOnServer = myRoom?.find((p) => p.userId === myId)?.watching ?? null;
+  useEffect(() => {
+    if (watchingOnServer && state.stage !== watchingOnServer) socketRef.current?.emit('stream:unwatch');
+  }, [watchingOnServer, state.stage]);
 
   const value = useMemo(() => ({ state, actions }), [state, actions]);
   return <RealtimeContext.Provider value={value}>{children}</RealtimeContext.Provider>;

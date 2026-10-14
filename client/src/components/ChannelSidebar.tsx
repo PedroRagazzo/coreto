@@ -5,6 +5,7 @@ import { useState, type ReactNode } from 'react';
 import { useRealtime } from '../state/realtime';
 import { can, displayNameOf, groupChannels } from '../state/selectors';
 import { Avatar } from './Avatar';
+import { LiveBadge } from './StreamStage';
 import { CreateChannelDialog } from './CreateChannelDialog';
 import { EditChannelDialog } from './EditChannelDialog';
 import { EditSpaceDialog } from './EditSpaceDialog';
@@ -213,17 +214,37 @@ function VoiceChannelItem({ channel, onEdit }: ChannelItemProps) {
             const name = displayNameOf(state.snapshot, state.users, p.userId);
             // Só dá para medir quem fala na chamada em que você está.
             const speaking = isMine && Boolean(state.speaking[p.userId]) && !p.muted;
-            return (
-              <li key={p.userId} className="flex items-center gap-2 rounded px-1.5 py-1 text-sm text-muted">
+            const row = (
+              <>
                 <Avatar name={name} color={user?.avatarColor ?? '#555'} size="xs" speaking={speaking} />
-                <span className={`flex-1 truncate ${speaking ? 'text-fg' : ''}`}>
+                <span className={`flex-1 truncate text-left ${speaking ? 'text-fg' : ''}`}>
                   {name}
                   {speaking && <span className="sr-only"> (falando)</span>}
                 </span>
+                {p.streaming && <LiveBadge />}
                 {p.deafened ? (
-                  <HeadphoneOff size={14} aria-label="Som desativado" className="text-dnd" />
+                  <HeadphoneOff size={14} aria-label="Som desativado" className="shrink-0 text-dnd" />
                 ) : (
-                  p.muted && <MicOff size={14} aria-label="Microfone desativado" className="text-dnd" />
+                  p.muted && <MicOff size={14} aria-label="Microfone desativado" className="shrink-0 text-dnd" />
+                )}
+              </>
+            );
+            const rowClass = 'flex w-full items-center gap-2 rounded px-1.5 py-1 text-sm text-muted';
+            return (
+              <li key={p.userId}>
+                {p.streaming ? (
+                  // Como no Discord: clicar em quem está ao vivo abre a transmissão.
+                  <button
+                    type="button"
+                    onClick={() => actions.watchStream(p.userId)}
+                    title={p.userId === state.me?.id ? 'Ver a prévia da sua tela' : `Assistir à tela de ${name}`}
+                    aria-pressed={state.stage === p.userId}
+                    className={`${rowClass} hover:bg-hover/60 hover:text-fg ${state.stage === p.userId ? 'bg-hover/60 text-fg' : ''}`}
+                  >
+                    {row}
+                  </button>
+                ) : (
+                  <div className={rowClass}>{row}</div>
                 )}
               </li>
             );

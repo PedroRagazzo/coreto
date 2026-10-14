@@ -144,6 +144,12 @@ export interface ClientToServerEvents {
   'voice:leave': () => void;
   'voice:state': (req: { muted: boolean; deafened: boolean }) => void;
   'voice:signal': (req: { to: Id; signal: SignalPayload }) => void;
+  /** Começa a compartilhar a tela na sala em que está; exige STREAM. */
+  'stream:start': (ack: (res: Ack<null>) => void) => void;
+  'stream:stop': () => void;
+  /** Assiste à transmissão de alguém da mesma sala (uma de cada vez). */
+  'stream:watch': (req: { userId: Id }, ack: (res: Ack<null>) => void) => void;
+  'stream:unwatch': () => void;
 }
 
 export interface ServerToClientEvents {

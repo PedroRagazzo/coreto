@@ -117,6 +117,10 @@ export interface VoiceParticipant {
   channelId: Id;
   muted: boolean;
   deafened: boolean;
+  /** Está compartilhando a tela ("ao vivo"). */
+  streaming: boolean;
+  /** De quem está assistindo a transmissão, na mesma sala. */
+  watching: Id | null;
 }
 
 /** Tudo que o cliente precisa para desenhar um espaço ao entrar nele. */

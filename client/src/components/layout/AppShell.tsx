@@ -10,6 +10,7 @@ import { ChatPanel } from '../ChatPanel';
 import { ConnectionBanner } from '../ConnectionBanner';
 import { DirectMessagesPanel, DirectMessagesSidebar } from '../DirectMessages';
 import { SpaceRail } from '../SpaceRail';
+import { StreamStage } from '../StreamStage';
 import { UserPanel } from '../UserPanel';
 import { VoiceStatusBar } from '../VoiceStatusBar';
 
@@ -33,7 +34,9 @@ export function AppShell() {
       {/* Coluna 3: conversa + membros */}
       <main className="flex min-w-0 flex-1 flex-col">
         <ConnectionBanner />
-        {inDirectMessages ? (
+        {state.stage ? (
+          <StreamStage />
+        ) : inDirectMessages ? (
           <DirectMessagesPanel />
         ) : (
           <ChatPanel showMembers={showMembers} onToggleMembers={() => setShowMembers((v) => !v)} />

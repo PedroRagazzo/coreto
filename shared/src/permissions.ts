@@ -12,6 +12,8 @@ export const Permission = {
   MANAGE_MESSAGES: 1 << 4,
   MANAGE_CHANNELS: 1 << 5,
   MANAGE_ROLES: 1 << 6,
+  /** Compartilhar a tela em canais de voz. */
+  STREAM: 1 << 7,
   /** Ignora todas as sobrescritas de canal. */
   ADMINISTRATOR: 1 << 30,
 } as const;
@@ -21,7 +23,7 @@ export type PermissionName = keyof typeof Permission;
 export const ALL_PERMISSIONS = Object.values(Permission).reduce((acc, flag) => acc | flag, 0);
 
 export const DEFAULT_EVERYONE_PERMISSIONS =
-  Permission.VIEW_CHANNEL | Permission.SEND_MESSAGES | Permission.CONNECT | Permission.SPEAK;
+  Permission.VIEW_CHANNEL | Permission.SEND_MESSAGES | Permission.CONNECT | Permission.SPEAK | Permission.STREAM;
 
 export function hasPermission(permissions: number, flag: number): boolean {
   return (permissions & flag) === flag;

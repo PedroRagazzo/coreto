@@ -1,4 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import type { VoiceParticipant } from '../../../shared/src/models.js';
+import { Permission } from '../../../shared/src/permissions.js';
 import type { SignalPayload } from '../../../shared/src/protocol.js';
 import { hasTestDatabase } from '../support/database.js';
 import { channelNamed, expectNoEvent, joinDemoSpace, nextEvent, ok, TestServer, type TestClient } from '../support/harness.js';
@@ -76,5 +78,74 @@ describe.skipIf(!hasTestDatabase)('salas de voz', () => {
     const pareamento = channelNamed(await joinDemoSpace(bruno.client), 'Pareamento');
     ok(await bruno.client.socket.emitWithAck('voice:join', { channelId: pareamento.id }));
     await left;
+  });
+
+  describe('compartilhamento de tela', () => {
+    /** Espera a lista da sala chegar num estado que passe no teste. */
+    const roster = (client: TestClient, check: (p: VoiceParticipant[]) => boolean) =>
+      nextEvent(client.socket, 'voice:update', (u) => check(u.participants)).then((u) => u.participants);
+    const find = (list: VoiceParticipant[], who: TestClient) => list.find((p) => p.userId === who.user.id);
+
+    it('mostra quem está ao vivo e quem assiste, e quem para de transmitir libera quem assistia', async () => {
+      const ana = await inRoom('Ana', 'Sala de estar');
+      const bruno = await inRoom('Bruno', 'Sala de estar');
+
+      const live = roster(bruno.client, (list) => find(list, ana.client)?.streaming === true);
+      ok(await ana.client.socket.emitWithAck('stream:start'));
+      await live;
+
+      const watching = roster(ana.client, (list) => find(list, bruno.client)?.watching === ana.client.user.id);
+      ok(await bruno.client.socket.emitWithAck('stream:watch', { userId: ana.client.user.id }));
+      await watching;
+
+      const ended = roster(bruno.client, (list) => find(list, ana.client)?.streaming === false);
+      ana.client.socket.emit('stream:stop');
+      expect(find(await ended, bruno.client)?.watching).toBeNull();
+    });
+
+    it('quem sai da sala ao vivo também encerra a transmissão para quem assistia', async () => {
+      const ana = await inRoom('Ana', 'Sala de estar');
+      const bruno = await inRoom('Bruno', 'Sala de estar');
+      ok(await ana.client.socket.emitWithAck('stream:start'));
+      ok(await bruno.client.socket.emitWithAck('stream:watch', { userId: ana.client.user.id }));
+
+      const cleared = roster(bruno.client, (list) => !find(list, ana.client) && find(list, bruno.client)?.watching === null);
+      ana.client.socket.emit('voice:leave');
+      await cleared;
+    });
+
+    it('recusa transmitir fora de uma sala e assistir a quem não está ao vivo, a si mesmo ou em outra sala', async () => {
+      const fora = await server.connect('Fora');
+      expect((await fora.socket.emitWithAck('stream:start')).ok).toBe(false);
+
+      const ana = await inRoom('Ana', 'Sala de estar');
+      const bruno = await inRoom('Bruno', 'Sala de estar');
+      const carla = await inRoom('Carla', 'Pareamento');
+      expect((await bruno.client.socket.emitWithAck('stream:watch', { userId: ana.client.user.id })).ok).toBe(false);
+
+      ok(await ana.client.socket.emitWithAck('stream:start'));
+      expect((await ana.client.socket.emitWithAck('stream:watch', { userId: ana.client.user.id })).ok).toBe(false);
+      expect((await carla.client.socket.emitWithAck('stream:watch', { userId: ana.client.user.id })).ok).toBe(false);
+      expect((await fora.socket.emitWithAck('stream:watch', { userId: ana.client.user.id })).ok).toBe(false);
+    });
+
+    it('exige a permissão de transmitir no canal', async () => {
+      const ana = await inRoom('Ana', 'Sala de estar');
+      const sala = channelNamed(await joinDemoSpace(ana.client), 'Sala de estar');
+      // Tira STREAM do @everyone nesta sala, direto no banco, e recarrega o servidor.
+      await server.db.permissionOverwrite.create({
+        data: { channelId: sala.id, targetType: 'ROLE', targetId: sala.spaceId, deny: BigInt(Permission.STREAM) },
+      });
+      await server.restart();
+      const again = await server.connectWithToken(ana.client.token);
+      await joinDemoSpace(again);
+      ok(await again.socket.emitWithAck('voice:join', { channelId: sala.id }));
+      expect(await again.socket.emitWithAck('stream:start')).toEqual({
+        ok: false,
+        error: 'Você não tem permissão para compartilhar a tela neste canal.',
+      });
+      await server.db.permissionOverwrite.deleteMany({ where: { channelId: sala.id } });
+      await server.restart();
+    });
   });
 });

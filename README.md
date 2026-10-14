@@ -90,14 +90,14 @@ coreto/
 │       └── realtime/
 │           ├── chat.ts      Entrar no espaço, histórico, mensagens, menções, digitação
 │           ├── presence.ts  Online / ausente / não perturbe / indisponível
-│           ├── voice.ts     Lista das salas + repasse de sinalização WebRTC
+│           ├── voice.ts     Lista das salas, quem transmite e quem assiste, repasse de sinalização WebRTC
 │           ├── membership.ts
 │           ├── guards.ts    Validação de payload e permissão
 │           └── types.ts     Tipos do socket e nomes das salas
 └── client/src/
     ├── state/realtime.tsx   Socket + reducer + ações (fonte única de estado)
     ├── state/selectors.ts
-    ├── lib/voice.ts         Malha WebRTC + medidor de quem está falando
+    ├── lib/voice.ts         Malha WebRTC (voz e tela) + medidor de quem está falando
     ├── lib/uploads.ts       Envio de imagens com progresso
     ├── lib/socket.ts, identity.ts, format.ts
     └── components/
@@ -108,6 +108,8 @@ coreto/
         ├── MemberList.tsx        Membros online / indisponíveis à direita
         ├── MessageContent.tsx    Texto formatado, menções e imagens de uma mensagem
         ├── MentionAutocomplete.tsx  Sugestões ao digitar "@"
+        ├── StreamStage.tsx       Transmissão de tela no painel central (assistir ou prévia)
+        ├── ScreenShareDialog.tsx Qualidade da transmissão antes do seletor do navegador
         ├── VoiceStatusBar.tsx, UserPanel.tsx, MessageList.tsx, MessageInput.tsx ...
 ```
 
@@ -217,6 +219,8 @@ cada uma precisaria ser invalidada (por exemplo, com Redis pub/sub) e o socket.i
 O cálculo (`server/src/permissions.ts`) aplica, em ordem: dono do espaço → cargos (+ `@everyone`) → `ADMINISTRATOR` →
 sobrescrita de `@everyone` → sobrescritas dos cargos → sobrescrita do membro. Sem `VIEW_CHANNEL` o canal some.
 
+`STREAM` (compartilhar a tela) vem ligada no `@everyone`; uma sobrescrita de canal pode tirá-la de uma sala.
+
 Exemplos na seed: `#avisos` (todos leem, só a Moderação escreve) e `#moderação` (invisível para quem não é da Moderação).
 
 ## Voz
@@ -231,6 +235,23 @@ nada pelo servidor.
 A malha funciona bem até umas 5 a 8 pessoas por sala, porque cada participante envia o áudio para todos os outros.
 Para salas maiores, e para impor `SPEAK` no servidor, troque por um SFU (mediasoup, LiveKit ou Janus):
 o protocolo de `voice:join` / `voice:signal` já isola essa troca em `server/src/realtime/voice.ts` e `client/src/lib/voice.ts`.
+
+### Compartilhamento de tela
+
+Funciona como o "Go Live" do Discord. Dentro de uma sala de voz, **Compartilhar tela** abre a escolha de qualidade
+(720p, 1080p ou original; 15, 30 ou 60 fps; com ou sem som). Depois disso, o próprio navegador pergunta qual tela,
+janela ou aba compartilhar. Quem transmite ganha o selo **AO VIVO** na lista da sala; os outros clicam no nome para
+assistir, o que também os coloca na chamada se ainda não estiverem nela. A transmissão abre no painel central com
+quantas pessoas estão assistindo (e quem, ao passar o mouse), volume do som da tela e tela cheia. Quem transmite vê uma
+prévia sem som e o contador "N assistindo" na barra de voz. Parar pelo botão do Coreto, pelo aviso do navegador ou
+saindo da chamada mostra "A transmissão terminou" para quem assistia.
+
+O vídeo só vai para quem escolheu assistir, o que economiza a banda de quem transmite. O servidor só guarda
+`streaming` e `watching` de cada participante (`stream:start`, `stream:stop`, `stream:watch`, `stream:unwatch`) e quem
+transmite lê essa lista. Cada pessoa que assiste ganha um transceptor de vídeo na conexão direta (uma renegociação na
+primeira vez); depois, parar e voltar a assistir só troca a faixa (`replaceTrack`), sem renegociar. Como qualquer lado
+pode renegociar, `client/src/lib/voice.ts` usa o padrão "perfect negotiation" do WebRTC para resolver ofertas
+simultâneas. A permissão `STREAM` controla quem pode transmitir; o `@everyone` a tem por padrão.
 
 ### TURN
 
@@ -267,7 +288,8 @@ se a chamada ficar muda o problema está nele (porta, segredo ou realm). Servido
 - Anexos só de imagem, sem limite de envios por pessoa, guardados no disco do servidor (para várias instâncias, troque
   por um armazenamento de objetos como S3).
 - O anel de quem está falando só aparece para quem está na mesma chamada.
-- Sem vídeo nem compartilhamento de tela.
+- Sem câmera. Na malha P2P, quem transmite a tela manda uma cópia do vídeo para cada pessoa que assiste: até umas 4 ou
+  5 pessoas assistindo, conforme a internet de quem transmite. Cada pessoa assiste a uma transmissão por vez.
 
 ## Licença
 
