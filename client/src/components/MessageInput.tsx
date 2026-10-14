@@ -1,9 +1,9 @@
 import type { Id } from '@shared/models';
+import { MAX_MESSAGE_LENGTH } from '@shared/protocol';
 import { SendHorizontal } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useRealtime } from '../state/realtime';
 
-const MAX_LENGTH = 2000;
 const MAX_HEIGHT_PX = 192;
 
 interface MessageInputProps {
@@ -58,7 +58,7 @@ export function MessageInput({ targetId, label, canSend }: MessageInputProps) {
           ref={textareaRef}
           rows={1}
           value={draft}
-          maxLength={MAX_LENGTH}
+          maxLength={MAX_MESSAGE_LENGTH}
           disabled={!canSend}
           aria-label={`Mensagem para ${label}`}
           placeholder={

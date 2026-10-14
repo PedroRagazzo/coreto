@@ -16,6 +16,10 @@ import type {
 
 export type Ack<T> = { ok: true; data: T } | { ok: false; error: string };
 
+export const MAX_MESSAGE_LENGTH = 2000;
+/** Mensagens por página do histórico; uma página menor que isso significa que chegou ao começo. */
+export const HISTORY_PAGE_SIZE = 50;
+
 // ── Login (HTTP POST /login) ─────────────────────────────────────────────────
 // O socket.io só aceita conexões com o token de sessão devolvido aqui.
 
@@ -110,6 +114,10 @@ export interface ClientToServerEvents {
     ack: (res: Ack<Message[]>) => void,
   ) => void;
   'message:send': (req: { channelId: Id; content: string }, ack: (res: Ack<Message>) => void) => void;
+  /** Só o autor edita. */
+  'message:edit': (req: { messageId: Id; content: string }, ack: (res: Ack<Message>) => void) => void;
+  /** O autor apaga; em canais, quem tem MANAGE_MESSAGES também. */
+  'message:delete': (req: { messageId: Id }, ack: (res: Ack<null>) => void) => void;
   'typing:start': (req: { channelId: Id }) => void;
   'presence:set': (status: SelectableStatus) => void;
   'voice:join': (req: { channelId: Id }, ack: (res: Ack<VoiceJoinResult>) => void) => void;
@@ -138,6 +146,8 @@ export interface ServerToClientEvents {
   /** Uma conversa direta foi criada ou recebeu mensagem. Chega antes do `message:new`. */
   'dm:upsert': (payload: DirectConversationPayload) => void;
   'message:new': (message: Message) => void;
+  'message:updated': (message: Message) => void;
+  'message:deleted': (payload: { channelId: Id; messageId: Id }) => void;
   typing: (payload: { channelId: Id; userId: Id }) => void;
   'presence:update': (payload: { userId: Id; status: PresenceStatus }) => void;
   'member:joined': (payload: { member: Member; user: User }) => void;

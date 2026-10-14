@@ -85,6 +85,77 @@ describe.skipIf(!hasTestDatabase)('mensagens em canais', () => {
     await notToSelf;
   });
 
+  it('pagina até o começo do histórico, sem repetir nem pular mensagens', async () => {
+    const ana = await server.connect('Ana');
+    const space = ok(await ana.socket.emitWithAck('space:create', { name: 'Muitas mensagens' }));
+    const geral = channelNamed(ok(await ana.socket.emitWithAck('space:join', space.id)), 'geral');
+    for (let i = 1; i <= 23; i++) {
+      ok(await ana.socket.emitWithAck('message:send', { channelId: geral.id, content: `n${i}` }));
+    }
+
+    const seen: string[] = [];
+    let page = ok(await ana.socket.emitWithAck('channel:history', { channelId: geral.id, limit: 10 }));
+    while (page.length > 0) {
+      seen.unshift(...page.map((m) => m.content));
+      if (page.length < 10) break;
+      page = ok(await ana.socket.emitWithAck('channel:history', { channelId: geral.id, before: page[0].id, limit: 10 }));
+    }
+    expect(seen).toEqual(Array.from({ length: 23 }, (_, i) => `n${i + 1}`));
+  });
+
+  it('deixa só o autor editar, e avisa quem está no canal', async () => {
+    const ana = await server.connect('Ana');
+    const bruno = await server.connect('Bruno');
+    const geral = channelNamed(await joinDemoSpace(ana), 'geral');
+    await joinDemoSpace(bruno);
+    const sent = ok(await ana.socket.emitWithAck('message:send', { channelId: geral.id, content: 'primeira versão' }));
+    expect(sent.editedAt).toBeNull();
+
+    expect(await bruno.socket.emitWithAck('message:edit', { messageId: sent.id, content: 'invasão' })).toEqual({
+      ok: false,
+      error: 'Você só pode editar as suas mensagens.',
+    });
+    expect((await ana.socket.emitWithAck('message:edit', { messageId: sent.id, content: '   ' })).ok).toBe(false);
+
+    const updated = nextEvent(bruno.socket, 'message:updated', (m) => m.id === sent.id);
+    const edited = ok(await ana.socket.emitWithAck('message:edit', { messageId: sent.id, content: '  versão final ' }));
+    expect(edited).toMatchObject({ id: sent.id, content: 'versão final', createdAt: sent.createdAt });
+    expect(edited.editedAt).not.toBeNull();
+    expect(await updated).toEqual(edited);
+
+    const history = ok(await bruno.socket.emitWithAck('channel:history', { channelId: geral.id }));
+    expect(history.find((m) => m.id === sent.id)?.content).toBe('versão final');
+  });
+
+  it('deixa o autor apagar a própria mensagem, mas não a dos outros', async () => {
+    const ana = await server.connect('Ana');
+    const bruno = await server.connect('Bruno');
+    const geral = channelNamed(await joinDemoSpace(ana), 'geral');
+    await joinDemoSpace(bruno);
+    const sent = ok(await ana.socket.emitWithAck('message:send', { channelId: geral.id, content: 'vou me arrepender' }));
+
+    expect((await bruno.socket.emitWithAck('message:delete', { messageId: sent.id })).ok).toBe(false);
+
+    const removed = nextEvent(bruno.socket, 'message:deleted', (p) => p.messageId === sent.id);
+    ok(await ana.socket.emitWithAck('message:delete', { messageId: sent.id }));
+    expect(await removed).toEqual({ channelId: geral.id, messageId: sent.id });
+    expect(await server.db.message.count({ where: { id: sent.id } })).toBe(0);
+    expect((await ana.socket.emitWithAck('message:edit', { messageId: sent.id, content: 'tarde demais' })).ok).toBe(false);
+  });
+
+  it('deixa o dono do espaço apagar mensagens dos outros nos canais dele', async () => {
+    const dona = await server.connect('Dona');
+    const bruno = await server.connect('Bruno');
+    const space = ok(await dona.socket.emitWithAck('space:create', { name: 'Moderado' }));
+    const geral = channelNamed(ok(await bruno.socket.emitWithAck('space:join', space.id)), 'geral');
+    const sent = ok(await bruno.socket.emitWithAck('message:send', { channelId: geral.id, content: 'spam' }));
+
+    // O dono pode apagar, mas editar continua sendo só do autor.
+    expect((await dona.socket.emitWithAck('message:edit', { messageId: sent.id, content: 'censurado' })).ok).toBe(false);
+    ok(await dona.socket.emitWithAck('message:delete', { messageId: sent.id }));
+    expect(await server.db.message.count({ where: { id: sent.id } })).toBe(0);
+  });
+
   it('mantém as mensagens depois de reiniciar o servidor', async () => {
     const ana = await server.connect('Ana');
     const geral = channelNamed(await joinDemoSpace(ana), 'geral');

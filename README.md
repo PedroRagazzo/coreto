@@ -148,6 +148,17 @@ Depois disso o navegador guarda um token de sessão que **não expira**, e a pes
   fim dela. Excluir pede confirmação e apaga também as mensagens do canal (`onDelete: Cascade` no banco). Quem estava
   numa sala de voz excluída é desconectado com um aviso, e quem estava lendo um canal excluído vai para outro canal de texto.
 
+## Histórico e edição de mensagens
+
+- **Histórico completo:** cada canal ou conversa abre com as 50 mensagens mais recentes. Ao rolar até perto do topo, a
+  página anterior é buscada (`channel:history` com `before`) e entra em cima sem a leitura pular. A mensagem de
+  boas-vindas só aparece quando o histórico chega de fato ao começo.
+- **Editar:** só o autor, passando o mouse sobre a mensagem e clicando no lápis. Enter salva, Esc cancela; a mensagem
+  ganha "(editada)" para todos (`message:edit` → `message:updated`).
+- **Apagar:** o autor apaga as próprias mensagens, com confirmação. Em canais, quem tem `MANAGE_MESSAGES` (o dono do
+  espaço, por exemplo) também apaga as dos outros; em conversas diretas, cada um só apaga as suas
+  (`message:delete` → `message:deleted`).
+
 ## Mensagens diretas
 
 Clique em alguém na lista de membros para abrir uma conversa privada. Só é possível conversar com quem participa de
@@ -200,7 +211,7 @@ Fora de redes locais, configure um servidor TURN em `ICE_SERVERS`.
 - Todo espaço é público: quem conecta vira membro de todos, inclusive dos criados por outras pessoas.
 - Mensagens diretas só entre duas pessoas (sem grupos) e sem lista para buscar usuários: comece pela lista de membros.
 - Mensagens não lidas só são contadas nas conversas diretas, e a contagem zera ao recarregar a página.
-- Sem edição/remoção de mensagens, anexos, vídeo, compartilhamento de tela ou indicador de quem está falando.
+- Sem anexos, vídeo, compartilhamento de tela ou indicador de quem está falando.
 
 ## Licença
 

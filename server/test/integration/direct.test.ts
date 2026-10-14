@@ -67,6 +67,27 @@ describe.skipIf(!hasTestDatabase)('mensagens diretas', () => {
     await carlaSeesNothing;
   });
 
+  it('edita e apaga mensagens da conversa só pelo autor, avisando os dois lados', async () => {
+    const ana = await server.connect('Ana');
+    const bruno = await server.connect('Bruno');
+    const carla = await server.connect('Carla');
+    const { conversation } = ok(await ana.socket.emitWithAck('dm:open', { userId: bruno.user.id }));
+    const sent = ok(await ana.socket.emitWithAck('message:send', { channelId: conversation.id, content: 'oi' }));
+
+    const updated = nextEvent(bruno.socket, 'message:updated');
+    ok(await ana.socket.emitWithAck('message:edit', { messageId: sent.id, content: 'oi, tudo bem?' }));
+    expect((await updated).content).toBe('oi, tudo bem?');
+
+    // Nem o outro participante nem uma terceira pessoa apagam a mensagem da Ana.
+    expect((await bruno.socket.emitWithAck('message:delete', { messageId: sent.id })).ok).toBe(false);
+    expect((await carla.socket.emitWithAck('message:delete', { messageId: sent.id })).ok).toBe(false);
+    expect((await carla.socket.emitWithAck('message:edit', { messageId: sent.id, content: 'x' })).ok).toBe(false);
+
+    const removed = nextEvent(bruno.socket, 'message:deleted');
+    ok(await ana.socket.emitWithAck('message:delete', { messageId: sent.id }));
+    expect((await removed).messageId).toBe(sent.id);
+  });
+
   it('devolve as conversas ao reconectar, com quem está do outro lado', async () => {
     const ana = await server.connect('Ana');
     const bruno = await server.connect('Bruno');

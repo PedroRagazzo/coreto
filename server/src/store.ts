@@ -432,6 +432,19 @@ export class Store {
     return toMessage(row);
   }
 
+  async findMessage(messageId: Id): Promise<Message | null> {
+    const row = await this.db.message.findUnique({ where: { id: messageId } });
+    return row ? toMessage(row) : null;
+  }
+
+  async editMessage(messageId: Id, content: string): Promise<Message> {
+    return toMessage(await this.db.message.update({ where: { id: messageId }, data: { content, editedAt: new Date() } }));
+  }
+
+  async deleteMessage(messageId: Id): Promise<void> {
+    await this.db.message.delete({ where: { id: messageId } });
+  }
+
   // ── Voz ────────────────────────────────────────────────────────────────────
 
   voiceIn(channelId: Id): VoiceSession[] {

@@ -15,6 +15,7 @@ import type {
 } from '@shared/models';
 import { hasPermission, Permission } from '@shared/permissions';
 import {
+  HISTORY_PAGE_SIZE,
   INVALID_SESSION,
   type ChannelCreatedPayload,
   type CreateChannelRequest,
@@ -59,6 +60,10 @@ export interface RealtimeState {
   messages: Record<Id, Message[]>;
   /** canal ou conversa → usuário → instante (ms) em que o aviso de digitação expira */
   typing: Record<Id, Record<Id, number>>;
+  /** Conversas cujo histórico já foi carregado até a primeira mensagem. */
+  historyComplete: Record<Id, true>;
+  /** Conversas buscando uma página de mensagens antigas agora. */
+  loadingOlder: Record<Id, true>;
   voice: Record<Id, VoiceParticipant[]>;
   myVoice: MyVoiceState;
 }
@@ -88,6 +93,8 @@ const initialState: RealtimeState = {
   users: {},
   messages: {},
   typing: {},
+  historyComplete: {},
+  loadingOlder: {},
   voice: {},
   myVoice: IDLE_VOICE,
 };
@@ -106,8 +113,11 @@ type Action =
   | { type: 'space:select'; spaceId: Id | null }
   | { type: 'space:snapshot'; snapshot: SpaceSnapshot }
   | { type: 'channel:select'; spaceId: Id; channelId: Id }
-  | { type: 'messages:history'; channelId: Id; messages: Message[] }
+  | { type: 'messages:history'; channelId: Id; messages: Message[]; reachedStart: boolean }
+  | { type: 'history:loading'; channelId: Id; loading: boolean }
   | { type: 'message:new'; message: Message }
+  | { type: 'message:updated'; message: Message }
+  | { type: 'message:deleted'; channelId: Id; messageId: Id }
   | { type: 'typing'; channelId: Id; userId: Id; until: number }
   | { type: 'presence'; userId: Id; status: PresenceStatus }
   | { type: 'member:joined'; member: Member; user: User }
@@ -252,7 +262,42 @@ function reducer(state: RealtimeState, action: Action): RealtimeState {
       const byId = new Map((state.messages[action.channelId] ?? []).map((m) => [m.id, m]));
       for (const message of action.messages) byId.set(message.id, message);
       const merged = [...byId.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-      return { ...state, messages: { ...state.messages, [action.channelId]: merged } };
+      return {
+        ...state,
+        messages: { ...state.messages, [action.channelId]: merged },
+        // Uma vez no começo, continua no começo (a página mais recente não desfaz isso).
+        historyComplete:
+          action.reachedStart && !state.historyComplete[action.channelId]
+            ? { ...state.historyComplete, [action.channelId]: true }
+            : state.historyComplete,
+      };
+    }
+
+    case 'history:loading':
+      return {
+        ...state,
+        loadingOlder: action.loading
+          ? { ...state.loadingOlder, [action.channelId]: true }
+          : withoutKey(state.loadingOlder, action.channelId),
+      };
+
+    case 'message:updated': {
+      const { channelId, id } = action.message;
+      const list = state.messages[channelId];
+      if (!list?.some((m) => m.id === id)) return state;
+      return {
+        ...state,
+        messages: { ...state.messages, [channelId]: list.map((m) => (m.id === id ? action.message : m)) },
+      };
+    }
+
+    case 'message:deleted': {
+      const list = state.messages[action.channelId];
+      if (!list) return state;
+      return {
+        ...state,
+        messages: { ...state.messages, [action.channelId]: list.filter((m) => m.id !== action.messageId) },
+      };
     }
 
     case 'message:new': {
@@ -326,6 +371,12 @@ export interface RealtimeActions {
   selectDirect(conversationId: Id): void;
   /** Envia para um canal de texto ou conversa direta. Resolve com erro ou `null`. */
   sendMessage(targetId: Id, content: string): Promise<string | null>;
+  /** Busca a página anterior à mensagem mais antiga carregada. */
+  loadOlder(targetId: Id): void;
+  /** Edita uma mensagem sua. Resolve com erro ou `null`. */
+  editMessage(messageId: Id, content: string): Promise<string | null>;
+  /** Apaga uma mensagem (sua, ou de outros se você modera o canal). Resolve com erro ou `null`. */
+  deleteMessage(messageId: Id): Promise<string | null>;
   notifyTyping(targetId: Id): void;
   joinVoice(channelId: Id): void;
   leaveVoice(): void;
@@ -367,7 +418,10 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
 
     const loadHistory = async (channelId: Id) => {
       const res = await socketRef.current?.emitWithAck('channel:history', { channelId });
-      if (res?.ok) dispatch({ type: 'messages:history', channelId, messages: res.data });
+      if (res?.ok) {
+        const reachedStart = res.data.length < HISTORY_PAGE_SIZE;
+        dispatch({ type: 'messages:history', channelId, messages: res.data, reachedStart });
+      }
     };
 
     const openChannel = (snapshot: SpaceSnapshot | null, channelId: Id) => {
@@ -482,6 +536,40 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
         dispatch({ type: 'dm:upsert', payload: res.data });
         selectDirect(res.data.conversation.id);
         return null;
+      },
+
+      loadOlder(channelId) {
+        const { historyComplete, loadingOlder, messages } = stateRef.current;
+        const oldest = messages[channelId]?.[0];
+        const socket = socketRef.current;
+        if (!socket || !oldest || historyComplete[channelId] || loadingOlder[channelId]) return;
+        dispatch({ type: 'history:loading', channelId, loading: true });
+        void socket
+          .emitWithAck('channel:history', { channelId, before: oldest.id, limit: HISTORY_PAGE_SIZE })
+          .then((res) => {
+            if (res.ok) {
+              const reachedStart = res.data.length < HISTORY_PAGE_SIZE;
+              dispatch({ type: 'messages:history', channelId, messages: res.data, reachedStart });
+            }
+          })
+          .finally(() => dispatch({ type: 'history:loading', channelId, loading: false }));
+      },
+
+      async editMessage(messageId, content) {
+        const socket = socketRef.current;
+        if (!socket) return 'Sem conexão com o servidor.';
+        const res = await socket.emitWithAck('message:edit', { messageId, content });
+        if (!res.ok) return res.error;
+        dispatch({ type: 'message:updated', message: res.data });
+        return null;
+      },
+
+      async deleteMessage(messageId) {
+        const socket = socketRef.current;
+        if (!socket) return 'Sem conexão com o servidor.';
+        // O estado é atualizado pelo evento `message:deleted`, que chega para todos que veem a conversa.
+        const res = await socket.emitWithAck('message:delete', { messageId });
+        return res.ok ? null : res.error;
       },
 
       async sendMessage(channelId, content) {
@@ -614,6 +702,8 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
     });
     socket.on('dm:upsert', (payload) => dispatch({ type: 'dm:upsert', payload }));
     socket.on('message:new', (message) => dispatch({ type: 'message:new', message }));
+    socket.on('message:updated', (message) => dispatch({ type: 'message:updated', message }));
+    socket.on('message:deleted', ({ channelId, messageId }) => dispatch({ type: 'message:deleted', channelId, messageId }));
     socket.on('typing', ({ channelId, userId }) =>
       dispatch({ type: 'typing', channelId, userId, until: Date.now() + TYPING_TTL_MS }),
     );
