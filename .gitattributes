@@ -1,0 +1,2 @@
+# Texto sempre com fim de linha LF, no repositório e no checkout, em qualquer sistema.
+* text=auto eol=lf
