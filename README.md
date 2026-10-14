@@ -95,3 +95,7 @@ Fora de redes locais, configure um servidor TURN em `ICE_SERVERS`.
 - Mensagens diretas: só o lugar no layout.
 - Sem edição/remoção de mensagens, anexos, vídeo, compartilhamento de tela ou indicador de quem está falando.
 - Todos os espaços são públicos: quem conecta vira membro de todos.
+
+## Licença
+
+[MIT](LICENSE)

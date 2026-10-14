@@ -2,6 +2,7 @@
   "name": "coreto",
   "private": true,
   "description": "Plataforma aberta de comunidades com chat em tempo real e salas de voz",
+  "license": "MIT",
   "workspaces": [
     "server",
     "client"
