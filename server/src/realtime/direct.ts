@@ -5,7 +5,7 @@
 import type { DirectConversation, Id } from '../../../shared/src/models.js';
 import type { DirectConversationPayload } from '../../../shared/src/protocol.js';
 import type { Store } from '../store.js';
-import { isFunction } from './guards.js';
+import { isFunction, storageError } from './guards.js';
 import { rooms, type AppSocket } from './types.js';
 
 export function directPayload(store: Store, conversation: DirectConversation): DirectConversationPayload {
@@ -25,7 +25,7 @@ export const participantRooms = (conversation: DirectConversation) => conversati
 export function registerDirect(socket: AppSocket, store: Store): void {
   const { userId } = socket.data;
 
-  socket.on('dm:open', (req, ack) => {
+  socket.on('dm:open', async (req, ack) => {
     if (!isFunction(ack)) return;
     const target = typeof req?.userId === 'string' ? store.users.get(req.userId) : undefined;
     if (!target || target.id === userId) return ack({ ok: false, error: 'Usuário inválido.' });
@@ -34,6 +34,10 @@ export function registerDirect(socket: AppSocket, store: Store): void {
       return ack({ ok: false, error: 'Vocês precisam participar de um espaço em comum.' });
     }
     // A conversa só aparece para o outro lado quando a primeira mensagem chegar.
-    ack({ ok: true, data: directPayload(store, store.directBetween(userId, target.id)) });
+    try {
+      ack({ ok: true, data: directPayload(store, await store.directBetween(userId, target.id)) });
+    } catch (err) {
+      ack(storageError('dm:open', err));
+    }
   });
 }

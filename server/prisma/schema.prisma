@@ -1,14 +1,13 @@
-// Esquema relacional (PostgreSQL) para quando o armazenamento em memória
-// (src/store.ts) for substituído por um banco. Presença e estado de voz são
-// efêmeros e ficam fora daqui (memória ou Redis).
+// Esquema relacional (PostgreSQL). A URL de conexão fica em prisma.config.ts.
+// Presença e estado de voz são efêmeros e ficam fora do banco.
 
 generator client {
-  provider = "prisma-client-js"
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
 }
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 enum ChannelKind {
@@ -22,14 +21,27 @@ enum OverwriteTarget {
 }
 
 model User {
-  id          String    @id @default(uuid())
-  displayName String    @db.VarChar(32)
-  avatarColor String    @db.VarChar(7)
-  isBot       Boolean   @default(false)
-  createdAt   DateTime  @default(now())
-  ownedSpaces Space[]   @relation("SpaceOwner")
-  memberships Member[]
-  messages    Message[]
+  id            String               @id @default(uuid())
+  displayName   String               @db.VarChar(32)
+  avatarColor   String               @db.VarChar(7)
+  isBot         Boolean              @default(false)
+  createdAt     DateTime             @default(now())
+  sessions      Session[]
+  ownedSpaces   Space[]              @relation("SpaceOwner")
+  memberships   Member[]
+  messages      Message[]
+  directsAsA    DirectConversation[] @relation("DirectUserA")
+  directsAsB    DirectConversation[] @relation("DirectUserB")
+}
+
+/// Login provisório: guarda só o hash SHA-256 do token gerado pelo navegador.
+model Session {
+  tokenHash String   @id @db.Char(64)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
 }
 
 /// Comunidade ("Espaço").
@@ -72,6 +84,7 @@ model Member {
   roles    MemberRole[]
 
   @@id([spaceId, userId])
+  @@index([userId])
 }
 
 model MemberRole {
@@ -123,16 +136,37 @@ model PermissionOverwrite {
   @@id([channelId, targetType, targetId])
 }
 
+/// Conversa privada entre duas pessoas. `userAId` é sempre o menor dos dois ids,
+/// para que o par só possa existir uma vez.
+model DirectConversation {
+  id            String    @id @default(uuid())
+  userAId       String
+  userBId       String
+  userA         User      @relation("DirectUserA", fields: [userAId], references: [id], onDelete: Cascade)
+  userB         User      @relation("DirectUserB", fields: [userBId], references: [id], onDelete: Cascade)
+  createdAt     DateTime  @default(now())
+  lastMessageAt DateTime?
+  messages      Message[]
+
+  @@unique([userAId, userBId])
+  @@index([userBId])
+}
+
+/// Mensagem de um canal de texto (`channelId`) ou de uma conversa direta (`directId`):
+/// exatamente um dos dois é preenchido.
 model Message {
   /// Em produção, prefira ids ordenáveis por tempo (UUIDv7 ou snowflake) para paginar pelo id.
-  id        String    @id @default(uuid())
-  channelId String
-  channel   Channel   @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  id        String              @id @default(uuid())
+  channelId String?
+  channel   Channel?            @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  directId  String?
+  direct    DirectConversation? @relation(fields: [directId], references: [id], onDelete: Cascade)
   authorId  String
-  author    User      @relation(fields: [authorId], references: [id])
-  content   String    @db.VarChar(2000)
-  createdAt DateTime  @default(now())
+  author    User                @relation(fields: [authorId], references: [id])
+  content   String              @db.VarChar(2000)
+  createdAt DateTime            @default(now())
   editedAt  DateTime?
 
   @@index([channelId, createdAt(sort: Desc)])
+  @@index([directId, createdAt(sort: Desc)])
 }

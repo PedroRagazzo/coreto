@@ -3,15 +3,23 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "start": "tsx src/index.ts",
-    "typecheck": "tsc --noEmit"
+    "dev": "prisma generate && node --watch --import tsx src/index.ts",
+    "start": "prisma generate && tsx src/index.ts",
+    "typecheck": "prisma generate && tsc --noEmit",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "db:studio": "prisma studio"
   },
   "dependencies": {
+    "@prisma/adapter-pg": "^7.10.0",
+    "@prisma/client": "^7.10.0",
+    "dotenv": "^16.4.7",
     "socket.io": "^4.8.1"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "prisma": "^7.10.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   }

@@ -34,3 +34,9 @@ export function messageTarget(store: Store, userId: Id, id: unknown, access: 're
 }
 
 export const isFunction = (value: unknown): value is (...args: never[]) => void => typeof value === 'function';
+
+/** Registra a falha no log do servidor e devolve uma mensagem genérica para o cliente. */
+export function storageError(context: string, err: unknown): { ok: false; error: string } {
+  console.error(`[${context}]`, err);
+  return { ok: false, error: 'Erro ao acessar o banco de dados. Tente de novo.' };
+}

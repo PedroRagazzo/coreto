@@ -1,6 +1,6 @@
 import type { Store } from '../store.js';
 import { directPayload, otherParticipant, participantRooms } from './direct.js';
-import { isFunction, messageTarget } from './guards.js';
+import { isFunction, messageTarget, storageError } from './guards.js';
 import { rooms, type AppSocket, type IO } from './types.js';
 
 const MAX_MESSAGE_LENGTH = 2000;
@@ -26,16 +26,20 @@ export function registerChat(io: IO, socket: AppSocket, store: Store): void {
     ack({ ok: true, data: snapshot });
   });
 
-  socket.on('channel:history', (req, ack) => {
+  socket.on('channel:history', async (req, ack) => {
     if (!isFunction(ack)) return;
     const target = messageTarget(store, userId, req?.channelId, 'read');
     if (!target) return ack({ ok: false, error: 'Canal indisponível.' });
     const limit = Math.min(Math.max(Number(req.limit) || 50, 1), MAX_HISTORY_PAGE);
     const before = typeof req.before === 'string' ? req.before : undefined;
-    ack({ ok: true, data: store.history(target.id, before, limit) });
+    try {
+      ack({ ok: true, data: await store.history(target.id, before, limit) });
+    } catch (err) {
+      ack(storageError('channel:history', err));
+    }
   });
 
-  socket.on('message:send', (req, ack) => {
+  socket.on('message:send', async (req, ack) => {
     if (!isFunction(ack)) return;
     const target = messageTarget(store, userId, req?.channelId, 'write');
     if (!target) return ack({ ok: false, error: 'Você não tem permissão para escrever aqui.' });
@@ -45,7 +49,12 @@ export function registerChat(io: IO, socket: AppSocket, store: Store): void {
       return ack({ ok: false, error: `Limite de ${MAX_MESSAGE_LENGTH} caracteres.` });
     }
 
-    const message = store.addMessage(target.id, userId, content);
+    let message;
+    try {
+      message = await store.addMessage(target.id, userId, content);
+    } catch (err) {
+      return ack(storageError('message:send', err));
+    }
     if (target.kind === 'channel') {
       io.to(rooms.channel(target.id)).emit('message:new', message);
     } else {

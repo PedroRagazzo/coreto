@@ -1,27 +1,41 @@
-// Armazenamento em memória. A interface pública é a mesma que um repositório
-// com banco (ver prisma/schema.prisma) precisará oferecer.
+// Estado do servidor sobre o PostgreSQL (Prisma).
+//
+// A estrutura (usuários, espaços, cargos, categorias, canais, membros e conversas
+// diretas) é carregada do banco ao iniciar e fica em memória: as checagens de
+// permissão rodam a cada evento e precisam ser síncronas. Toda escrita vai
+// primeiro ao banco e só depois atualiza a memória. Mensagens não ficam em
+// memória: são gravadas e lidas direto do banco. Presença e voz são efêmeras.
+//
+// Com uma instância só do servidor isso basta; com várias, a memória de cada
+// uma precisaria ser invalidada (por exemplo via Redis pub/sub).
 
-import { randomUUID } from 'node:crypto';
 import type {
   Category,
   Channel,
-  ChannelKind,
   DirectConversation,
   Id,
   Member,
   Message,
-  PermissionOverwrite,
   Role,
   Space,
   SpaceSnapshot,
   User,
   VoiceParticipant,
 } from '../../shared/src/models.js';
-import { DEFAULT_EVERYONE_PERMISSIONS } from '../../shared/src/permissions.js';
+import { hashToken, type Db } from './db/client.js';
+import {
+  toCategory,
+  toChannel,
+  toDirect,
+  toMember,
+  toMessage,
+  toRole,
+  toSpace,
+  toUser,
+} from './db/mappers.js';
 import { computeChannelPermissions } from './permissions.js';
 
 const AVATAR_COLORS = ['#2bb39a', '#5b8def', '#b07de0', '#e5a54b', '#e06c75', '#4fb3c8', '#8cbf5a'];
-const HISTORY_LIMIT_PER_CHANNEL = 500;
 
 /** Sessão de voz de um usuário: no máximo uma por conta, presa ao socket que entrou. */
 export interface VoiceSession extends VoiceParticipant {
@@ -37,121 +51,99 @@ export const toParticipant = ({ userId, channelId, muted, deafened }: VoiceSessi
 });
 
 const byPosition = (a: { position: number }, b: { position: number }) => a.position - b.position;
+const memberKey = (spaceId: Id, userId: Id) => `${spaceId}:${userId}`;
 
 export class Store {
   readonly users = new Map<Id, User>();
   readonly spaces = new Map<Id, Space>();
   readonly channels = new Map<Id, Channel>();
+  readonly directs = new Map<Id, DirectConversation>();
   /** userId → sessão de voz ativa */
   readonly voice = new Map<Id, VoiceSession>();
-  readonly directs = new Map<Id, DirectConversation>();
 
-  private readonly tokens = new Map<string, Id>();
   private readonly categories = new Map<Id, Category>();
   private readonly roles = new Map<Id, Role>();
   private readonly members = new Map<string, Member>();
-  private readonly messages = new Map<Id, Message[]>();
+
+  private constructor(private readonly db: Db) {}
+
+  /** Carrega a estrutura inteira do banco para a memória. */
+  static async load(db: Db): Promise<Store> {
+    const store = new Store(db);
+    const [users, spaces, roles, categories, channels, members, directs] = await Promise.all([
+      db.user.findMany(),
+      db.space.findMany(),
+      db.role.findMany(),
+      db.category.findMany(),
+      db.channel.findMany({ include: { overwrites: true } }),
+      db.member.findMany({ include: { roles: { select: { roleId: true } } } }),
+      db.directConversation.findMany(),
+    ]);
+    for (const row of users) store.users.set(row.id, toUser(row));
+    for (const row of spaces) store.spaces.set(row.id, toSpace(row));
+    for (const row of roles) store.roles.set(row.id, toRole(row));
+    for (const row of categories) store.categories.set(row.id, toCategory(row));
+    for (const row of channels) store.channels.set(row.id, toChannel(row));
+    for (const row of members) store.members.set(memberKey(row.spaceId, row.userId), toMember(row));
+    for (const row of directs) store.directs.set(row.id, toDirect(row));
+    return store;
+  }
 
   // ── Usuários ───────────────────────────────────────────────────────────────
 
-  createUser(displayName: string, options: { isBot?: boolean } = {}): User {
-    const user: User = {
-      id: randomUUID(),
-      displayName,
-      avatarColor: AVATAR_COLORS[this.users.size % AVATAR_COLORS.length],
-      status: options.isBot ? 'online' : 'offline',
-      isBot: options.isBot ?? false,
-    };
+  /**
+   * Autenticação provisória: o navegador gera um token aleatório e o guarda no
+   * localStorage; o banco guarda só o hash. Substituir por login de verdade
+   * (OAuth, senha + JWT) antes de produção.
+   */
+  async resolveSession(token: string, displayName: string): Promise<User> {
+    const tokenHash = hashToken(token);
+    const session = await this.db.session.findUnique({ where: { tokenHash } });
+    const existing = session ? this.users.get(session.userId) : undefined;
+    if (existing) {
+      if (existing.displayName !== displayName) {
+        await this.db.user.update({ where: { id: existing.id }, data: { displayName } });
+        existing.displayName = displayName;
+      }
+      return existing;
+    }
+
+    const row = await this.db.user.create({
+      data: {
+        displayName,
+        avatarColor: AVATAR_COLORS[this.users.size % AVATAR_COLORS.length],
+        sessions: { create: { tokenHash } },
+      },
+    });
+    const user = toUser(row);
     this.users.set(user.id, user);
     return user;
   }
 
-  /**
-   * Autenticação provisória: o navegador gera um token aleatório e o guarda no
-   * localStorage. Substituir por login de verdade (OAuth, senha + JWT) antes de produção.
-   */
-  resolveSession(token: string, displayName: string): User {
-    const existing = this.users.get(this.tokens.get(token) ?? '');
-    if (existing) {
-      existing.displayName = displayName;
-      return existing;
-    }
-    const user = this.createUser(displayName);
-    this.tokens.set(token, user.id);
-    return user;
-  }
-
-  // ── Espaços, cargos, categorias e canais ───────────────────────────────────
-
-  createSpace(name: string, ownerId: Id): Space {
-    const space: Space = { id: randomUUID(), name, ownerId, iconUrl: null };
-    this.spaces.set(space.id, space);
-    this.roles.set(space.id, {
-      id: space.id,
-      spaceId: space.id,
-      name: '@everyone',
-      color: null,
-      position: 0,
-      permissions: DEFAULT_EVERYONE_PERMISSIONS,
-      hoist: false,
-    });
-    this.addMember(space.id, ownerId);
-    return space;
-  }
-
-  createRole(input: Omit<Role, 'id'>): Role {
-    const role: Role = { id: randomUUID(), ...input };
-    this.roles.set(role.id, role);
-    return role;
-  }
-
-  createCategory(spaceId: Id, name: string): Category {
-    const position = [...this.categories.values()].filter((c) => c.spaceId === spaceId).length;
-    const category: Category = { id: randomUUID(), spaceId, name, position };
-    this.categories.set(category.id, category);
-    return category;
-  }
-
-  createChannel(input: {
-    spaceId: Id;
-    categoryId: Id | null;
-    name: string;
-    kind: ChannelKind;
-    topic?: string | null;
-    overwrites?: PermissionOverwrite[];
-  }): Channel {
-    const position = [...this.channels.values()].filter(
-      (c) => c.spaceId === input.spaceId && c.categoryId === input.categoryId,
-    ).length;
-    const channel: Channel = {
-      id: randomUUID(),
-      spaceId: input.spaceId,
-      categoryId: input.categoryId,
-      name: input.name,
-      kind: input.kind,
-      position,
-      topic: input.topic ?? null,
-      overwrites: input.overwrites ?? [],
-    };
-    this.channels.set(channel.id, channel);
-    if (channel.kind === 'text') this.messages.set(channel.id, []);
-    return channel;
-  }
-
   // ── Membros ────────────────────────────────────────────────────────────────
 
-  addMember(spaceId: Id, userId: Id, roleIds: Id[] = []): Member {
-    const member: Member = { spaceId, userId, nickname: null, roleIds, joinedAt: new Date().toISOString() };
-    this.members.set(`${spaceId}:${userId}`, member);
+  async addMember(spaceId: Id, userId: Id): Promise<Member> {
+    const row = await this.db.member.upsert({
+      where: { spaceId_userId: { spaceId, userId } },
+      create: { spaceId, userId },
+      update: {},
+      include: { roles: { select: { roleId: true } } },
+    });
+    const member = toMember(row);
+    this.members.set(memberKey(spaceId, userId), member);
     return member;
   }
 
   member(spaceId: Id, userId: Id): Member | null {
-    return this.members.get(`${spaceId}:${userId}`) ?? null;
+    return this.members.get(memberKey(spaceId, userId)) ?? null;
   }
 
   spacesForUser(userId: Id): Space[] {
-    return [...this.spaces.values()].filter((space) => this.members.has(`${space.id}:${userId}`));
+    return [...this.spaces.values()].filter((space) => this.members.has(memberKey(space.id, userId)));
+  }
+
+  sharesSpace(a: Id, b: Id): boolean {
+    return this.spacesForUser(a).some((space) => this.members.has(memberKey(space.id, b)));
   }
 
   permissionsFor(userId: Id, channel: Channel): number {
@@ -189,21 +181,24 @@ export class Store {
     };
   }
 
-  sharesSpace(a: Id, b: Id): boolean {
-    return this.spacesForUser(a).some((space) => this.members.has(`${space.id}:${b}`));
-  }
-
   // ── Conversas diretas ──────────────────────────────────────────────────────
 
   /** Devolve a conversa entre duas pessoas, criando-a na primeira vez. */
-  directBetween(a: Id, b: Id): DirectConversation {
-    for (const conversation of this.directs.values()) {
-      const [x, y] = conversation.participantIds;
-      if ((x === a && y === b) || (x === b && y === a)) return conversation;
-    }
-    const conversation: DirectConversation = { id: randomUUID(), participantIds: [a, b], lastMessageAt: null };
+  async directBetween(a: Id, b: Id): Promise<DirectConversation> {
+    const cached = [...this.directs.values()].find(
+      ({ participantIds: [x, y] }) => (x === a && y === b) || (x === b && y === a),
+    );
+    if (cached) return cached;
+
+    // O menor id fica em userAId: a restrição única impede o par duplicado.
+    const [userAId, userBId] = [a, b].sort();
+    const row = await this.db.directConversation.upsert({
+      where: { userAId_userBId: { userAId, userBId } },
+      create: { userAId, userBId },
+      update: {},
+    });
+    const conversation = this.directs.get(row.id) ?? toDirect(row);
     this.directs.set(conversation.id, conversation);
-    this.messages.set(conversation.id, []);
     return conversation;
   }
 
@@ -222,30 +217,41 @@ export class Store {
 
   // ── Mensagens ──────────────────────────────────────────────────────────────
 
-  /** Mensagens em ordem cronológica; `before` pagina para trás a partir de uma mensagem. */
-  history(channelId: Id, before?: Id, limit = 50): Message[] {
-    const list = this.messages.get(channelId) ?? [];
-    const index = before ? list.findIndex((m) => m.id === before) : -1;
-    const end = index === -1 ? list.length : index;
-    return list.slice(Math.max(0, end - limit), end);
+  /**
+   * Mensagens de um canal ou conversa em ordem cronológica. `before` pagina
+   * para trás a partir de uma mensagem já conhecida.
+   */
+  async history(targetId: Id, before?: Id, limit = 50): Promise<Message[]> {
+    const target = this.directs.has(targetId) ? { directId: targetId } : { channelId: targetId };
+    const cursor = before
+      ? await this.db.message.findUnique({ where: { id: before }, select: { id: true, createdAt: true } })
+      : null;
+    const rows = await this.db.message.findMany({
+      where: {
+        ...target,
+        ...(cursor && {
+          OR: [{ createdAt: { lt: cursor.createdAt } }, { createdAt: cursor.createdAt, id: { lt: cursor.id } }],
+        }),
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: limit,
+    });
+    return rows.reverse().map(toMessage);
   }
 
-  addMessage(channelId: Id, authorId: Id, content: string): Message {
-    const message: Message = {
-      id: randomUUID(),
-      channelId,
-      authorId,
-      content,
-      createdAt: new Date().toISOString(),
-      editedAt: null,
-    };
-    const list = this.messages.get(channelId);
-    if (!list) throw new Error(`Canal de texto ou conversa inexistente: ${channelId}`);
-    list.push(message);
-    const direct = this.directs.get(channelId);
-    if (direct) direct.lastMessageAt = message.createdAt;
-    if (list.length > HISTORY_LIMIT_PER_CHANNEL) list.splice(0, list.length - HISTORY_LIMIT_PER_CHANNEL);
-    return message;
+  async addMessage(targetId: Id, authorId: Id, content: string): Promise<Message> {
+    const createdAt = new Date();
+    const direct = this.directs.get(targetId);
+    if (!direct) {
+      return toMessage(await this.db.message.create({ data: { channelId: targetId, authorId, content, createdAt } }));
+    }
+
+    const [row] = await this.db.$transaction([
+      this.db.message.create({ data: { directId: targetId, authorId, content, createdAt } }),
+      this.db.directConversation.update({ where: { id: targetId }, data: { lastMessageAt: createdAt } }),
+    ]);
+    direct.lastMessageAt = createdAt.toISOString();
+    return toMessage(row);
   }
 
   // ── Voz ────────────────────────────────────────────────────────────────────

@@ -1,75 +1,104 @@
-import { Permission } from '../../shared/src/permissions.js';
-import type { Store } from './store.js';
+import { randomUUID } from 'node:crypto';
+import { DEFAULT_EVERYONE_PERMISSIONS, Permission } from '../../shared/src/permissions.js';
+import type { Db } from './db/client.js';
 
-/** Dados de demonstração: dois espaços públicos mantidos por um usuário-robô. */
-export function seed(store: Store): void {
-  const bot = store.createUser('Coreto', { isBot: true });
+/**
+ * Cria os dados de demonstração (dois espaços públicos mantidos por um
+ * usuário-robô) se o banco ainda não tiver nenhum espaço.
+ * Devolve `true` quando criou alguma coisa.
+ */
+export async function seedIfEmpty(db: Db): Promise<boolean> {
+  if ((await db.space.count()) > 0) return false;
 
-  // ── Espaço 1 ───────────────────────────────────────────────────────────────
-  const dev = store.createSpace('Coreto Dev', bot.id);
-  const moderation = store.createRole({
-    spaceId: dev.id,
-    name: 'Moderação',
-    color: '#e5a54b',
-    position: 1,
-    permissions: Permission.MANAGE_MESSAGES | Permission.MANAGE_CHANNELS,
-    hoist: true,
-  });
+  const id = () => randomUUID();
+  const bot = id();
+  const dev = id();
+  const moderation = id();
+  const devText = id();
+  const devVoice = id();
+  const geral = id();
+  const avisos = id();
+  const privateChannel = id();
+  const club = id();
+  const clubText = id();
+  const clubVoice = id();
+  const conversa = id();
 
-  const devText = store.createCategory(dev.id, 'Canais de texto');
-  const devVoice = store.createCategory(dev.id, 'Canais de voz');
+  const send = BigInt(Permission.SEND_MESSAGES);
+  const view = BigInt(Permission.VIEW_CHANNEL);
+  const everyone = BigInt(DEFAULT_EVERYONE_PERMISSIONS);
+  // Horários crescentes para manter a ordem das mensagens de boas-vindas.
+  const at = (offsetMs: number) => new Date(Date.now() + offsetMs);
 
-  const geral = store.createChannel({
-    spaceId: dev.id,
-    categoryId: devText.id,
-    name: 'geral',
-    kind: 'text',
-    topic: 'Conversa livre sobre o projeto',
-  });
-  const avisos = store.createChannel({
-    spaceId: dev.id,
-    categoryId: devText.id,
-    name: 'avisos',
-    kind: 'text',
-    topic: 'Somente leitura: apenas a moderação publica aqui',
-    overwrites: [
-      { targetType: 'role', targetId: dev.id, allow: 0, deny: Permission.SEND_MESSAGES },
-      { targetType: 'role', targetId: moderation.id, allow: Permission.SEND_MESSAGES, deny: 0 },
-    ],
-  });
-  store.createChannel({ spaceId: dev.id, categoryId: devText.id, name: 'ajuda', kind: 'text', topic: 'Dúvidas e suporte' });
-  store.createChannel({
-    spaceId: dev.id,
-    categoryId: devText.id,
-    name: 'moderação',
-    kind: 'text',
-    topic: 'Canal privado da equipe',
-    overwrites: [
-      { targetType: 'role', targetId: dev.id, allow: 0, deny: Permission.VIEW_CHANNEL },
-      { targetType: 'role', targetId: moderation.id, allow: Permission.VIEW_CHANNEL, deny: 0 },
-    ],
-  });
-  store.createChannel({ spaceId: dev.id, categoryId: devVoice.id, name: 'Sala de estar', kind: 'voice' });
-  store.createChannel({ spaceId: dev.id, categoryId: devVoice.id, name: 'Pareamento', kind: 'voice' });
-
-  store.addMessage(geral.id, bot.id, 'Bem-vindo ao Coreto! Este espaço é público: todo mundo que entra vira membro.');
-  store.addMessage(geral.id, bot.id, 'Clique em um canal de voz para entrar e clique em "Sair da chamada" para sair.');
-  store.addMessage(avisos.id, bot.id, 'Neste canal, só a moderação pode escrever. É um exemplo de sobrescrita de permissão.');
-
-  // ── Espaço 2 ───────────────────────────────────────────────────────────────
-  const club = store.createSpace('Clube do Livro', bot.id);
-  const clubText = store.createCategory(club.id, 'Conversas');
-  const clubVoice = store.createCategory(club.id, 'Encontros');
-
-  const conversa = store.createChannel({
-    spaceId: club.id,
-    categoryId: clubText.id,
-    name: 'conversa',
-    kind: 'text',
-    topic: 'O que você está lendo?',
-  });
-  store.createChannel({ spaceId: club.id, categoryId: clubText.id, name: 'recomendações', kind: 'text' });
-  store.createChannel({ spaceId: club.id, categoryId: clubVoice.id, name: 'Leitura em voz alta', kind: 'voice' });
-
-  store.addMessage(conversa.id, bot.id, 'Leitura do mês: escolham nos comentários!');
+  await db.$transaction([
+    db.user.create({ data: { id: bot, displayName: 'Coreto', avatarColor: '#2bb39a', isBot: true } }),
+    db.space.createMany({
+      data: [
+        { id: dev, name: 'Coreto Dev', ownerId: bot },
+        { id: club, name: 'Clube do Livro', ownerId: bot },
+      ],
+    }),
+    // O cargo @everyone usa o mesmo id do espaço.
+    db.role.createMany({
+      data: [
+        { id: dev, spaceId: dev, name: '@everyone', position: 0, permissions: everyone },
+        {
+          id: moderation,
+          spaceId: dev,
+          name: 'Moderação',
+          color: '#e5a54b',
+          position: 1,
+          permissions: BigInt(Permission.MANAGE_MESSAGES | Permission.MANAGE_CHANNELS),
+          hoist: true,
+        },
+        { id: club, spaceId: club, name: '@everyone', position: 0, permissions: everyone },
+      ],
+    }),
+    db.member.createMany({
+      data: [
+        { spaceId: dev, userId: bot },
+        { spaceId: club, userId: bot },
+      ],
+    }),
+    db.category.createMany({
+      data: [
+        { id: devText, spaceId: dev, name: 'Canais de texto', position: 0 },
+        { id: devVoice, spaceId: dev, name: 'Canais de voz', position: 1 },
+        { id: clubText, spaceId: club, name: 'Conversas', position: 0 },
+        { id: clubVoice, spaceId: club, name: 'Encontros', position: 1 },
+      ],
+    }),
+    db.channel.createMany({
+      data: [
+        { id: geral, spaceId: dev, categoryId: devText, name: 'geral', kind: 'TEXT', position: 0, topic: 'Conversa livre sobre o projeto' },
+        { id: avisos, spaceId: dev, categoryId: devText, name: 'avisos', kind: 'TEXT', position: 1, topic: 'Somente leitura: apenas a moderação publica aqui' },
+        { spaceId: dev, categoryId: devText, name: 'ajuda', kind: 'TEXT', position: 2, topic: 'Dúvidas e suporte' },
+        { id: privateChannel, spaceId: dev, categoryId: devText, name: 'moderação', kind: 'TEXT', position: 3, topic: 'Canal privado da equipe' },
+        { spaceId: dev, categoryId: devVoice, name: 'Sala de estar', kind: 'VOICE', position: 0 },
+        { spaceId: dev, categoryId: devVoice, name: 'Pareamento', kind: 'VOICE', position: 1 },
+        { id: conversa, spaceId: club, categoryId: clubText, name: 'conversa', kind: 'TEXT', position: 0, topic: 'O que você está lendo?' },
+        { spaceId: club, categoryId: clubText, name: 'recomendações', kind: 'TEXT', position: 1 },
+        { spaceId: club, categoryId: clubVoice, name: 'Leitura em voz alta', kind: 'VOICE', position: 0 },
+      ],
+    }),
+    db.permissionOverwrite.createMany({
+      data: [
+        // #avisos: todos leem, só a Moderação escreve.
+        { channelId: avisos, targetType: 'ROLE', targetId: dev, deny: send },
+        { channelId: avisos, targetType: 'ROLE', targetId: moderation, allow: send },
+        // #moderação: invisível para quem não é da Moderação.
+        { channelId: privateChannel, targetType: 'ROLE', targetId: dev, deny: view },
+        { channelId: privateChannel, targetType: 'ROLE', targetId: moderation, allow: view },
+      ],
+    }),
+    db.message.createMany({
+      data: [
+        { channelId: geral, authorId: bot, createdAt: at(0), content: 'Bem-vindo ao Coreto! Este espaço é público: todo mundo que entra vira membro.' },
+        { channelId: geral, authorId: bot, createdAt: at(1), content: 'Clique em um canal de voz para entrar e clique em "Sair da chamada" para sair.' },
+        { channelId: avisos, authorId: bot, createdAt: at(2), content: 'Neste canal, só a moderação pode escrever. É um exemplo de sobrescrita de permissão.' },
+        { channelId: conversa, authorId: bot, createdAt: at(3), content: 'Leitura do mês: escolham nos comentários!' },
+      ],
+    }),
+  ]);
+  return true;
 }

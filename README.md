@@ -4,16 +4,30 @@ Plataforma aberta de comunidades com chat em tempo real e salas de voz.
 Front-end em React + TypeScript + Tailwind CSS; tempo real em Node.js + socket.io; voz por WebRTC.
 
 > [!WARNING]
-> **Protótipo: não use em produção.** O login não tem senha (qualquer um escolhe um nome e entra), os dados ficam
-> só em memória e somem quando o servidor reinicia, e a voz não foi validada com muitas pessoas ou fora da rede local.
+> **Protótipo: não use em produção.** O login não tem senha (qualquer um escolhe um nome e entra), não há como
+> criar espaços ou canais pela interface, e a voz não foi validada com muitas pessoas ou fora da rede local.
 > Veja [Limitações do protótipo](#limitações-do-protótipo).
 
 ## Rodando
 
-```bash
-npm install
-npm run dev
-```
+Requer Node.js 20.19+ e PostgreSQL.
+
+1. Copie `server/.env.example` para `server/.env` e ajuste a `DATABASE_URL` (usuário, senha, porta).
+2. Instale as dependências e crie as tabelas:
+
+   ```bash
+   npm install
+   npm run db:migrate -w server
+   ```
+
+   O `db:migrate` cria o banco se ele ainda não existir e aplica as migrations de `server/prisma/migrations`.
+3. Rode:
+
+   ```bash
+   npm run dev
+   ```
+
+Na primeira execução com o banco vazio, o servidor cria os espaços e canais de demonstração.
 
 - Front-end: http://localhost:5173
 - Servidor em tempo real: http://localhost:3001 (`/health` responde `{"ok":true}`)
@@ -22,6 +36,7 @@ Abra duas janelas (uma anônima) com nomes diferentes para ver mensagens, digita
 
 | Variável | Onde | Padrão |
 |---|---|---|
+| `DATABASE_URL` | server (`server/.env`) | obrigatória: conexão PostgreSQL |
 | `SERVER_PORT` | server | `3001` |
 | `CLIENT_ORIGIN` | server | `http://localhost:5173,http://127.0.0.1:5173` |
 | `ICE_SERVERS` | server | STUN público do Google (JSON de `RTCIceServer[]`) |
@@ -36,12 +51,15 @@ coreto/
 │   ├── permissions.ts       Bit flags (ler, escrever, conectar, falar...)
 │   └── protocol.ts          Eventos socket.io tipados + formatos de sinalização WebRTC
 ├── server/
-│   ├── prisma/schema.prisma Esquema relacional (PostgreSQL) para a fase com banco
+│   ├── prisma/              Esquema (schema.prisma) e migrations do PostgreSQL
+│   ├── prisma.config.ts     Configuração do Prisma (lê DATABASE_URL de server/.env)
 │   └── src/
 │       ├── index.ts         HTTP + socket.io + autenticação provisória
-│       ├── store.ts         Armazenamento em memória (troque por repositório com banco)
+│       ├── store.ts         Estrutura em memória + leituras e escritas no banco
+│       ├── db/              Cliente Prisma e conversão linha ↔ modelo de domínio
+│       ├── generated/       Cliente gerado pelo `prisma generate` (fora do Git)
 │       ├── permissions.ts   Cálculo de permissões efetivas por canal
-│       ├── seed.ts          Espaços e canais de demonstração
+│       ├── seed.ts          Espaços e canais de demonstração (só com o banco vazio)
 │       └── realtime/
 │           ├── chat.ts      Entrar no espaço, histórico, mensagens, digitação
 │           ├── presence.ts  Online / ausente / não perturbe / indisponível
@@ -84,6 +102,24 @@ quando a primeira mensagem chega. Ela usa os mesmos eventos dos canais (`channel
 `typing:start`) com o id da conversa no lugar do id do canal; o evento `dm:upsert` avisa sobre conversas novas ou
 atualizadas. O ícone de mensagens diretas na barra de espaços mostra quantas mensagens ainda não foram lidas.
 
+## Persistência
+
+O banco é PostgreSQL, acessado pelo Prisma 7 (`@prisma/adapter-pg`). Comandos úteis, rodados a partir da raiz:
+
+| Comando | O que faz |
+|---|---|
+| `npm run db:migrate -w server` | Cria uma migration a partir de mudanças no `schema.prisma` e aplica (desenvolvimento) |
+| `npm run db:deploy -w server` | Só aplica as migrations existentes (produção) |
+| `npm run db:studio -w server` | Abre o Prisma Studio para ver e editar os dados |
+
+O que vai para o banco: usuários, sessões (só o hash SHA-256 do token), espaços, cargos, categorias, canais, sobrescritas
+de permissão, membros, conversas diretas e mensagens. Presença e estado das salas de voz são efêmeros e ficam só em memória.
+
+Ao iniciar, o servidor carrega a estrutura (tudo menos as mensagens) para a memória, porque as permissões são checadas a
+cada evento. Toda escrita vai primeiro ao banco e depois atualiza a memória. As mensagens nunca ficam em memória: são
+gravadas e paginadas direto no banco. Isso funciona com **uma instância** do servidor; para rodar várias, a memória de
+cada uma precisaria ser invalidada (por exemplo, com Redis pub/sub) e o socket.io precisaria de um adaptador compartilhado.
+
 ## Permissões
 
 `Role.permissions` é um bitfield (`shared/src/permissions.ts`). Cada canal tem `overwrites` com `allow`/`deny` para um cargo ou membro.
@@ -105,7 +141,7 @@ Fora de redes locais, configure um servidor TURN em `ICE_SERVERS`.
 ## Limitações do protótipo
 
 - Login provisório: token aleatório no `localStorage`, sem senha.
-- Dados em memória: reiniciar o servidor apaga tudo. O esquema Prisma está pronto, mas não está ligado.
+- Não há como criar espaços, canais ou cargos pela interface: só os dados de demonstração.
 - Mensagens diretas só entre duas pessoas (sem grupos) e sem lista para buscar usuários: comece pela lista de membros.
 - Mensagens não lidas só são contadas nas conversas diretas, e a contagem zera ao recarregar a página.
 - Sem edição/remoção de mensagens, anexos, vídeo, compartilhamento de tela ou indicador de quem está falando.
