@@ -1,17 +1,19 @@
 import type { Channel, Id } from '@shared/models';
 import { hasPermission, Permission } from '@shared/permissions';
-import { ChevronDown, ChevronRight, Hash, HeadphoneOff, Lock, MicOff, Plus, Volume2 } from 'lucide-react';
-import { useState } from 'react';
+import { ChevronDown, ChevronRight, Hash, HeadphoneOff, Lock, MicOff, Plus, Settings, Volume2 } from 'lucide-react';
+import { useState, type ReactNode } from 'react';
 import { useRealtime } from '../state/realtime';
 import { can, displayNameOf, groupChannels } from '../state/selectors';
 import { Avatar } from './Avatar';
 import { CreateChannelDialog } from './CreateChannelDialog';
+import { EditChannelDialog } from './EditChannelDialog';
 
 export function ChannelSidebar() {
   const { state } = useRealtime();
   const [collapsed, setCollapsed] = useState<Record<Id, boolean>>({});
   /** Categoria em que o diálogo de criar canal foi aberto; `null` = fechado. */
   const [creatingIn, setCreatingIn] = useState<{ categoryId: Id | null } | null>(null);
+  const [editing, setEditing] = useState<Channel | null>(null);
   const { snapshot } = state;
 
   if (!snapshot) {
@@ -79,13 +81,19 @@ export function ChannelSidebar() {
                 </div>
               )}
               <ul className="mt-1 space-y-0.5">
-                {visible.map((channel) =>
-                  channel.kind === 'text' ? (
-                    <TextChannelItem key={channel.id} channel={channel} active={channel.id === activeChannelId} />
+                {visible.map((channel) => {
+                  const onEdit = canManage ? () => setEditing(channel) : undefined;
+                  return channel.kind === 'text' ? (
+                    <TextChannelItem
+                      key={channel.id}
+                      channel={channel}
+                      active={channel.id === activeChannelId}
+                      onEdit={onEdit}
+                    />
                   ) : (
-                    <VoiceChannelItem key={channel.id} channel={channel} />
-                  ),
-                )}
+                    <VoiceChannelItem key={channel.id} channel={channel} onEdit={onEdit} />
+                  );
+                })}
               </ul>
             </section>
           );
@@ -95,30 +103,58 @@ export function ChannelSidebar() {
       {creatingIn && (
         <CreateChannelDialog initialCategoryId={creatingIn.categoryId} onClose={() => setCreatingIn(null)} />
       )}
+      {editing && <EditChannelDialog channel={editing} onClose={() => setEditing(null)} />}
     </>
   );
 }
 
-function TextChannelItem({ channel, active }: { channel: Channel; active: boolean }) {
+/** Linha de canal com a engrenagem de edição, que aparece no hover para quem pode gerenciar canais. */
+function ChannelRow({ channel, onEdit, children }: { channel: Channel; onEdit?: () => void; children: ReactNode }) {
+  return (
+    <div className="group/row relative">
+      {children}
+      {onEdit && (
+        <button
+          type="button"
+          title="Editar canal"
+          aria-label={`Editar ${channel.kind === 'text' ? '#' : ''}${channel.name}`}
+          onClick={onEdit}
+          className="absolute top-1/2 right-1.5 -translate-y-1/2 rounded p-0.5 text-faint opacity-0 group-hover/row:opacity-100 hover:text-fg focus-visible:opacity-100"
+        >
+          <Settings size={15} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+interface ChannelItemProps {
+  channel: Channel;
+  onEdit?: () => void;
+}
+
+function TextChannelItem({ channel, active, onEdit }: ChannelItemProps & { active: boolean }) {
   const { actions } = useRealtime();
   return (
     <li>
-      <button
-        type="button"
-        aria-current={active ? 'page' : undefined}
-        onClick={() => actions.selectChannel(channel.id)}
-        className={`flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-[15px] ${
-          active ? 'bg-hover text-fg' : 'text-muted hover:bg-hover/60 hover:text-fg'
-        }`}
-      >
-        <Hash size={18} className="shrink-0 text-faint" />
-        <span className="truncate">{channel.name}</span>
-      </button>
+      <ChannelRow channel={channel} onEdit={onEdit}>
+        <button
+          type="button"
+          aria-current={active ? 'page' : undefined}
+          onClick={() => actions.selectChannel(channel.id)}
+          className={`flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-[15px] ${onEdit ? 'pr-7' : ''} ${
+            active ? 'bg-hover text-fg' : 'text-muted hover:bg-hover/60 hover:text-fg'
+          }`}
+        >
+          <Hash size={18} className="shrink-0 text-faint" />
+          <span className="truncate">{channel.name}</span>
+        </button>
+      </ChannelRow>
     </li>
   );
 }
 
-function VoiceChannelItem({ channel }: { channel: Channel }) {
+function VoiceChannelItem({ channel, onEdit }: ChannelItemProps) {
   const { state, actions } = useRealtime();
   const participants = state.voice[channel.id] ?? [];
   const canConnect = can(state.snapshot, channel.id, Permission.CONNECT);
@@ -126,22 +162,24 @@ function VoiceChannelItem({ channel }: { channel: Channel }) {
 
   return (
     <li>
-      <button
-        type="button"
-        disabled={!canConnect}
-        onClick={() => actions.joinVoice(channel.id)}
-        title={canConnect ? `Entrar em ${channel.name}` : 'Você não pode entrar neste canal'}
-        className={`flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-[15px] disabled:cursor-not-allowed disabled:opacity-60 ${
-          isMine ? 'bg-hover text-fg' : 'text-muted hover:bg-hover/60 hover:text-fg'
-        }`}
-      >
-        {canConnect ? (
-          <Volume2 size={18} className="shrink-0 text-faint" />
-        ) : (
-          <Lock size={16} className="shrink-0 text-faint" />
-        )}
-        <span className="truncate">{channel.name}</span>
-      </button>
+      <ChannelRow channel={channel} onEdit={onEdit}>
+        <button
+          type="button"
+          disabled={!canConnect}
+          onClick={() => actions.joinVoice(channel.id)}
+          title={canConnect ? `Entrar em ${channel.name}` : 'Você não pode entrar neste canal'}
+          className={`flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-[15px] disabled:cursor-not-allowed disabled:opacity-60 ${onEdit ? 'pr-7' : ''} ${
+            isMine ? 'bg-hover text-fg' : 'text-muted hover:bg-hover/60 hover:text-fg'
+          }`}
+        >
+          {canConnect ? (
+            <Volume2 size={18} className="shrink-0 text-faint" />
+          ) : (
+            <Lock size={16} className="shrink-0 text-faint" />
+          )}
+          <span className="truncate">{channel.name}</span>
+        </button>
+      </ChannelRow>
 
       {participants.length > 0 && (
         <ul aria-label={`Na sala ${channel.name}`} className="mt-0.5 mb-1 ml-7 space-y-0.5">

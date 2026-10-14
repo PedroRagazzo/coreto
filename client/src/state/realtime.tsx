@@ -2,6 +2,7 @@
 // viram ações do reducer, e os componentes chamam `actions` para agir.
 
 import type {
+  Channel,
   DirectConversation,
   Id,
   Member,
@@ -18,6 +19,7 @@ import type {
   CreateChannelRequest,
   DirectConversationPayload,
   SelectableStatus,
+  UpdateChannelRequest,
 } from '@shared/protocol';
 import { createContext, useContext, useEffect, useMemo, useReducer, useRef, type ReactNode } from 'react';
 import type { Identity } from '../lib/identity';
@@ -94,6 +96,8 @@ type Action =
   | { type: 'session'; user: User; spaces: Space[]; directs: DirectConversation[]; directUsers: User[] }
   | { type: 'space:created'; space: Space }
   | { type: 'channel:created'; payload: ChannelCreatedPayload }
+  | { type: 'channel:updated'; channel: Channel }
+  | { type: 'channel:deleted'; spaceId: Id; channelId: Id }
   | { type: 'dm:upsert'; payload: DirectConversationPayload }
   | { type: 'dm:select'; conversationId: Id }
   | { type: 'space:select'; spaceId: Id | null }
@@ -150,6 +154,39 @@ function reducer(state: RealtimeState, action: Action): RealtimeState {
           channels: [...snapshot.channels, channel].sort((a, b) => a.position - b.position),
           permissions: { ...snapshot.permissions, [channel.id]: permissions },
         },
+      };
+    }
+
+    case 'channel:updated': {
+      const snapshot = state.snapshot;
+      if (!snapshot || !snapshot.channels.some((c) => c.id === action.channel.id)) return state;
+      const channels = snapshot.channels
+        .map((c) => (c.id === action.channel.id ? action.channel : c))
+        .sort((a, b) => a.position - b.position);
+      return { ...state, snapshot: { ...snapshot, channels } };
+    }
+
+    case 'channel:deleted': {
+      const { spaceId, channelId } = action;
+      const snapshot = state.snapshot;
+      const activeChannelBySpace =
+        state.activeChannelBySpace[spaceId] === channelId
+          ? withoutKey(state.activeChannelBySpace, spaceId)
+          : state.activeChannelBySpace;
+      return {
+        ...state,
+        activeChannelBySpace,
+        snapshot:
+          snapshot?.space.id === spaceId
+            ? {
+                ...snapshot,
+                channels: snapshot.channels.filter((c) => c.id !== channelId),
+                permissions: withoutKey(snapshot.permissions, channelId),
+              }
+            : snapshot,
+        messages: withoutKey(state.messages, channelId),
+        typing: withoutKey(state.typing, channelId),
+        voice: withoutKey(state.voice, channelId),
       };
     }
 
@@ -255,6 +292,10 @@ export interface RealtimeActions {
   createSpace(name: string): Promise<string | null>;
   /** Cria um canal no espaço aberto e abre ele, se for de texto. Resolve com erro ou `null`. */
   createChannel(req: Omit<CreateChannelRequest, 'spaceId'>): Promise<string | null>;
+  /** Altera nome, tópico ou categoria. Resolve com erro ou `null`. */
+  updateChannel(req: UpdateChannelRequest): Promise<string | null>;
+  /** Exclui o canal e as mensagens dele. Resolve com erro ou `null`. */
+  deleteChannel(channelId: Id): Promise<string | null>;
   /** Abre (ou cria) a conversa direta com alguém. Resolve com erro ou `null`. */
   openDirect(userId: Id): Promise<string | null>;
   selectDirect(conversationId: Id): void;
@@ -361,6 +402,23 @@ export function RealtimeProvider({ identity, children }: { identity: Identity; c
           );
         }
         return null;
+      },
+
+      async updateChannel(req) {
+        const socket = socketRef.current;
+        if (!socket) return 'Sem conexão com o servidor.';
+        const res = await socket.emitWithAck('channel:update', req);
+        if (!res.ok) return res.error;
+        dispatch({ type: 'channel:updated', channel: res.data });
+        return null;
+      },
+
+      async deleteChannel(channelId) {
+        const socket = socketRef.current;
+        if (!socket) return 'Sem conexão com o servidor.';
+        // O estado é atualizado pelo evento `channel:deleted`, que chega para todos no espaço.
+        const res = await socket.emitWithAck('channel:delete', { channelId });
+        return res.ok ? null : res.error;
       },
 
       async openDirect(userId) {
@@ -482,6 +540,16 @@ export function RealtimeProvider({ identity, children }: { identity: Identity; c
     });
     socket.on('space:created', (space) => dispatch({ type: 'space:created', space }));
     socket.on('channel:created', (payload) => dispatch({ type: 'channel:created', payload }));
+    socket.on('channel:updated', (channel) => dispatch({ type: 'channel:updated', channel }));
+    socket.on('channel:deleted', ({ spaceId, channelId }) => {
+      const before = stateRef.current;
+      dispatch({ type: 'channel:deleted', spaceId, channelId });
+      // Quem estava lendo o canal excluído vai para o primeiro canal de texto que sobrou.
+      if (before.activeSpaceId === spaceId && before.activeChannelBySpace[spaceId] === channelId) {
+        const next = before.snapshot?.channels.find((c) => c.kind === 'text' && c.id !== channelId);
+        if (next) actions.selectChannel(next.id);
+      }
+    });
     socket.on('dm:upsert', (payload) => dispatch({ type: 'dm:upsert', payload }));
     socket.on('message:new', (message) => dispatch({ type: 'message:new', message }));
     socket.on('typing', ({ channelId, userId }) =>

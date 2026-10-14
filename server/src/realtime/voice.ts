@@ -27,20 +27,26 @@ function isSignal(value: unknown): value is SignalPayload {
   return signal.kind === 'candidate' && typeof signal.candidate === 'object' && signal.candidate !== null;
 }
 
+function broadcastRoster(io: IO, store: Store, spaceId: Id, channelId: Id): void {
+  const participants = store.voiceIn(channelId).map(toParticipant);
+  io.to(rooms.space(spaceId)).emit('voice:update', { channelId, participants });
+}
+
+/**
+ * Encerra uma sessão de voz no servidor e avisa os outros participantes.
+ * Com `reason`, também avisa o dono da sessão, que ainda não sabe que saiu.
+ */
+export function endVoiceSession(io: IO, store: Store, session: VoiceSession, reason?: string): void {
+  store.voice.delete(session.userId);
+  if (reason) io.to(session.socketId).emit('voice:ended', { reason });
+  io.in(session.socketId).socketsLeave(rooms.voice(session.channelId));
+  io.to(rooms.voice(session.channelId)).emit('voice:peer-left', { userId: session.userId });
+  broadcastRoster(io, store, session.spaceId, session.channelId);
+}
+
 export function registerVoice(io: IO, socket: AppSocket, store: Store): void {
   const { userId } = socket.data;
-
-  const broadcastRoster = (spaceId: Id, channelId: Id) => {
-    const participants = store.voiceIn(channelId).map(toParticipant);
-    io.to(rooms.space(spaceId)).emit('voice:update', { channelId, participants });
-  };
-
-  const endSession = (session: VoiceSession) => {
-    store.voice.delete(session.userId);
-    io.in(session.socketId).socketsLeave(rooms.voice(session.channelId));
-    io.to(rooms.voice(session.channelId)).emit('voice:peer-left', { userId: session.userId });
-    broadcastRoster(session.spaceId, session.channelId);
-  };
+  const endSession = (session: VoiceSession, reason?: string) => endVoiceSession(io, store, session, reason);
 
   /** Só o socket que abriu a sessão pode encerrá-la. */
   const leave = () => {
@@ -55,10 +61,8 @@ export function registerVoice(io: IO, socket: AppSocket, store: Store): void {
 
     const previous = store.voice.get(userId);
     if (previous) {
-      if (previous.socketId !== socket.id) {
-        io.to(previous.socketId).emit('voice:ended', { reason: 'Você entrou em uma chamada em outra janela.' });
-      }
-      endSession(previous);
+      const otherWindow = previous.socketId !== socket.id;
+      endSession(previous, otherWindow ? 'Você entrou em uma chamada em outra janela.' : undefined);
     }
 
     const peers = store.voiceIn(channel.id).map((s) => s.userId);
@@ -71,7 +75,7 @@ export function registerVoice(io: IO, socket: AppSocket, store: Store): void {
       socketId: socket.id,
     });
     void socket.join(rooms.voice(channel.id));
-    broadcastRoster(channel.spaceId, channel.id);
+    broadcastRoster(io, store, channel.spaceId, channel.id);
     ack({ ok: true, data: { peers, iceServers: ICE_SERVERS } });
   });
 
@@ -83,7 +87,7 @@ export function registerVoice(io: IO, socket: AppSocket, store: Store): void {
     if (session?.socketId !== socket.id) return;
     session.muted = Boolean(req?.muted);
     session.deafened = Boolean(req?.deafened);
-    broadcastRoster(session.spaceId, session.channelId);
+    broadcastRoster(io, store, session.spaceId, session.channelId);
   });
 
   // Repasse de sinalização: apenas entre participantes da mesma sala.

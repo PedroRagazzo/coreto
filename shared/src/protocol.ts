@@ -66,11 +66,22 @@ export interface CreateChannelRequest {
   kind: ChannelKind;
 }
 
+/** Só os campos presentes são alterados. O tópico vale só para canais de texto. */
+export interface UpdateChannelRequest {
+  channelId: Id;
+  name?: string;
+  topic?: string | null;
+  categoryId?: Id | null;
+}
+
 // `channelId` em history/send/typing aceita um canal de texto ou uma conversa direta.
 export interface ClientToServerEvents {
   'space:join': (spaceId: Id, ack: (res: Ack<SpaceSnapshot>) => void) => void;
   'space:create': (req: { name: string }, ack: (res: Ack<Space>) => void) => void;
   'channel:create': (req: CreateChannelRequest, ack: (res: Ack<ChannelCreatedPayload>) => void) => void;
+  'channel:update': (req: UpdateChannelRequest, ack: (res: Ack<Channel>) => void) => void;
+  /** Apaga o canal e todas as mensagens dele. */
+  'channel:delete': (req: { channelId: Id }, ack: (res: Ack<null>) => void) => void;
   'dm:open': (req: { userId: Id }, ack: (res: Ack<DirectConversationPayload>) => void) => void;
   'channel:history': (
     req: { channelId: Id; before?: Id; limit?: number },
@@ -97,6 +108,9 @@ export interface ServerToClientEvents {
   'space:created': (space: Space) => void;
   /** Um canal novo apareceu no espaço aberto; só chega para quem pode vê-lo. */
   'channel:created': (payload: ChannelCreatedPayload) => void;
+  /** Nome, tópico ou categoria mudaram; só chega para quem pode ver o canal. */
+  'channel:updated': (channel: Channel) => void;
+  'channel:deleted': (payload: { spaceId: Id; channelId: Id }) => void;
   /** Uma conversa direta foi criada ou recebeu mensagem. Chega antes do `message:new`. */
   'dm:upsert': (payload: DirectConversationPayload) => void;
   'message:new': (message: Message) => void;

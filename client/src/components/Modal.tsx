@@ -52,18 +52,25 @@ interface DialogActionsProps {
   onCancel: () => void;
   submitLabel: string;
   disabled: boolean;
+  /** Ação destrutiva: botão principal em vermelho. */
+  danger?: boolean;
+  /** Conteúdo alinhado à esquerda, como um botão secundário de excluir. */
+  leading?: ReactNode;
 }
 
-export function DialogActions({ onCancel, submitLabel, disabled }: DialogActionsProps) {
+export function DialogActions({ onCancel, submitLabel, disabled, danger = false, leading }: DialogActionsProps) {
   return (
-    <div className="mt-6 flex justify-end gap-2">
+    <div className="mt-6 flex items-center gap-2">
+      <div className="mr-auto">{leading}</div>
       <button type="button" onClick={onCancel} className="rounded-md px-4 py-2 text-sm font-medium text-muted hover:text-fg">
         Cancelar
       </button>
       <button
         type="submit"
         disabled={disabled}
-        className="rounded-md bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-strong disabled:opacity-50"
+        className={`rounded-md px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 ${
+          danger ? 'bg-dnd hover:bg-dnd/85' : 'bg-accent hover:bg-accent-strong'
+        }`}
       >
         {submitLabel}
       </button>

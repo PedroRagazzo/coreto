@@ -230,25 +230,55 @@ export class Store {
     return category?.spaceId === spaceId ? category : null;
   }
 
+  /** Posição logo depois do último canal da categoria (ou da lista sem categoria). */
+  private nextChannelPosition(spaceId: Id, categoryId: Id | null): number {
+    return [...this.channels.values()]
+      .filter((c) => c.spaceId === spaceId && c.categoryId === categoryId)
+      .reduce((max, c) => Math.max(max, c.position + 1), 0);
+  }
+
   /** Cria um canal no fim da categoria (ou da lista sem categoria), sem sobrescritas. */
   async createChannel(input: { spaceId: Id; categoryId: Id | null; name: string; kind: ChannelKind }): Promise<Channel> {
-    const siblings = [...this.channels.values()].filter(
-      (c) => c.spaceId === input.spaceId && c.categoryId === input.categoryId,
-    );
-    const position = siblings.reduce((max, c) => Math.max(max, c.position + 1), 0);
     const row = await this.db.channel.create({
       data: {
         spaceId: input.spaceId,
         categoryId: input.categoryId,
         name: input.name,
         kind: input.kind === 'text' ? 'TEXT' : 'VOICE',
-        position,
+        position: this.nextChannelPosition(input.spaceId, input.categoryId),
       },
       include: { overwrites: true },
     });
     const channel = toChannel(row);
     this.channels.set(channel.id, channel);
     return channel;
+  }
+
+  /** Altera nome, tópico ou categoria. Ao mudar de categoria, o canal vai para o fim dela. */
+  async updateChannel(
+    channelId: Id,
+    patch: { name?: string; topic?: string | null; categoryId?: Id | null },
+  ): Promise<Channel> {
+    const current = this.channels.get(channelId);
+    if (!current) throw new Error(`Canal inexistente: ${channelId}`);
+    const moving = patch.categoryId !== undefined && patch.categoryId !== current.categoryId;
+    const row = await this.db.channel.update({
+      where: { id: channelId },
+      data: {
+        ...patch,
+        ...(moving && { position: this.nextChannelPosition(current.spaceId, patch.categoryId ?? null) }),
+      },
+      include: { overwrites: true },
+    });
+    const channel = toChannel(row);
+    this.channels.set(channel.id, channel);
+    return channel;
+  }
+
+  /** Apaga o canal; o banco apaga junto as mensagens e as sobrescritas dele. */
+  async deleteChannel(channelId: Id): Promise<void> {
+    await this.db.channel.delete({ where: { id: channelId } });
+    this.channels.delete(channelId);
   }
 
   snapshot(spaceId: Id, userId: Id): SpaceSnapshot | null {

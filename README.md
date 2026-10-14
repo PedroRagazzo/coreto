@@ -94,7 +94,7 @@ Cada aba mantém uma conexão socket.io. Os eventos vão para salas do socket.io
 
 Todo evento do cliente é validado no servidor: tipo do payload, existência do canal e permissão.
 
-## Criar espaços e canais
+## Criar, editar e excluir
 
 - **Espaço:** o botão **+** no fim da barra de espaços. Qualquer pessoa pode criar; quem cria vira dono (todas as
   permissões). O espaço nasce com as categorias "Canais de texto" e "Canais de voz", o canal `#geral` e a sala "Geral".
@@ -103,6 +103,10 @@ Todo evento do cliente é validado no servidor: tipo do payload, existência do 
   `MANAGE_CHANNELS` no espaço (dono, administradores ou cargos com essa permissão), e o servidor confere de novo.
   Nomes de canais de texto são normalizados (`Dúvidas Gerais` → `#dúvidas-gerais`, ver `shared/src/names.ts`).
   Quem está com o espaço aberto recebe o canal pelo evento `channel:created`, com as próprias permissões, e só se puder vê-lo.
+- **Editar ou excluir canal:** a engrenagem que aparece ao passar o mouse sobre o canal, com a mesma exigência de
+  `MANAGE_CHANNELS`. Dá para mudar nome, tópico (só canais de texto) e categoria; ao mudar de categoria, o canal vai para o
+  fim dela. Excluir pede confirmação e apaga também as mensagens do canal (`onDelete: Cascade` no banco). Quem estava
+  numa sala de voz excluída é desconectado com um aviso, e quem estava lendo um canal excluído vai para outro canal de texto.
 
 ## Mensagens diretas
 
@@ -151,7 +155,7 @@ Fora de redes locais, configure um servidor TURN em `ICE_SERVERS`.
 ## Limitações do protótipo
 
 - Login provisório: token aleatório no `localStorage`, sem senha.
-- Não há como editar ou apagar espaços e canais, criar categorias, nem criar ou atribuir cargos pela interface.
+- Não há como editar ou apagar espaços, reordenar canais, criar categorias, nem criar ou atribuir cargos pela interface.
 - Todo espaço é público: quem conecta vira membro de todos, inclusive dos criados por outras pessoas.
 - Mensagens diretas só entre duas pessoas (sem grupos) e sem lista para buscar usuários: comece pela lista de membros.
 - Mensagens não lidas só são contadas nas conversas diretas, e a contagem zera ao recarregar a página.

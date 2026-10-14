@@ -4,6 +4,12 @@ import type { ChannelKind } from './models.js';
 
 export const MAX_SPACE_NAME = 100;
 export const MAX_CHANNEL_NAME = 100;
+export const MAX_CHANNEL_TOPIC = 1024;
+
+/** Tópico vazio vira `null` (sem tópico). */
+export function normalizeTopic(topic: string): string | null {
+  return topic.trim().slice(0, MAX_CHANNEL_TOPIC) || null;
+}
 
 export function normalizeSpaceName(name: string): string {
   return name.trim().replace(/\s+/g, ' ').slice(0, MAX_SPACE_NAME);
