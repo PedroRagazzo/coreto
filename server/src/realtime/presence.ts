@@ -1,4 +1,4 @@
-import type { Id, PresenceStatus } from '../../../shared/src/models.js';
+import type { Id, MentionCount, PresenceStatus } from '../../../shared/src/models.js';
 import type { Store } from '../store.js';
 import { otherParticipant } from './direct.js';
 import { rooms, type AppSocket, type IO } from './types.js';
@@ -18,7 +18,12 @@ export function registerPresence(io: IO, socket: AppSocket, store: Store): void 
 
   const directs = store.directsFor(userId);
   const directUsers = directs.flatMap((c) => store.users.get(otherParticipant(c, userId)) ?? []);
-  socket.emit('session:ready', { user, spaces: store.spacesForUser(userId), directs, directUsers });
+  const ready = (mentions: MentionCount[]) =>
+    socket.emit('session:ready', { user, spaces: store.spacesForUser(userId), directs, directUsers, mentions });
+  store.mentionCounts(userId).then(ready, (err: unknown) => {
+    console.error('[session:ready]', err);
+    ready([]); // sem os contadores de menção, mas a sessão funciona
+  });
 
   socket.on('presence:set', (status) => {
     if (status === 'online' || status === 'idle' || status === 'dnd') setStatus(io, store, userId, status);

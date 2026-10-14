@@ -82,14 +82,34 @@ export interface DirectConversation {
   lastMessageAt: string | null;
 }
 
+/** Imagem anexada a uma mensagem. O arquivo é servido em `GET /uploads/<id>`. */
+export interface Attachment {
+  id: Id;
+  fileName: string;
+  contentType: string;
+  /** Bytes. */
+  size: number;
+  width: number;
+  height: number;
+}
+
 export interface Message {
   id: Id;
   /** Id de um canal de texto ou de uma conversa direta. */
   channelId: Id;
   authorId: Id;
+  /** Texto com a formatação de markup.ts; menções como `<@id>`. Pode ser vazio se houver anexos. */
   content: string;
+  attachments: Attachment[];
   createdAt: string;
   editedAt: string | null;
+}
+
+/** Menções ainda não vistas de um usuário num canal. */
+export interface MentionCount {
+  channelId: Id;
+  spaceId: Id;
+  count: number;
 }
 
 export interface VoiceParticipant {

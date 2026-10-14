@@ -1,6 +1,7 @@
 // Conversão entre as linhas do Prisma e os modelos de domínio de shared/.
 
 import type {
+  Attachment,
   Category,
   Channel,
   DirectConversation,
@@ -80,12 +81,25 @@ export const toDirect = (row: Db.DirectConversation): DirectConversation => ({
   lastMessageAt: iso(row.lastMessageAt),
 });
 
-export const toMessage = (row: Db.Message): Message => ({
+export const toAttachment = (row: Db.Attachment): Attachment => ({
+  id: row.id,
+  fileName: row.fileName,
+  contentType: row.contentType,
+  size: row.size,
+  width: row.width,
+  height: row.height,
+});
+
+/** Use com `include: messageInclude` nas consultas de mensagens. */
+export const messageInclude = { attachments: { orderBy: { position: 'asc' } } } as const;
+
+export const toMessage = (row: Db.Message & { attachments: Db.Attachment[] }): Message => ({
   id: row.id,
   // A restrição Message_target_check garante que exatamente um dos dois existe.
   channelId: (row.channelId ?? row.directId)!,
   authorId: row.authorId,
   content: row.content,
+  attachments: row.attachments.map(toAttachment),
   createdAt: row.createdAt.toISOString(),
   editedAt: iso(row.editedAt),
 });

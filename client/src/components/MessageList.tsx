@@ -1,3 +1,4 @@
+import { decodeMentions, encodeMentions, mentionedUserIds } from '@shared/markup';
 import type { Id, Message } from '@shared/models';
 import { Permission } from '@shared/permissions';
 import { MAX_MESSAGE_LENGTH } from '@shared/protocol';
@@ -5,8 +6,10 @@ import { Pencil, Trash2 } from 'lucide-react';
 import { useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { formatMessageTime, formatShortTime } from '../lib/format';
 import { useRealtime } from '../state/realtime';
-import { can, displayNameOf, roleColorOf } from '../state/selectors';
+import { can, displayNameOf, mentionCandidates, roleColorOf } from '../state/selectors';
 import { Avatar } from './Avatar';
+import { Markup, MessageContent } from './MessageContent';
+import { useMentionAutocomplete } from './MentionAutocomplete';
 import { DialogActions, Modal } from './Modal';
 
 /** Mensagens seguidas do mesmo autor dentro desta janela viram um bloco só. */
@@ -117,6 +120,7 @@ export function MessageList({ conversationId, welcome, messages }: MessageListPr
                 <MessageRow
                   key={message.id}
                   message={message}
+                  mentionsMe={Boolean(state.me && mentionedUserIds(message.content).includes(state.me.id))}
                   editing={editingId === message.id}
                   onEdit={mine ? () => setEditingId(message.id) : undefined}
                   onDelete={mine || moderates ? () => setDeleting(message) : undefined}
@@ -165,6 +169,8 @@ export function MessageList({ conversationId, welcome, messages }: MessageListPr
 
 interface MessageRowProps {
   message: Message;
+  /** Destaca a linha: a mensagem menciona você. */
+  mentionsMe: boolean;
   leading: ReactNode;
   header: ReactNode;
   editing: boolean;
@@ -175,13 +181,18 @@ interface MessageRowProps {
   onEditDone: () => void;
 }
 
-function MessageRow({ message, leading, header, editing, onEdit, onDelete, onEditDone }: MessageRowProps) {
+function MessageRow({ message, mentionsMe, leading, header, editing, onEdit, onDelete, onEditDone }: MessageRowProps) {
+  const background = editing
+    ? 'bg-rail/40'
+    : mentionsMe
+      ? 'border-l-2 border-mention bg-mention/[0.07] pl-[14px] hover:bg-mention/10'
+      : 'hover:bg-rail/30';
   return (
-    <div className={`group relative flex gap-4 px-4 py-0.5 ${editing ? 'bg-rail/40' : 'hover:bg-rail/30'}`}>
+    <div className={`group relative flex gap-4 px-4 py-0.5 ${background}`}>
       {leading}
       <div className="min-w-0 flex-1">
         {header}
-        {editing ? <MessageEditor message={message} onDone={onEditDone} /> : <MessageBody message={message} />}
+        {editing ? <MessageEditor message={message} onDone={onEditDone} /> : <MessageContent message={message} />}
       </div>
 
       {!editing && (onEdit || onDelete) && (
@@ -214,22 +225,14 @@ function MessageRow({ message, leading, header, editing, onEdit, onDelete, onEdi
   );
 }
 
-function MessageBody({ message }: { message: Message }) {
-  return (
-    <p className="text-[15px] leading-relaxed break-words whitespace-pre-wrap text-fg/95">
-      {message.content}
-      {message.editedAt && (
-        <span className="ml-1 text-[10px] text-faint" title={`Editada em ${formatMessageTime(message.editedAt)}`}>
-          (editada)
-        </span>
-      )}
-    </p>
-  );
-}
-
 function MessageEditor({ message, onDone }: { message: Message; onDone: () => void }) {
-  const { actions } = useRealtime();
-  const [draft, setDraft] = useState(message.content);
+  const { state, actions } = useRealtime();
+  const candidates = mentionCandidates(state, message.channelId);
+  // Edita com `@Nome`; volta para `<@id>` ao salvar.
+  const original = decodeMentions(message.content, (id) =>
+    state.users[id] ? displayNameOf(state.snapshot, state.users, id) : null,
+  );
+  const [draft, setDraft] = useState(original);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -251,9 +254,11 @@ function MessageEditor({ message, onDone }: { message: Message; onDone: () => vo
 
   async function save(e?: FormEvent) {
     e?.preventDefault();
-    const content = draft.trim();
+    const content = encodeMentions(draft.trim(), candidates);
     if (busy) return;
-    if (!content) return setError('A mensagem não pode ficar vazia. Para tirá-la, use a lixeira.');
+    if (!content && message.attachments.length === 0) {
+      return setError('A mensagem não pode ficar vazia. Para tirá-la, use a lixeira.');
+    }
     if (content === message.content) return onDone();
     setBusy(true);
     const err = await actions.editMessage(message.id, content);
@@ -262,16 +267,24 @@ function MessageEditor({ message, onDone }: { message: Message; onDone: () => vo
     else onDone();
   }
 
+  const autocomplete = useMentionAutocomplete(ref, draft, setDraft, candidates);
+
   return (
-    <form onSubmit={save} className="py-1">
+    <form onSubmit={save} className="relative py-1">
+      {autocomplete.popup}
       <textarea
         ref={ref}
         rows={1}
         value={draft}
         maxLength={MAX_MESSAGE_LENGTH}
         aria-label="Editar mensagem"
-        onChange={(e) => setDraft(e.target.value)}
+        {...autocomplete.inputProps}
+        onChange={(e) => {
+          setDraft(e.target.value);
+          autocomplete.inputProps.onChange();
+        }}
         onKeyDown={(e) => {
+          if (autocomplete.handleKeyDown(e)) return;
           if (e.key === 'Escape') {
             e.preventDefault();
             onDone();
@@ -325,8 +338,14 @@ function DeleteMessageDialog({ message, onClose }: { message: Message; onClose: 
       onClose={onClose}
     >
       <form onSubmit={submit}>
-        <blockquote className="max-h-40 overflow-y-auto rounded-md border border-line bg-rail px-3 py-2 text-sm whitespace-pre-wrap text-muted">
-          {message.content}
+        <blockquote className="max-h-40 overflow-y-auto rounded-md border border-line bg-rail px-3 py-2 text-sm break-words whitespace-pre-wrap text-muted">
+          <Markup content={message.content} />
+          {message.attachments.length > 0 && (
+            <p className="mt-1 text-xs text-faint">
+              {message.attachments.length === 1 ? '1 imagem' : `${message.attachments.length} imagens`} também
+              {message.attachments.length === 1 ? ' será apagada' : ' serão apagadas'}.
+            </p>
+          )}
         </blockquote>
         {error && (
           <p role="alert" className="mt-3 text-sm text-dnd">

@@ -1,5 +1,7 @@
+import type { MentionCandidate } from '@shared/markup';
 import type { Category, Channel, Id, SpaceSnapshot, User } from '@shared/models';
 import { hasPermission } from '@shared/permissions';
+import type { RealtimeState } from './realtime';
 
 export function can(snapshot: SpaceSnapshot | null, channelId: Id | undefined, flag: number): boolean {
   if (!snapshot || !channelId) return false;
@@ -38,4 +40,19 @@ export function groupChannels(snapshot: SpaceSnapshot, includeEmpty = false): Ch
     if (channels.length || includeEmpty) groups.push({ category, channels });
   }
   return groups;
+}
+
+/**
+ * Quem dá para mencionar numa conversa: os membros do espaço num canal (o
+ * servidor ainda descarta quem não enxerga o canal) ou os dois lados de uma
+ * conversa direta. Robôs ficam de fora.
+ */
+export function mentionCandidates(state: RealtimeState, targetId: Id): MentionCandidate[] {
+  const { snapshot, users } = state;
+  const ids = snapshot?.channels.some((c) => c.id === targetId)
+    ? snapshot.members.map((m) => m.userId)
+    : (state.directs[targetId]?.participantIds ?? []);
+  return ids
+    .filter((id) => users[id] && !users[id].isBot)
+    .map((id) => ({ id, name: displayNameOf(snapshot, users, id) }));
 }

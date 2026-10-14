@@ -152,20 +152,27 @@ interface ChannelItemProps {
 }
 
 function TextChannelItem({ channel, active, onEdit }: ChannelItemProps & { active: boolean }) {
-  const { actions } = useRealtime();
+  const { state, actions } = useRealtime();
+  const mentions = state.mentions[channel.id]?.count ?? 0;
   return (
     <li>
       <ChannelRow channel={channel} onEdit={onEdit}>
         <button
           type="button"
           aria-current={active ? 'page' : undefined}
+          aria-label={mentions ? `${channel.name} (${mentions} ${mentions === 1 ? 'menção' : 'menções'})` : undefined}
           onClick={() => actions.selectChannel(channel.id)}
           className={`flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-[15px] ${onEdit ? 'pr-7' : ''} ${
-            active ? 'bg-hover text-fg' : 'text-muted hover:bg-hover/60 hover:text-fg'
+            active
+              ? 'bg-hover text-fg'
+              : mentions
+                ? 'font-semibold text-fg hover:bg-hover/60'
+                : 'text-muted hover:bg-hover/60 hover:text-fg'
           }`}
         >
           <Hash size={18} className="shrink-0 text-faint" />
-          <span className="truncate">{channel.name}</span>
+          <span className="flex-1 truncate text-left">{channel.name}</span>
+          {mentions > 0 && <CountBadge count={mentions} />}
         </button>
       </ChannelRow>
     </li>
@@ -204,10 +211,15 @@ function VoiceChannelItem({ channel, onEdit }: ChannelItemProps) {
           {participants.map((p) => {
             const user = state.users[p.userId];
             const name = displayNameOf(state.snapshot, state.users, p.userId);
+            // Só dá para medir quem fala na chamada em que você está.
+            const speaking = isMine && Boolean(state.speaking[p.userId]) && !p.muted;
             return (
               <li key={p.userId} className="flex items-center gap-2 rounded px-1.5 py-1 text-sm text-muted">
-                <Avatar name={name} color={user?.avatarColor ?? '#555'} size="xs" />
-                <span className="flex-1 truncate">{name}</span>
+                <Avatar name={name} color={user?.avatarColor ?? '#555'} size="xs" speaking={speaking} />
+                <span className={`flex-1 truncate ${speaking ? 'text-fg' : ''}`}>
+                  {name}
+                  {speaking && <span className="sr-only"> (falando)</span>}
+                </span>
                 {p.deafened ? (
                   <HeadphoneOff size={14} aria-label="Som desativado" className="text-dnd" />
                 ) : (
@@ -219,5 +231,17 @@ function VoiceChannelItem({ channel, onEdit }: ChannelItemProps) {
         </ul>
       )}
     </li>
+  );
+}
+
+/** Contador vermelho de menções. */
+export function CountBadge({ count }: { count: number }) {
+  return (
+    <span
+      aria-hidden
+      className="min-w-[18px] shrink-0 rounded-full bg-dnd px-1.5 text-center text-[11px] leading-[18px] font-bold text-white"
+    >
+      {count > 99 ? '99+' : count}
+    </span>
   );
 }

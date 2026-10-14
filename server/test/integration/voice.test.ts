@@ -33,6 +33,14 @@ describe.skipIf(!hasTestDatabase)('salas de voz', () => {
     );
   });
 
+  it('entrega os servidores ICE e a política de transporte ao entrar', async () => {
+    const client = await server.connect('Ana');
+    const sala = channelNamed(await joinDemoSpace(client), 'Sala de estar');
+    const joined = ok(await client.socket.emitWithAck('voice:join', { channelId: sala.id }));
+    expect(joined.iceServers.length).toBeGreaterThan(0);
+    expect(joined.iceTransportPolicy).toBe('all');
+  });
+
   it('repassa a sinalização só entre quem está na mesma sala', async () => {
     const ana = await inRoom('Ana', 'Sala de estar');
     const bruno = await inRoom('Bruno', 'Sala de estar');

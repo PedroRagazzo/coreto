@@ -1,11 +1,13 @@
 // Contrato dos eventos socket.io. Servidor e cliente tipam o socket com estas interfaces.
 
 import type {
+  Attachment,
   Channel,
   ChannelKind,
   DirectConversation,
   Id,
   Member,
+  MentionCount,
   Message,
   PresenceStatus,
   Space,
@@ -19,6 +21,16 @@ export type Ack<T> = { ok: true; data: T } | { ok: false; error: string };
 export const MAX_MESSAGE_LENGTH = 2000;
 /** Mensagens por página do histórico; uma página menor que isso significa que chegou ao começo. */
 export const HISTORY_PAGE_SIZE = 50;
+
+// ── Anexos (HTTP POST /uploads) ──────────────────────────────────────────────
+// O corpo é o arquivo cru; `Authorization: Bearer <token>` e `X-File-Name`
+// (codificado com encodeURIComponent). Depois, o id vai em `message:send`.
+
+export const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+export const MAX_ATTACHMENTS_PER_MESSAGE = 4;
+export const ATTACHMENT_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] as const;
+
+export type UploadResponse = { ok: true; attachment: Attachment } | { ok: false; error: string };
 
 // ── Login (HTTP POST /login) ─────────────────────────────────────────────────
 // O socket.io só aceita conexões com o token de sessão devolvido aqui.
@@ -67,6 +79,8 @@ export interface VoiceJoinResult {
   /** Quem já estava na sala; quem entra inicia a negociação com cada um. */
   peers: Id[];
   iceServers: IceServer[];
+  /** `relay` força o áudio a passar pelo TURN (útil para testar o TURN). */
+  iceTransportPolicy: 'all' | 'relay';
 }
 
 export interface DirectConversationPayload {
@@ -113,12 +127,18 @@ export interface ClientToServerEvents {
     req: { channelId: Id; before?: Id; limit?: number },
     ack: (res: Ack<Message[]>) => void,
   ) => void;
-  'message:send': (req: { channelId: Id; content: string }, ack: (res: Ack<Message>) => void) => void;
-  /** Só o autor edita. */
+  /** `attachmentIds`: anexos enviados antes por POST /uploads, na ordem em que aparecem. */
+  'message:send': (
+    req: { channelId: Id; content: string; attachmentIds?: Id[] },
+    ack: (res: Ack<Message>) => void,
+  ) => void;
+  /** Só o autor edita; os anexos não mudam. */
   'message:edit': (req: { messageId: Id; content: string }, ack: (res: Ack<Message>) => void) => void;
   /** O autor apaga; em canais, quem tem MANAGE_MESSAGES também. */
   'message:delete': (req: { messageId: Id }, ack: (res: Ack<null>) => void) => void;
   'typing:start': (req: { channelId: Id }) => void;
+  /** O usuário viu o canal: zera as menções dele ali. */
+  'mentions:ack': (req: { channelId: Id }) => void;
   'presence:set': (status: SelectableStatus) => void;
   'voice:join': (req: { channelId: Id }, ack: (res: Ack<VoiceJoinResult>) => void) => void;
   'voice:leave': () => void;
@@ -133,6 +153,8 @@ export interface ServerToClientEvents {
     directs: DirectConversation[];
     /** Quem está do outro lado das conversas diretas. */
     directUsers: User[];
+    /** Menções ainda não vistas, por canal (de todos os espaços). */
+    mentions: MentionCount[];
   }) => void;
   /** Um espaço novo foi criado; todos os usuários já são membros dele. */
   'space:created': (space: Space) => void;
@@ -149,6 +171,8 @@ export interface ServerToClientEvents {
   'message:updated': (message: Message) => void;
   'message:deleted': (payload: { channelId: Id; messageId: Id }) => void;
   typing: (payload: { channelId: Id; userId: Id }) => void;
+  /** O número de menções não vistas do usuário num canal mudou (0 = todas vistas). */
+  'mentions:update': (payload: MentionCount) => void;
   'presence:update': (payload: { userId: Id; status: PresenceStatus }) => void;
   'member:joined': (payload: { member: Member; user: User }) => void;
   'voice:update': (payload: { channelId: Id; participants: VoiceParticipant[] }) => void;

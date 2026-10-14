@@ -1,13 +1,23 @@
 // Sobe o servidor real numa porta livre contra o banco de teste e conecta
 // clientes socket.io como se fossem navegadores.
 
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { io as connectSocket, type Socket } from 'socket.io-client';
-import type { Channel, DirectConversation, Space, SpaceSnapshot, User } from '../../../shared/src/models.js';
-import type { Ack, ClientToServerEvents, LoginResponse, ServerToClientEvents } from '../../../shared/src/protocol.js';
+import type { Channel, DirectConversation, MentionCount, Space, SpaceSnapshot, User } from '../../../shared/src/models.js';
+import type {
+  Ack,
+  ClientToServerEvents,
+  LoginResponse,
+  ServerToClientEvents,
+  UploadResponse,
+} from '../../../shared/src/protocol.js';
 import { startServer, type RunningServer } from '../../src/app.js';
 import { createDb, type Db } from '../../src/db/client.js';
 import { seedIfEmpty } from '../../src/seed.js';
 import { Store } from '../../src/store.js';
+import { iceConfigFromEnv } from '../../src/turn.js';
 import { assertTestDatabase, TEST_DATABASE_URL } from './database.js';
 
 export type TestSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
@@ -23,6 +33,7 @@ export interface TestClient {
   spaces: Space[];
   directs: DirectConversation[];
   directUsers: User[];
+  mentions: MentionCount[];
 }
 
 type EventName = keyof ServerToClientEvents;
@@ -33,7 +44,11 @@ export class TestServer {
   private store: Store | null = null;
   private readonly clients: TestSocket[] = [];
 
-  private constructor(readonly db: Db) {}
+  private constructor(
+    readonly db: Db,
+    /** Pasta temporária dos anexos, apagada em `stop`. */
+    readonly uploadDir: string,
+  ) {}
 
   /** Apaga o banco de teste, recria os dados de demonstração e sobe o servidor. */
   static async start(): Promise<TestServer> {
@@ -42,7 +57,7 @@ export class TestServer {
     const db = createDb(TEST_DATABASE_URL);
     await resetDatabase(db);
     await seedIfEmpty(db);
-    const harness = new TestServer(db);
+    const harness = new TestServer(db, await mkdtemp(join(tmpdir(), 'coreto-uploads-')));
     await harness.boot();
     return harness;
   }
@@ -63,6 +78,7 @@ export class TestServer {
     await this.disconnectAll();
     await this.server?.close();
     await this.db.$disconnect();
+    await rm(this.uploadDir, { recursive: true, force: true });
   }
 
   /** POST /login cru, para testar as respostas do servidor. */
@@ -73,6 +89,16 @@ export class TestServer {
       body: JSON.stringify({ name, pin }),
     });
     return { status: res.status, body: (await res.json()) as LoginResponse };
+  }
+
+  /** POST /uploads com o token da pessoa (ou um token qualquer). */
+  async upload(token: string, data: Buffer, fileName = 'foto.png'): Promise<{ status: number; body: UploadResponse }> {
+    const res = await fetch(`${this.url}/uploads`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'x-file-name': encodeURIComponent(fileName) },
+      body: data,
+    });
+    return { status: res.status, body: (await res.json()) as UploadResponse };
   }
 
   /**
@@ -115,7 +141,12 @@ export class TestServer {
 
   private async boot(): Promise<void> {
     this.store = await Store.load(this.db);
-    this.server = await startServer(this.store, { port: 0, clientOrigins: [] });
+    this.server = await startServer(this.store, {
+      port: 0,
+      clientOrigins: [],
+      uploadDir: this.uploadDir,
+      ice: iceConfigFromEnv({}),
+    });
   }
 }
 
@@ -167,6 +198,17 @@ export function expectNoEvent<E extends EventName>(socket: TestSocket, event: E,
     }, windowMs);
     socket.on(event, handler as never);
   });
+}
+
+/** Início de um PNG com as dimensões pedidas; o servidor só lê o cabeçalho. */
+export function fakePng(width: number, height: number, extraBytes = 32): Buffer {
+  const header = Buffer.alloc(24);
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(header);
+  header.writeUInt32BE(13, 8);
+  header.write('IHDR', 12, 'latin1');
+  header.writeUInt32BE(width, 16);
+  header.writeUInt32BE(height, 20);
+  return Buffer.concat([header, Buffer.alloc(extraBytes, 7)]);
 }
 
 /** Abre o primeiro espaço de demonstração ("Coreto Dev") e devolve o retrato dele. */

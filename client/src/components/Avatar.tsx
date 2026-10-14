@@ -29,14 +29,18 @@ interface AvatarProps {
   size?: keyof typeof SIZES;
   /** Cor da borda do indicador de status: deve casar com o fundo onde o avatar aparece. */
   ringClass?: string;
+  /** Anel verde de quem está falando numa chamada. */
+  speaking?: boolean;
 }
 
-export function Avatar({ name, color, status, size = 'md', ringClass = 'border-sidebar' }: AvatarProps) {
+export function Avatar({ name, color, status, size = 'md', ringClass = 'border-sidebar', speaking = false }: AvatarProps) {
   return (
     <span className="relative inline-flex shrink-0">
       <span
         aria-hidden
-        className={`flex items-center justify-center rounded-full font-semibold text-white select-none ${SIZES[size]}`}
+        className={`flex items-center justify-center rounded-full font-semibold text-white transition-shadow select-none ${SIZES[size]} ${
+          speaking ? 'ring-2 ring-online ring-offset-2 ring-offset-sidebar' : ''
+        }`}
         style={{ backgroundColor: color }}
       >
         {initials(name)}

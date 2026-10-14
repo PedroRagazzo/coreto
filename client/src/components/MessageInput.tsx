@@ -1,10 +1,25 @@
-import type { Id } from '@shared/models';
-import { MAX_MESSAGE_LENGTH } from '@shared/protocol';
-import { SendHorizontal } from 'lucide-react';
+import { encodeMentions } from '@shared/markup';
+import type { Attachment, Id } from '@shared/models';
+import { ATTACHMENT_TYPES, MAX_ATTACHMENTS_PER_MESSAGE, MAX_MESSAGE_LENGTH } from '@shared/protocol';
+import { ImagePlus, LoaderCircle, SendHorizontal, TriangleAlert, X } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { checkImageFile, type UploadHandle } from '../lib/uploads';
 import { useRealtime } from '../state/realtime';
+import { mentionCandidates } from '../state/selectors';
+import { useMentionAutocomplete } from './MentionAutocomplete';
 
 const MAX_HEIGHT_PX = 192;
+
+interface PendingImage {
+  key: string;
+  file: File;
+  previewUrl: string;
+  progress: number;
+  /** Preenchido quando o envio termina; é o id que vai na mensagem. */
+  attachment: Attachment | null;
+  error: string | null;
+  upload: UploadHandle | null;
+}
 
 interface MessageInputProps {
   /** Canal de texto ou conversa direta. */
@@ -15,16 +30,30 @@ interface MessageInputProps {
 }
 
 export function MessageInput({ targetId, label, canSend }: MessageInputProps) {
-  const { actions } = useRealtime();
+  const { state, actions } = useRealtime();
   const [draft, setDraft] = useState('');
+  const [images, setImages] = useState<PendingImage[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const imagesRef = useRef(images);
+  imagesRef.current = images;
 
+  const candidates = mentionCandidates(state, targetId);
+  const autocomplete = useMentionAutocomplete(textareaRef, draft, setDraft, candidates);
+
+  // Trocar de conversa descarta o rascunho e as imagens ainda não enviadas.
   useEffect(() => {
     setDraft('');
     setError(null);
     textareaRef.current?.focus();
+    return () => {
+      for (const image of imagesRef.current) discard(image);
+      setImages([]);
+    };
   }, [targetId]);
 
   // Cresce com o texto até um limite; depois rola.
@@ -35,56 +64,193 @@ export function MessageInput({ targetId, label, canSend }: MessageInputProps) {
     el.style.height = `${Math.min(el.scrollHeight, MAX_HEIGHT_PX)}px`;
   }, [draft]);
 
+  const patchImage = (key: string, patch: Partial<PendingImage>) =>
+    setImages((list) => list.map((image) => (image.key === key ? { ...image, ...patch } : image)));
+
+  function addFiles(files: File[]) {
+    if (!canSend || files.length === 0) return;
+    const room = MAX_ATTACHMENTS_PER_MESSAGE - imagesRef.current.length;
+    const problems: string[] = [];
+    if (files.length > room) problems.push(`Até ${MAX_ATTACHMENTS_PER_MESSAGE} imagens por mensagem.`);
+    const accepted: PendingImage[] = [];
+    for (const file of files.slice(0, Math.max(room, 0))) {
+      const problem = checkImageFile(file);
+      if (problem) {
+        problems.push(problem);
+        continue;
+      }
+      const key = crypto.randomUUID();
+      const upload = actions.uploadImage(file, (progress) => patchImage(key, { progress }));
+      accepted.push({ key, file, previewUrl: URL.createObjectURL(file), progress: 0, attachment: null, error: null, upload });
+      void upload.done.then((res) =>
+        patchImage(key, res.ok ? { attachment: res.attachment, progress: 1, upload: null } : { error: res.error, upload: null }),
+      );
+    }
+    setImages((list) => [...list, ...accepted]);
+    setError(problems[0] ?? null);
+  }
+
+  function removeImage(key: string) {
+    const image = imagesRef.current.find((i) => i.key === key);
+    if (image) discard(image);
+    setImages((list) => list.filter((i) => i.key !== key));
+  }
+
+  // Arrastar imagens para qualquer parte da conversa (a <section> em volta), não só para a caixa de texto.
+  useEffect(() => {
+    const zone = formRef.current?.closest('section');
+    if (!zone || !canSend) return;
+    const hasFiles = (e: DragEvent) => e.dataTransfer?.types.includes('Files') ?? false;
+    let depth = 0;
+    const onEnter = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      depth++;
+      setDragging(true);
+    };
+    const onLeave = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      depth = Math.max(0, depth - 1);
+      if (depth === 0) setDragging(false);
+    };
+    const onOver = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      e.dataTransfer!.dropEffect = 'copy';
+    };
+    const onDrop = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      depth = 0;
+      setDragging(false);
+      addFiles([...e.dataTransfer!.files]);
+      textareaRef.current?.focus();
+    };
+    zone.addEventListener('dragenter', onEnter);
+    zone.addEventListener('dragleave', onLeave);
+    zone.addEventListener('dragover', onOver);
+    zone.addEventListener('drop', onDrop);
+    return () => {
+      zone.removeEventListener('dragenter', onEnter);
+      zone.removeEventListener('dragleave', onLeave);
+      zone.removeEventListener('dragover', onOver);
+      zone.removeEventListener('drop', onDrop);
+    };
+  });
+
+  const uploading = images.some((i) => i.upload !== null);
+  const failed = images.some((i) => i.error !== null);
+  const ready = images.filter((i) => i.attachment);
+  const canSubmit = canSend && !sending && !uploading && !failed && (draft.trim() !== '' || ready.length > 0);
+
   async function submit() {
-    const content = draft.trim();
-    if (!content || sending || !canSend) return;
+    if (!canSubmit) return;
+    const content = encodeMentions(draft.trim(), candidates);
     setSending(true);
-    const err = await actions.sendMessage(targetId, content);
+    const err = await actions.sendMessage(
+      targetId,
+      content,
+      ready.map((i) => i.attachment!.id),
+    );
     setSending(false);
     setError(err);
-    if (!err) setDraft('');
+    if (!err) {
+      setDraft('');
+      for (const image of images) URL.revokeObjectURL(image.previewUrl);
+      setImages([]);
+    }
   }
 
   return (
     <form
+      ref={formRef}
       onSubmit={(e) => {
         e.preventDefault();
         void submit();
       }}
-      className="px-4 pt-1"
+      className="relative px-4 pt-1"
     >
-      <div className="flex items-end gap-2 rounded-lg bg-elevated px-4 py-2.5 focus-within:ring-1 focus-within:ring-accent/60">
-        <textarea
-          ref={textareaRef}
-          rows={1}
-          value={draft}
-          maxLength={MAX_MESSAGE_LENGTH}
-          disabled={!canSend}
-          aria-label={`Mensagem para ${label}`}
-          placeholder={
-            canSend ? `Conversar em ${label}` : 'Você não tem permissão para enviar mensagens aqui.'
-          }
-          onChange={(e) => {
-            setDraft(e.target.value);
-            if (e.target.value.trim()) actions.notifyTyping(targetId);
-          }}
-          onKeyDown={(e) => {
-            // Enter envia; Shift+Enter quebra linha; não interfere na composição de acentos (IME).
-            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-              e.preventDefault();
-              void submit();
-            }
-          }}
-          className="flex-1 resize-none bg-transparent text-[15px] leading-6 placeholder:text-faint focus:outline-none disabled:cursor-not-allowed"
-        />
-        <button
-          type="submit"
-          aria-label="Enviar mensagem"
-          disabled={!canSend || sending || !draft.trim()}
-          className="rounded p-1 text-muted hover:text-accent disabled:opacity-40 disabled:hover:text-muted"
+      {dragging && (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute right-4 bottom-full left-4 mb-2 rounded-lg border-2 border-dashed border-accent bg-panel/90 py-6 text-center text-sm font-medium text-accent"
         >
-          <SendHorizontal size={20} />
-        </button>
+          Solte para anexar a {label}
+        </div>
+      )}
+      {autocomplete.popup}
+
+      <div className="rounded-lg bg-elevated focus-within:ring-1 focus-within:ring-accent/60">
+        {images.length > 0 && (
+          <ul aria-label="Imagens anexadas" className="flex gap-3 overflow-x-auto border-b border-line px-4 pt-3 pb-2">
+            {images.map((image) => (
+              <PendingImageTile key={image.key} image={image} onRemove={() => removeImage(image.key)} />
+            ))}
+          </ul>
+        )}
+        <div className="flex items-end gap-2 px-3 py-2.5">
+          <button
+            type="button"
+            title="Anexar imagem"
+            aria-label="Anexar imagem"
+            disabled={!canSend || images.length >= MAX_ATTACHMENTS_PER_MESSAGE}
+            onClick={() => fileInputRef.current?.click()}
+            className="rounded p-1 text-muted hover:text-fg disabled:opacity-40 disabled:hover:text-muted"
+          >
+            <ImagePlus size={20} />
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept={ATTACHMENT_TYPES.join(',')}
+            multiple
+            hidden
+            onChange={(e) => {
+              addFiles([...(e.target.files ?? [])]);
+              e.target.value = ''; // permite escolher o mesmo arquivo de novo
+            }}
+          />
+          <textarea
+            ref={textareaRef}
+            rows={1}
+            value={draft}
+            maxLength={MAX_MESSAGE_LENGTH}
+            disabled={!canSend}
+            aria-label={`Mensagem para ${label}`}
+            placeholder={
+              canSend ? `Conversar em ${label}` : 'Você não tem permissão para enviar mensagens aqui.'
+            }
+            {...autocomplete.inputProps}
+            onChange={(e) => {
+              setDraft(e.target.value);
+              autocomplete.inputProps.onChange();
+              if (e.target.value.trim()) actions.notifyTyping(targetId);
+            }}
+            onPaste={(e) => {
+              const files = [...e.clipboardData.files];
+              if (files.length === 0) return; // texto colado segue normal
+              e.preventDefault();
+              addFiles(files);
+            }}
+            onKeyDown={(e) => {
+              if (autocomplete.handleKeyDown(e)) return;
+              // Enter envia; Shift+Enter quebra linha; não interfere na composição de acentos (IME).
+              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                void submit();
+              }
+            }}
+            className="flex-1 resize-none bg-transparent py-0.5 text-[15px] leading-6 placeholder:text-faint focus:outline-none disabled:cursor-not-allowed"
+          />
+          <button
+            type="submit"
+            aria-label="Enviar mensagem"
+            title={uploading ? 'Aguarde o envio das imagens' : undefined}
+            disabled={!canSubmit}
+            className="rounded p-1 text-muted hover:text-accent disabled:opacity-40 disabled:hover:text-muted"
+          >
+            <SendHorizontal size={20} />
+          </button>
+        </div>
       </div>
       {error && (
         <p role="alert" className="mt-1 text-xs text-dnd">
@@ -92,5 +258,50 @@ export function MessageInput({ targetId, label, canSend }: MessageInputProps) {
         </p>
       )}
     </form>
+  );
+}
+
+function discard(image: PendingImage): void {
+  image.upload?.abort();
+  URL.revokeObjectURL(image.previewUrl);
+}
+
+function PendingImageTile({ image, onRemove }: { image: PendingImage; onRemove: () => void }) {
+  const status = image.error ?? (image.upload ? `Enviando… ${Math.round(image.progress * 100)}%` : 'Pronta para enviar');
+  return (
+    <li className="relative shrink-0" title={`${image.file.name} — ${status}`}>
+      <img
+        src={image.previewUrl}
+        alt={image.file.name}
+        className={`h-20 w-20 rounded-md object-cover ${image.upload || image.error ? 'opacity-50' : ''}`}
+      />
+      {image.upload && (
+        <span className="absolute inset-0 flex items-center justify-center">
+          <LoaderCircle size={22} className="animate-spin text-fg" aria-label={status} />
+        </span>
+      )}
+      {image.upload && (
+        <span
+          aria-hidden
+          className="absolute right-1 bottom-1 left-1 h-1 overflow-hidden rounded-full bg-rail/80"
+        >
+          <span className="block h-full bg-accent transition-[width]" style={{ width: `${image.progress * 100}%` }} />
+        </span>
+      )}
+      {image.error && (
+        <span className="absolute inset-0 flex items-center justify-center">
+          <TriangleAlert size={22} className="text-dnd" aria-label={image.error} />
+        </span>
+      )}
+      <button
+        type="button"
+        onClick={onRemove}
+        aria-label={`Remover ${image.file.name}`}
+        className="absolute -top-2 -right-2 rounded-full border-2 border-elevated bg-dnd p-0.5 text-white hover:bg-dnd/85"
+      >
+        <X size={12} />
+      </button>
+      {image.error && <p className="mt-1 w-20 truncate text-[10px] text-dnd">{image.error}</p>}
+    </li>
   );
 }

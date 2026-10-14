@@ -4,16 +4,13 @@
 
 import type { Id } from '../../../shared/src/models.js';
 import { Permission } from '../../../shared/src/permissions.js';
-import type { IceServer, SignalPayload } from '../../../shared/src/protocol.js';
+import type { SignalPayload } from '../../../shared/src/protocol.js';
 import { toParticipant, type Store, type VoiceSession } from '../store.js';
+import type { IceConfig } from '../turn.js';
 import { channelWithPermission, isFunction } from './guards.js';
 import { rooms, type AppSocket, type IO } from './types.js';
 
 const MAX_SDP_LENGTH = 100_000;
-
-const ICE_SERVERS: IceServer[] = process.env.ICE_SERVERS
-  ? (JSON.parse(process.env.ICE_SERVERS) as IceServer[])
-  : [{ urls: 'stun:stun.l.google.com:19302' }];
 
 function isSignal(value: unknown): value is SignalPayload {
   if (typeof value !== 'object' || value === null) return false;
@@ -44,7 +41,7 @@ export function endVoiceSession(io: IO, store: Store, session: VoiceSession, rea
   broadcastRoster(io, store, session.spaceId, session.channelId);
 }
 
-export function registerVoice(io: IO, socket: AppSocket, store: Store): void {
+export function registerVoice(io: IO, socket: AppSocket, store: Store, ice: IceConfig): void {
   const { userId } = socket.data;
   const endSession = (session: VoiceSession, reason?: string) => endVoiceSession(io, store, session, reason);
 
@@ -76,7 +73,7 @@ export function registerVoice(io: IO, socket: AppSocket, store: Store): void {
     });
     void socket.join(rooms.voice(channel.id));
     broadcastRoster(io, store, channel.spaceId, channel.id);
-    ack({ ok: true, data: { peers, iceServers: ICE_SERVERS } });
+    ack({ ok: true, data: { peers, iceServers: ice.iceServers(userId), iceTransportPolicy: ice.transportPolicy } });
   });
 
   socket.on('voice:leave', leave);

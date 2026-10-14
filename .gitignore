@@ -3,3 +3,4 @@ dist
 .env
 *.log
 server/src/generated
+server/uploads

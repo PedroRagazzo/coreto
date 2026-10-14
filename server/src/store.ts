@@ -11,12 +11,14 @@
 
 import { randomUUID } from 'node:crypto';
 import type {
+  Attachment,
   Category,
   Channel,
   ChannelKind,
   DirectConversation,
   Id,
   Member,
+  MentionCount,
   Message,
   Role,
   Space,
@@ -26,6 +28,8 @@ import type {
 } from '../../shared/src/models.js';
 import { hashToken, type Db } from './db/client.js';
 import {
+  messageInclude,
+  toAttachment,
   toCategory,
   toChannel,
   toDirect,
@@ -54,6 +58,29 @@ export const toParticipant = ({ userId, channelId, muted, deafened }: VoiceSessi
   muted,
   deafened,
 });
+
+/** Um anexo do pedido não existe, é de outra pessoa ou já está em outra mensagem. */
+export class AttachmentUnavailableError extends Error {
+  constructor() {
+    super('Anexo indisponível. Envie a imagem de novo.');
+  }
+}
+
+export interface NewAttachment {
+  uploaderId: Id;
+  fileName: string;
+  contentType: string;
+  size: number;
+  width: number;
+  height: number;
+}
+
+/** Quem ganha e quem perde a menção de uma mensagem ao editá-la. */
+export interface MentionChanges {
+  channelId: Id;
+  added: Id[];
+  removed: Id[];
+}
 
 export type LoginResult =
   | { status: 'ok'; user: User; token: string; created: boolean }
@@ -402,6 +429,7 @@ export class Store {
       },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: limit,
+      include: messageInclude,
     });
     return rows.reverse().map(toMessage);
   }
@@ -417,32 +445,107 @@ export class Store {
   }
   private lastMessageTime = 0;
 
-  async addMessage(targetId: Id, authorId: Id, content: string): Promise<Message> {
+  /**
+   * Grava a mensagem com os anexos (já enviados por `authorId` e ainda soltos)
+   * e as menções de canal, tudo ou nada.
+   */
+  async addMessage(
+    targetId: Id,
+    authorId: Id,
+    content: string,
+    { attachmentIds = [], mentions = [] }: { attachmentIds?: Id[]; mentions?: Id[] } = {},
+  ): Promise<Message> {
     const createdAt = this.nextMessageTime();
     const direct = this.directs.get(targetId);
-    if (!direct) {
-      return toMessage(await this.db.message.create({ data: { channelId: targetId, authorId, content, createdAt } }));
-    }
-
-    const [row] = await this.db.$transaction([
-      this.db.message.create({ data: { directId: targetId, authorId, content, createdAt } }),
-      this.db.directConversation.update({ where: { id: targetId }, data: { lastMessageAt: createdAt } }),
-    ]);
-    direct.lastMessageAt = createdAt.toISOString();
+    const row = await this.db.$transaction(async (tx) => {
+      const message = await tx.message.create({
+        data: { ...(direct ? { directId: targetId } : { channelId: targetId }), authorId, content, createdAt },
+      });
+      for (const [position, id] of attachmentIds.entries()) {
+        const { count } = await tx.attachment.updateMany({
+          where: { id, uploaderId: authorId, messageId: null },
+          data: { messageId: message.id, position },
+        });
+        if (count !== 1) throw new AttachmentUnavailableError();
+      }
+      if (mentions.length > 0) {
+        await tx.mention.createMany({ data: mentions.map((userId) => ({ messageId: message.id, userId, channelId: targetId })) });
+      }
+      if (direct) await tx.directConversation.update({ where: { id: targetId }, data: { lastMessageAt: createdAt } });
+      return tx.message.findUniqueOrThrow({ where: { id: message.id }, include: messageInclude });
+    });
+    if (direct) direct.lastMessageAt = createdAt.toISOString();
     return toMessage(row);
   }
 
   async findMessage(messageId: Id): Promise<Message | null> {
-    const row = await this.db.message.findUnique({ where: { id: messageId } });
+    const row = await this.db.message.findUnique({ where: { id: messageId }, include: messageInclude });
     return row ? toMessage(row) : null;
   }
 
-  async editMessage(messageId: Id, content: string): Promise<Message> {
-    return toMessage(await this.db.message.update({ where: { id: messageId }, data: { content, editedAt: new Date() } }));
+  async editMessage(messageId: Id, content: string, mentions?: MentionChanges): Promise<Message> {
+    const [row] = await this.db.$transaction([
+      this.db.message.update({ where: { id: messageId }, data: { content, editedAt: new Date() }, include: messageInclude }),
+      this.db.mention.deleteMany({ where: { messageId, userId: { in: mentions?.removed ?? [] } } }),
+      this.db.mention.createMany({
+        data: (mentions?.added ?? []).map((userId) => ({ messageId, userId, channelId: mentions!.channelId })),
+        skipDuplicates: true,
+      }),
+    ]);
+    return toMessage(row);
   }
 
+  /** Apaga a mensagem; anexos e menções vão junto (os arquivos dos anexos ficam com quem chamou). */
   async deleteMessage(messageId: Id): Promise<void> {
     await this.db.message.delete({ where: { id: messageId } });
+  }
+
+  // ── Anexos ─────────────────────────────────────────────────────────────────
+
+  /** Registra um anexo ainda solto (sem mensagem). Grave o arquivo depois disso. */
+  async createAttachment(input: NewAttachment): Promise<Attachment> {
+    return toAttachment(await this.db.attachment.create({ data: input }));
+  }
+
+  async discardAttachment(id: Id): Promise<void> {
+    await this.db.attachment.deleteMany({ where: { id } });
+  }
+
+  /** Anexo já publicado numa mensagem; os soltos não são servidos. */
+  async publishedAttachment(id: Id): Promise<Attachment | null> {
+    const row = await this.db.attachment.findFirst({ where: { id, messageId: { not: null } } });
+    return row ? toAttachment(row) : null;
+  }
+
+  // ── Menções ────────────────────────────────────────────────────────────────
+
+  /** Menções não vistas do usuário, por canal. */
+  async mentionCounts(userId: Id): Promise<MentionCount[]> {
+    const groups = await this.db.mention.groupBy({ by: ['channelId'], where: { userId }, _count: { _all: true } });
+    return groups.flatMap(({ channelId, _count }) => {
+      const channel = this.channels.get(channelId);
+      return channel ? [{ channelId, spaceId: channel.spaceId, count: _count._all }] : [];
+    });
+  }
+
+  async mentionCount(userId: Id, channelId: Id): Promise<number> {
+    return this.db.mention.count({ where: { userId, channelId } });
+  }
+
+  /** Quem tem menção não vista nesta mensagem. */
+  async mentionedIn(messageId: Id): Promise<Id[]> {
+    const rows = await this.db.mention.findMany({ where: { messageId }, select: { userId: true } });
+    return rows.map((r) => r.userId);
+  }
+
+  /** Quem tem menção não vista neste canal. */
+  async mentionedInChannel(channelId: Id): Promise<Id[]> {
+    const rows = await this.db.mention.findMany({ where: { channelId }, distinct: ['userId'], select: { userId: true } });
+    return rows.map((r) => r.userId);
+  }
+
+  async clearMentions(userId: Id, channelId: Id): Promise<void> {
+    await this.db.mention.deleteMany({ where: { userId, channelId } });
   }
 
   // ── Voz ────────────────────────────────────────────────────────────────────

@@ -36,6 +36,8 @@ model User {
   messages      Message[]
   directsAsA    DirectConversation[] @relation("DirectUserA")
   directsAsB    DirectConversation[] @relation("DirectUserB")
+  mentions      Mention[]
+  uploads       Attachment[]
 }
 
 /// Sessão de login sem expiração: o navegador fica sempre logado. O banco guarda só o hash SHA-256 do token.
@@ -167,10 +169,48 @@ model Message {
   direct    DirectConversation? @relation(fields: [directId], references: [id], onDelete: Cascade)
   authorId  String
   author    User                @relation(fields: [authorId], references: [id])
-  content   String              @db.VarChar(2000)
-  createdAt DateTime            @default(now())
-  editedAt  DateTime?
+  /// Pode ser vazio quando a mensagem tem anexos.
+  content     String              @db.VarChar(2000)
+  createdAt   DateTime            @default(now())
+  editedAt    DateTime?
+  mentions    Mention[]
+  attachments Attachment[]
 
   @@index([channelId, createdAt(sort: Desc)])
   @@index([directId, createdAt(sort: Desc)])
+}
+
+/// Menção ainda não vista: `<@id>` numa mensagem de canal. Some quando a pessoa abre o canal.
+model Mention {
+  messageId String
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Canal da mensagem, repetido para contar sem juntar tabelas.
+  channelId String
+  createdAt DateTime @default(now())
+
+  @@id([messageId, userId])
+  @@index([userId, channelId])
+}
+
+/// Imagem enviada. O arquivo fica em disco (UPLOAD_DIR/<id>); sem `messageId`,
+/// ainda não foi usada numa mensagem e é apagada depois de um tempo.
+model Attachment {
+  id          String   @id @default(uuid())
+  messageId   String?
+  message     Message? @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  /// Ordem dentro da mensagem.
+  position    Int      @default(0)
+  uploaderId  String
+  uploader    User     @relation(fields: [uploaderId], references: [id], onDelete: Cascade)
+  fileName    String   @db.VarChar(255)
+  contentType String   @db.VarChar(50)
+  size        Int
+  width       Int
+  height      Int
+  createdAt   DateTime @default(now())
+
+  @@index([messageId])
+  @@index([uploaderId, messageId])
 }

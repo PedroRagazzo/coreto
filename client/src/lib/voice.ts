@@ -1,9 +1,77 @@
 // Cliente de voz em malha P2P: uma RTCPeerConnection por participante.
 // Quem entra na sala envia a oferta para cada participante que já estava lá.
+// Quem está falando é medido aqui mesmo, no áudio que chega (e no microfone):
+// nada disso passa pelo servidor.
 
 import type { Id } from '@shared/models';
 import type { IceCandidate, IceServer, SignalPayload } from '@shared/protocol';
 import type { AppSocket } from './socket';
+
+/** Volume (RMS, 0–1) acima do qual conta como fala. */
+const SPEAKING_THRESHOLD = 0.02;
+/** Depois do último som alto, continua "falando" por este tempo, para o anel não piscar entre palavras. */
+const SPEAKING_HOLD_MS = 300;
+const SPEAKING_POLL_MS = 100;
+
+interface Meter {
+  source: MediaStreamAudioSourceNode;
+  analyser: AnalyserNode;
+  samples: Float32Array<ArrayBuffer>;
+  lastLoudAt: number;
+}
+
+/** Mede o volume de vários fluxos de áudio e avisa quando o conjunto de quem fala muda. */
+class SpeakingDetector {
+  private context: AudioContext | null = null;
+  private readonly meters = new Map<Id, Meter>();
+  private timer: ReturnType<typeof setInterval> | null = null;
+  private speaking = new Set<Id>();
+
+  constructor(private readonly onChange: (speaking: Set<Id>) => void) {}
+
+  watch(id: Id, stream: MediaStream): void {
+    this.unwatch(id);
+    this.context ??= new AudioContext();
+    void this.context.resume();
+    const source = this.context.createMediaStreamSource(stream);
+    const analyser = this.context.createAnalyser();
+    analyser.fftSize = 512;
+    source.connect(analyser); // só mede: não liga na saída, o som toca pelo <audio>
+    this.meters.set(id, { source, analyser, samples: new Float32Array(analyser.fftSize), lastLoudAt: 0 });
+    this.timer ??= setInterval(() => this.poll(), SPEAKING_POLL_MS);
+  }
+
+  unwatch(id: Id): void {
+    const meter = this.meters.get(id);
+    if (!meter) return;
+    meter.source.disconnect();
+    this.meters.delete(id);
+    this.poll();
+  }
+
+  stop(): void {
+    for (const id of [...this.meters.keys()]) this.unwatch(id);
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+    void this.context?.close();
+    this.context = null;
+  }
+
+  private poll(): void {
+    const now = performance.now();
+    const speaking = new Set<Id>();
+    for (const [id, meter] of this.meters) {
+      meter.analyser.getFloatTimeDomainData(meter.samples);
+      let sum = 0;
+      for (const sample of meter.samples) sum += sample * sample;
+      if (Math.sqrt(sum / meter.samples.length) > SPEAKING_THRESHOLD) meter.lastLoudAt = now;
+      if (now - meter.lastLoudAt < SPEAKING_HOLD_MS) speaking.add(id);
+    }
+    const changed = speaking.size !== this.speaking.size || [...speaking].some((id) => !this.speaking.has(id));
+    this.speaking = speaking;
+    if (changed) this.onChange(speaking);
+  }
+}
 
 interface Peer {
   pc: RTCPeerConnection;
@@ -15,15 +83,23 @@ interface Peer {
 export class VoiceManager {
   private localStream: MediaStream | null = null;
   private iceServers: IceServer[] = [];
+  private iceTransportPolicy: RTCIceTransportPolicy = 'all';
   private readonly peers = new Map<Id, Peer>();
   private deafened = false;
+  private selfId: Id | null = null;
+  private readonly detector: SpeakingDetector;
 
-  constructor(private readonly socket: AppSocket) {
+  /** `onSpeaking` recebe quem está falando agora (incluindo você), a cada mudança. */
+  constructor(
+    private readonly socket: AppSocket,
+    onSpeaking: (speaking: Set<Id>) => void = () => {},
+  ) {
+    this.detector = new SpeakingDetector(onSpeaking);
     socket.on('voice:signal', ({ from, signal }) => void this.handleSignal(from, signal));
     socket.on('voice:peer-left', ({ userId }) => this.closePeer(userId));
   }
 
-  async join(channelId: Id, startMuted: boolean): Promise<void> {
+  async join(channelId: Id, startMuted: boolean, selfId: Id): Promise<void> {
     this.teardown();
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
@@ -36,7 +112,11 @@ export class VoiceManager {
     }
     this.localStream = stream;
     this.iceServers = res.data.iceServers;
+    this.iceTransportPolicy = res.data.iceTransportPolicy;
+    this.selfId = selfId;
     this.setMuted(startMuted);
+    // Microfone desativado manda silêncio, então você deixa de "falar" sozinho.
+    this.detector.watch(selfId, stream);
     await Promise.all(res.data.peers.map((peerId) => this.call(peerId)));
   }
 
@@ -49,8 +129,11 @@ export class VoiceManager {
   /** Encerra tudo localmente sem avisar o servidor (ele já encerrou ou caiu). */
   teardown(): void {
     for (const peerId of [...this.peers.keys()]) this.closePeer(peerId);
+    if (this.selfId) this.detector.unwatch(this.selfId);
+    this.detector.stop();
     this.localStream?.getTracks().forEach((track) => track.stop());
     this.localStream = null;
+    this.selfId = null;
   }
 
   setMuted(muted: boolean): void {
@@ -71,7 +154,7 @@ export class VoiceManager {
   }
 
   private createPeer(peerId: Id): Peer {
-    const pc = new RTCPeerConnection({ iceServers: this.iceServers });
+    const pc = new RTCPeerConnection({ iceServers: this.iceServers, iceTransportPolicy: this.iceTransportPolicy });
     const peer: Peer = { pc, pendingCandidates: [], audio: null };
     this.peers.set(peerId, peer);
 
@@ -88,6 +171,7 @@ export class VoiceManager {
       audio.srcObject = remote;
       audio.muted = this.deafened;
       peer.audio = audio;
+      this.detector.watch(peerId, remote);
       audio.play().catch(() => {
         // O navegador pode bloquear autoplay; o clique em "entrar" normalmente libera.
       });
@@ -135,6 +219,7 @@ export class VoiceManager {
     if (!peer) return;
     peer.pc.close();
     if (peer.audio) peer.audio.srcObject = null;
+    this.detector.unwatch(peerId);
     this.peers.delete(peerId);
   }
 }

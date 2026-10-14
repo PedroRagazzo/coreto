@@ -1,5 +1,6 @@
 // Criação, edição e exclusão de espaços e de canais.
 
+import type { Id } from '../../../shared/src/models.js';
 import { normalizeChannelName, normalizeSpaceName, normalizeTopic } from '../../../shared/src/names.js';
 import { hasPermission, Permission } from '../../../shared/src/permissions.js';
 import type { Store } from '../store.js';
@@ -145,12 +146,18 @@ export function registerManagement(io: IO, socket: AppSocket, store: Store): voi
     if (!isFunction(ack)) return;
     const channel = manageableChannel(req?.channelId);
     if (!channel) return ack({ ok: false, error: 'Você não tem permissão para excluir este canal.' });
+    let mentioned: Id[];
     try {
+      mentioned = await store.mentionedInChannel(channel.id);
       await store.deleteChannel(channel.id);
     } catch (err) {
       return ack(storageError('channel:delete', err));
     }
 
+    // Quem tinha menções ali pode estar em outro espaço e não receber `channel:deleted`.
+    for (const userId of mentioned) {
+      io.to(rooms.user(userId)).emit('mentions:update', { channelId: channel.id, spaceId: channel.spaceId, count: 0 });
+    }
     for (const session of store.voiceIn(channel.id)) {
       endVoiceSession(io, store, session, 'O canal de voz em que você estava foi excluído.');
     }

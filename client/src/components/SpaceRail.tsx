@@ -8,6 +8,10 @@ export function SpaceRail() {
   const { state, actions } = useRealtime();
   const [creating, setCreating] = useState(false);
   const unreadDirects = Object.values(state.unread).reduce((sum, n) => sum + n, 0);
+  const mentionsBySpace: Record<string, number> = {};
+  for (const { spaceId, count } of Object.values(state.mentions)) {
+    mentionsBySpace[spaceId] = (mentionsBySpace[spaceId] ?? 0) + count;
+  }
 
   return (
     <nav aria-label="Espaços" className="flex w-[72px] shrink-0 flex-col items-center gap-2 overflow-y-auto bg-rail py-3">
@@ -22,20 +26,24 @@ export function SpaceRail() {
 
       <div aria-hidden className="my-1 h-0.5 w-8 rounded-full bg-line" />
 
-      {state.spaces.map((space) => (
-        <RailButton
-          key={space.id}
-          label={space.name}
-          active={state.activeSpaceId === space.id}
-          onClick={() => actions.selectSpace(space.id)}
-        >
-          {space.iconUrl ? (
-            <img src={space.iconUrl} alt="" className="h-full w-full rounded-full object-cover" />
-          ) : (
-            <span className="text-sm font-semibold">{initials(space.name)}</span>
-          )}
-        </RailButton>
-      ))}
+      {state.spaces.map((space) => {
+        const mentions = mentionsBySpace[space.id] ?? 0;
+        return (
+          <RailButton
+            key={space.id}
+            label={mentions ? `${space.name} (${mentions} ${mentions === 1 ? 'menção' : 'menções'})` : space.name}
+            active={state.activeSpaceId === space.id}
+            onClick={() => actions.selectSpace(space.id)}
+            badge={mentions}
+          >
+            {space.iconUrl ? (
+              <img src={space.iconUrl} alt="" className="h-full w-full rounded-full object-cover" />
+            ) : (
+              <span className="text-sm font-semibold">{initials(space.name)}</span>
+            )}
+          </RailButton>
+        );
+      })}
 
       <RailButton label="Criar um espaço" active={false} onClick={() => setCreating(true)}>
         <Plus size={22} className="text-accent group-hover:text-white" />

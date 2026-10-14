@@ -68,7 +68,8 @@ todos os testes e o build de produção do client.
 ```
 coreto/
 ├── shared/src/              Contrato único entre servidor e cliente
-│   ├── models.ts            Espaço, Categoria, Canal, Cargo, Membro, Mensagem, Voz
+│   ├── models.ts            Espaço, Categoria, Canal, Cargo, Membro, Mensagem, Anexo, Voz
+│   ├── markup.ts            Formatação das mensagens e menções (servidor e cliente usam o mesmo parser)
 │   ├── permissions.ts       Bit flags (ler, escrever, conectar, falar...)
 │   └── protocol.ts          Eventos socket.io tipados + formatos de sinalização WebRTC
 ├── server/
@@ -77,14 +78,17 @@ coreto/
 │   ├── test/                Testes unitários e de integração (Vitest)
 │   └── src/
 │       ├── index.ts         Processo: banco, dados de demonstração e encerramento
-│       ├── app.ts           HTTP + socket.io + autenticação provisória (startServer)
+│       ├── app.ts           HTTP (login, anexos) + socket.io + autenticação (startServer)
 │       ├── store.ts         Estrutura em memória + leituras e escritas no banco
+│       ├── uploads.ts       POST/GET /uploads, pasta dos arquivos e limpeza
+│       ├── images.ts        Reconhece PNG/JPEG/GIF/WebP pelo conteúdo e lê as dimensões
+│       ├── turn.ts          Servidores ICE e credenciais TURN temporárias
 │       ├── db/              Cliente Prisma e conversão linha ↔ modelo de domínio
 │       ├── generated/       Cliente gerado pelo `prisma generate` (fora do Git)
 │       ├── permissions.ts   Cálculo de permissões efetivas por canal
 │       ├── seed.ts          Espaços e canais de demonstração (só com o banco vazio)
 │       └── realtime/
-│           ├── chat.ts      Entrar no espaço, histórico, mensagens, digitação
+│           ├── chat.ts      Entrar no espaço, histórico, mensagens, menções, digitação
 │           ├── presence.ts  Online / ausente / não perturbe / indisponível
 │           ├── voice.ts     Lista das salas + repasse de sinalização WebRTC
 │           ├── membership.ts
@@ -93,7 +97,8 @@ coreto/
 └── client/src/
     ├── state/realtime.tsx   Socket + reducer + ações (fonte única de estado)
     ├── state/selectors.ts
-    ├── lib/voice.ts         Malha WebRTC (uma RTCPeerConnection por participante)
+    ├── lib/voice.ts         Malha WebRTC + medidor de quem está falando
+    ├── lib/uploads.ts       Envio de imagens com progresso
     ├── lib/socket.ts, identity.ts, format.ts
     └── components/
         ├── layout/AppShell.tsx   Layout de três colunas
@@ -101,6 +106,8 @@ coreto/
         ├── ChannelSidebar.tsx    Coluna 2: categorias recolhíveis, # texto e 🔊 voz
         ├── ChatPanel.tsx         Coluna 3: cabeçalho, mensagens, campo de texto
         ├── MemberList.tsx        Membros online / indisponíveis à direita
+        ├── MessageContent.tsx    Texto formatado, menções e imagens de uma mensagem
+        ├── MentionAutocomplete.tsx  Sugestões ao digitar "@"
         ├── VoiceStatusBar.tsx, UserPanel.tsx, MessageList.tsx, MessageInput.tsx ...
 ```
 
@@ -113,7 +120,7 @@ Cada aba mantém uma conexão socket.io. Os eventos vão para salas do socket.io
 | `space:{id}` | presença, novos membros, lista das salas de voz |
 | `channel:{id}` | mensagens e "digitando" (o socket só entra nos canais que pode ler) |
 | `voice:{id}` | saída de participantes da chamada |
-| `user:{id}` | todas as abas de um usuário: mensagens diretas, "digitando" e presença de quem conversa com ele |
+| `user:{id}` | todas as abas de um usuário: mensagens diretas, menções, "digitando" e presença de quem conversa com ele |
 
 Todo evento do cliente é validado no servidor: tipo do payload, existência do canal e permissão.
 
@@ -159,6 +166,25 @@ Depois disso o navegador guarda um token de sessão que **não expira**, e a pes
   espaço, por exemplo) também apaga as dos outros; em conversas diretas, cada um só apaga as suas
   (`message:delete` → `message:deleted`).
 
+## Formatação, menções e imagens
+
+- **Formatação:** `**negrito**`, `*itálico*` ou `_itálico_`, `~~riscado~~`, `` `código` `` e blocos com três crases
+  (` ```ts ` na primeira linha indica a linguagem). Links `http(s)://` viram clicáveis; `\*` escreve um asterisco.
+  O parser fica em `shared/src/markup.ts` e gera uma árvore, nunca HTML, então não há como injetar marcação.
+- **Menções:** digite `@` e parte do nome; escolha com as setas e Enter/Tab (ou o mouse). A mensagem guarda `<@id>`,
+  então renomear alguém não quebra menções antigas. Quem é mencionado num canal recebe `mentions:update` em todas as
+  abas, mesmo estando em outro espaço: o canal e o espaço ganham um contador vermelho, e a mensagem aparece destacada.
+  As menções não vistas ficam no banco (tabela `Mention`) e somem quando a pessoa abre o canal (`mentions:ack`). Só
+  conta quem enxerga o canal; o autor, robôs e menções dentro de código ficam de fora. Editar a mensagem tira a menção
+  de quem saiu do texto e avisa só quem entrou. Em conversas diretas a menção só destaca o texto.
+- **Imagens:** até 4 por mensagem, 8 MB cada, PNG, JPEG, GIF ou WebP. Anexe pelo botão, colando (Ctrl+V) ou
+  arrastando para a conversa. Cada imagem sobe na hora para `POST /uploads` (com barra de progresso) e o id vai
+  junto no `message:send`. O servidor reconhece o tipo pelo conteúdo (não pela extensão), guarda as dimensões para o
+  cliente reservar o espaço antes de a imagem carregar, e serve o arquivo em `GET /uploads/{id}` com `nosniff`.
+  Clique numa imagem para ampliar. Apagar a mensagem apaga o arquivo; imagens enviadas e nunca usadas, e arquivos de
+  canais ou espaços excluídos, são limpos ao iniciar e a cada hora. Os arquivos ficam em `server/uploads`
+  (`UPLOAD_DIR`). O link de uma imagem é aleatório e não exige login, como num CDN: quem tem o link vê a imagem.
+
 ## Mensagens diretas
 
 Clique em alguém na lista de membros para abrir uma conversa privada. Só é possível conversar com quem participa de
@@ -178,7 +204,7 @@ O banco é PostgreSQL, acessado pelo Prisma 7 (`@prisma/adapter-pg`). Comandos �
 | `npm run db:studio -w server` | Abre o Prisma Studio para ver e editar os dados |
 
 O que vai para o banco: usuários, sessões (só o hash SHA-256 do token), espaços, cargos, categorias, canais, sobrescritas
-de permissão, membros, conversas diretas e mensagens. Presença e estado das salas de voz são efêmeros e ficam só em memória.
+de permissão, membros, conversas diretas, mensagens, menções não vistas e os dados dos anexos (os arquivos ficam em disco). Presença e estado das salas de voz são efêmeros e ficam só em memória.
 
 Ao iniciar, o servidor carrega a estrutura (tudo menos as mensagens) para a memória, porque as permissões são checadas a
 cada evento. Toda escrita vai primeiro ao banco e depois atualiza a memória. As mensagens nunca ficam em memória: são
@@ -198,10 +224,36 @@ Exemplos na seed: `#avisos` (todos leem, só a Moderação escreve) e `#moderaç
 Um clique entra na sala; outro em "Sair da chamada" sai. O servidor guarda quem está em cada sala e só repassa a sinalização
 (SDP e candidatos ICE) entre participantes da mesma sala. O áudio vai direto entre os navegadores (malha P2P).
 
+Microfone e som desativados aparecem para todos ao lado do nome, na lista da sala. Quem está na chamada vê um anel
+verde em quem está falando: cada navegador mede o volume do áudio que recebe (e do próprio microfone), sem passar
+nada pelo servidor.
+
 A malha funciona bem até umas 5 a 8 pessoas por sala, porque cada participante envia o áudio para todos os outros.
 Para salas maiores, e para impor `SPEAK` no servidor, troque por um SFU (mediasoup, LiveKit ou Janus):
 o protocolo de `voice:join` / `voice:signal` já isola essa troca em `server/src/realtime/voice.ts` e `client/src/lib/voice.ts`.
-Fora de redes locais, configure um servidor TURN em `ICE_SERVERS`.
+
+### TURN
+
+Na mesma rede, ou com NATs simples, o STUN basta. Atrás de NAT simétrico, 4G ou firewall corporativo, o áudio só passa
+por um servidor TURN. Com o [coturn](https://github.com/coturn/coturn) em modo `use-auth-secret`, o Coreto gera para
+cada pessoa uma credencial temporária (o padrão "TURN REST API"), e o segredo nunca chega ao navegador:
+
+```
+# turnserver.conf
+use-auth-secret
+static-auth-secret=um-segredo-longo
+realm=turn.exemplo.com
+```
+
+```
+# server/.env
+TURN_URLS="turn:turn.exemplo.com:3478,turns:turn.exemplo.com:5349"
+TURN_SECRET="um-segredo-longo"
+```
+
+Para conferir se o TURN funciona, defina também `ICE_TRANSPORT_POLICY="relay"`: todo o áudio passa a ir pelo TURN, e
+se a chamada ficar muda o problema está nele (porta, segredo ou realm). Servidores fixos continuam aceitos em
+`ICE_SERVERS` (JSON). Veja `server/.env.example`.
 
 ## Limitações do protótipo
 
@@ -210,8 +262,12 @@ Fora de redes locais, configure um servidor TURN em `ICE_SERVERS`.
   cargos pela interface.
 - Todo espaço é público: quem conecta vira membro de todos, inclusive dos criados por outras pessoas.
 - Mensagens diretas só entre duas pessoas (sem grupos) e sem lista para buscar usuários: comece pela lista de membros.
-- Mensagens não lidas só são contadas nas conversas diretas, e a contagem zera ao recarregar a página.
-- Sem anexos, vídeo, compartilhamento de tela ou indicador de quem está falando.
+- Mensagens não lidas só são contadas nas conversas diretas, e a contagem zera ao recarregar a página. Menções, ao
+  contrário, ficam guardadas até serem vistas.
+- Anexos só de imagem, sem limite de envios por pessoa, guardados no disco do servidor (para várias instâncias, troque
+  por um armazenamento de objetos como S3).
+- O anel de quem está falando só aparece para quem está na mesma chamada.
+- Sem vídeo nem compartilhamento de tela.
 
 ## Licença
 

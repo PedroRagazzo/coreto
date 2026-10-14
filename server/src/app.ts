@@ -12,6 +12,8 @@ import { registerPresence } from './realtime/presence.js';
 import type { IO } from './realtime/types.js';
 import { registerVoice } from './realtime/voice.js';
 import type { Store } from './store.js';
+import { iceConfigFromEnv, type IceConfig } from './turn.js';
+import { handleUpload, readBody, serveUpload, UploadDir } from './uploads.js';
 
 const MAX_BODY_BYTES = 2_048;
 
@@ -19,6 +21,10 @@ export interface ServerOptions {
   /** 0 escolhe uma porta livre (usado nos testes). */
   port: number;
   clientOrigins: string[];
+  /** Pasta dos anexos; é criada se não existir. */
+  uploadDir: string;
+  /** Padrão: lido das variáveis de ambiente (ver turn.ts). */
+  ice?: IceConfig;
 }
 
 export interface RunningServer {
@@ -28,13 +34,36 @@ export interface RunningServer {
   close(): Promise<void>;
 }
 
-/** Sobe o HTTP (saúde e login) + socket.io sobre um Store já carregado. */
-export async function startServer(store: Store, { port, clientOrigins }: ServerOptions): Promise<RunningServer> {
+/** Sobe o HTTP (saúde, login e anexos) + socket.io sobre um Store já carregado. */
+export async function startServer(
+  store: Store,
+  { port, clientOrigins, uploadDir, ice = iceConfigFromEnv() }: ServerOptions,
+): Promise<RunningServer> {
   const throttle = new LoginThrottle();
+  const uploads = new UploadDir(uploadDir);
+  await uploads.ensure();
 
   const httpServer = createServer((req, res) => {
-    if (req.url === '/health') return sendJson(res, 200, { ok: true });
-    if (req.url === '/login') return void handleLogin(req, res, store, throttle, clientOrigins);
+    const path = (req.url ?? '').split('?')[0];
+    if (path === '/health') return sendJson(res, 200, { ok: true });
+    if (path === '/login') {
+      if (preflight(req, res, clientOrigins, 'POST', 'content-type')) return;
+      return void handleLogin(req, res, store, throttle);
+    }
+    if (path === '/uploads') {
+      if (preflight(req, res, clientOrigins, 'POST', 'authorization, content-type, x-file-name')) return;
+      return void handleUpload(req, res, store, uploads).catch((err: unknown) => {
+        console.error('[upload]', err);
+        if (!res.headersSent) sendJson(res, 500, { ok: false, error: 'Não foi possível guardar a imagem.' });
+      });
+    }
+    const file = /^\/uploads\/([^/]+)$/.exec(path);
+    if (file && req.method === 'GET') {
+      return void serveUpload(file[1], res, store, uploads).catch((err: unknown) => {
+        console.error('[upload]', err);
+        if (!res.headersSent) res.writeHead(500).end();
+      });
+    }
     res.writeHead(404).end();
   });
 
@@ -61,10 +90,10 @@ export async function startServer(store: Store, { port, clientOrigins }: ServerO
 
   io.on('connection', (socket) => {
     registerPresence(io, socket, store);
-    registerChat(io, socket, store);
+    registerChat(io, socket, store, uploads);
     registerDirect(socket, store);
     registerManagement(io, socket, store);
-    registerVoice(io, socket, store);
+    registerVoice(io, socket, store, ice);
   });
 
   await new Promise<void>((resolve) => httpServer.listen(port, resolve));
@@ -76,23 +105,22 @@ export async function startServer(store: Store, { port, clientOrigins }: ServerO
   };
 }
 
-async function handleLogin(
-  req: IncomingMessage,
-  res: ServerResponse,
-  store: Store,
-  throttle: LoginThrottle,
-  clientOrigins: string[],
-): Promise<void> {
-  // O front-end roda em outra origem (porta 5173): libera só as origens configuradas.
+/**
+ * O front-end roda em outra origem (porta 5173): libera só as origens
+ * configuradas. Devolve `true` se já respondeu (pedido OPTIONS de pré-voo).
+ */
+function preflight(req: IncomingMessage, res: ServerResponse, clientOrigins: string[], methods: string, headers: string): boolean {
   const origin = req.headers.origin;
   if (origin && clientOrigins.includes(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Vary', 'Origin');
   }
-  if (req.method === 'OPTIONS') {
-    res.writeHead(204, { 'Access-Control-Allow-Methods': 'POST', 'Access-Control-Allow-Headers': 'content-type' }).end();
-    return;
-  }
+  if (req.method !== 'OPTIONS') return false;
+  res.writeHead(204, { 'Access-Control-Allow-Methods': methods, 'Access-Control-Allow-Headers': headers }).end();
+  return true;
+}
+
+async function handleLogin(req: IncomingMessage, res: ServerResponse, store: Store, throttle: LoginThrottle): Promise<void> {
   if (req.method !== 'POST') return sendJson(res, 405, { ok: false, code: 'invalid_input', error: 'Use POST.' });
 
   let body: Partial<LoginRequest>;
@@ -143,27 +171,8 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(body));
 }
 
-function readJson(req: IncomingMessage): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    let size = 0;
-    req.on('data', (chunk: Buffer) => {
-      size += chunk.length;
-      if (size > MAX_BODY_BYTES) {
-        reject(new Error('Corpo grande demais.'));
-        req.destroy();
-        return;
-      }
-      chunks.push(chunk);
-    });
-    req.on('end', () => {
-      try {
-        resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')));
-      } catch (err) {
-        reject(err);
-      }
-    });
-    req.on('error', reject);
-  });
+async function readJson(req: IncomingMessage): Promise<unknown> {
+  const body = await readBody(req, MAX_BODY_BYTES);
+  if (!body) throw new Error('Corpo grande demais.');
+  return JSON.parse(body.toString('utf8'));
 }
-

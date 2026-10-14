@@ -6,6 +6,7 @@ import type {
   DirectConversation,
   Id,
   Member,
+  MentionCount,
   Message,
   PresenceStatus,
   Space,
@@ -26,6 +27,7 @@ import {
 import { createContext, useContext, useEffect, useMemo, useReducer, useRef, type ReactNode } from 'react';
 import type { Identity } from '../lib/identity';
 import { createSocket, type AppSocket } from '../lib/socket';
+import { uploadImage, type UploadHandle } from '../lib/uploads';
 import { describeMediaError, VoiceManager } from '../lib/voice';
 
 const TYPING_TTL_MS = 6_000;
@@ -66,6 +68,10 @@ export interface RealtimeState {
   loadingOlder: Record<Id, true>;
   voice: Record<Id, VoiceParticipant[]>;
   myVoice: MyVoiceState;
+  /** canal → menções suas ainda não vistas (de todos os espaços) */
+  mentions: Record<Id, MentionCount>;
+  /** Quem está falando agora na sua chamada (medido localmente). */
+  speaking: Record<Id, true>;
 }
 
 const IDLE_VOICE: MyVoiceState = {
@@ -97,11 +103,20 @@ const initialState: RealtimeState = {
   loadingOlder: {},
   voice: {},
   myVoice: IDLE_VOICE,
+  mentions: {},
+  speaking: {},
 };
 
 type Action =
   | { type: 'connection'; connection: RealtimeState['connection']; error?: string }
-  | { type: 'session'; user: User; spaces: Space[]; directs: DirectConversation[]; directUsers: User[] }
+  | {
+      type: 'session';
+      user: User;
+      spaces: Space[];
+      directs: DirectConversation[];
+      directUsers: User[];
+      mentions: MentionCount[];
+    }
   | { type: 'space:created'; space: Space }
   | { type: 'space:updated'; space: Space }
   | { type: 'space:deleted'; spaceId: Id }
@@ -122,7 +137,9 @@ type Action =
   | { type: 'presence'; userId: Id; status: PresenceStatus }
   | { type: 'member:joined'; member: Member; user: User }
   | { type: 'voice:update'; channelId: Id; participants: VoiceParticipant[] }
-  | { type: 'voice:self'; patch: Partial<MyVoiceState> };
+  | { type: 'voice:self'; patch: Partial<MyVoiceState> }
+  | { type: 'mentions:update'; mention: MentionCount }
+  | { type: 'speaking'; userIds: Id[] };
 
 function withoutKey<T>(record: Record<Id, T> | undefined, key: Id): Record<Id, T> {
   const { [key]: _removed, ...rest } = record ?? {};
@@ -140,6 +157,8 @@ function reducer(state: RealtimeState, action: Action): RealtimeState {
       // Mantém conversas abertas localmente que ainda não têm mensagens (o servidor só lista as com mensagens).
       const directs = { ...state.directs };
       for (const conversation of action.directs) directs[conversation.id] = conversation;
+      const mentions: Record<Id, MentionCount> = {};
+      for (const mention of action.mentions) mentions[mention.channelId] = mention;
       return {
         ...state,
         connection: 'ready',
@@ -148,6 +167,7 @@ function reducer(state: RealtimeState, action: Action): RealtimeState {
         spaces: action.spaces,
         users,
         directs,
+        mentions,
       };
     }
 
@@ -170,6 +190,7 @@ function reducer(state: RealtimeState, action: Action): RealtimeState {
         activeChannelBySpace: withoutKey(state.activeChannelBySpace, action.spaceId),
         snapshot: wasOpen ? null : state.snapshot,
         voice: wasOpen ? {} : state.voice,
+        mentions: Object.fromEntries(Object.entries(state.mentions).filter(([, m]) => m.spaceId !== action.spaceId)),
       };
     }
 
@@ -218,6 +239,7 @@ function reducer(state: RealtimeState, action: Action): RealtimeState {
         messages: withoutKey(state.messages, channelId),
         typing: withoutKey(state.typing, channelId),
         voice: withoutKey(state.voice, channelId),
+        mentions: withoutKey(state.mentions, channelId),
       };
     }
 
@@ -348,6 +370,20 @@ function reducer(state: RealtimeState, action: Action): RealtimeState {
 
     case 'voice:self':
       return { ...state, myVoice: { ...state.myVoice, ...action.patch } };
+
+    case 'mentions:update': {
+      const { mention } = action;
+      return {
+        ...state,
+        mentions:
+          mention.count > 0
+            ? { ...state.mentions, [mention.channelId]: mention }
+            : withoutKey(state.mentions, mention.channelId),
+      };
+    }
+
+    case 'speaking':
+      return { ...state, speaking: Object.fromEntries(action.userIds.map((id) => [id, true as const])) };
   }
 }
 
@@ -369,8 +405,10 @@ export interface RealtimeActions {
   /** Abre (ou cria) a conversa direta com alguém. Resolve com erro ou `null`. */
   openDirect(userId: Id): Promise<string | null>;
   selectDirect(conversationId: Id): void;
-  /** Envia para um canal de texto ou conversa direta. Resolve com erro ou `null`. */
-  sendMessage(targetId: Id, content: string): Promise<string | null>;
+  /** Envia para um canal de texto ou conversa direta, com anexos já enviados. Resolve com erro ou `null`. */
+  sendMessage(targetId: Id, content: string, attachmentIds?: Id[]): Promise<string | null>;
+  /** Envia uma imagem para anexar depois em `sendMessage`. */
+  uploadImage(file: File, onProgress: (fraction: number) => void): UploadHandle;
   /** Busca a página anterior à mensagem mais antiga carregada. */
   loadOlder(targetId: Id): void;
   /** Edita uma mensagem sua. Resolve com erro ou `null`. */
@@ -411,6 +449,8 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
   const voiceRef = useRef<VoiceManager | null>(null);
   const lastTypingRef = useRef<{ channelId: Id | null; at: number }>({ channelId: null, at: 0 });
   const firstSessionRef = useRef(true);
+  const identityRef = useRef(identity);
+  identityRef.current = identity;
 
   const actions = useMemo<RealtimeActions>(() => {
     const emitVoiceState = (muted: boolean, deafened: boolean) =>
@@ -572,16 +612,20 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
         return res.ok ? null : res.error;
       },
 
-      async sendMessage(channelId, content) {
+      async sendMessage(channelId, content, attachmentIds = []) {
         const socket = socketRef.current;
         if (!socket) return 'Sem conexão com o servidor.';
         lastTypingRef.current = { channelId: null, at: 0 };
         try {
-          const res = await socket.timeout(10_000).emitWithAck('message:send', { channelId, content });
+          const res = await socket.timeout(10_000).emitWithAck('message:send', { channelId, content, attachmentIds });
           return res.ok ? null : res.error;
         } catch {
           return 'O servidor não respondeu. Tente de novo.';
         }
+      },
+
+      uploadImage(file, onProgress) {
+        return uploadImage(identityRef.current.token, file, onProgress);
       },
 
       notifyTyping(channelId) {
@@ -603,8 +647,10 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
           const canSpeak = hasPermission(permissions, Permission.SPEAK);
 
           dispatch({ type: 'voice:self', patch: { connecting: true, error: null } });
+          const me = stateRef.current.me;
+          if (!me) return;
           try {
-            await voice.join(channelId, !canSpeak);
+            await voice.join(channelId, !canSpeak, me.id);
             dispatch({
               type: 'voice:self',
               patch: {
@@ -667,13 +713,13 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
 
   useEffect(() => {
     const socket = createSocket(identity.token);
-    const voice = new VoiceManager(socket);
+    const voice = new VoiceManager(socket, (speaking) => dispatch({ type: 'speaking', userIds: [...speaking] }));
     socketRef.current = socket;
     voiceRef.current = voice;
     firstSessionRef.current = true;
 
-    socket.on('session:ready', ({ user, spaces, directs, directUsers }) => {
-      dispatch({ type: 'session', user, spaces, directs, directUsers });
+    socket.on('session:ready', ({ user, spaces, directs, directUsers, mentions }) => {
+      dispatch({ type: 'session', user, spaces, directs, directUsers, mentions });
       // Na primeira conexão abre o primeiro espaço; nas reconexões, reabre o atual.
       const target = firstSessionRef.current ? (spaces[0]?.id ?? null) : stateRef.current.activeSpaceId;
       firstSessionRef.current = false;
@@ -707,6 +753,7 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
     socket.on('typing', ({ channelId, userId }) =>
       dispatch({ type: 'typing', channelId, userId, until: Date.now() + TYPING_TTL_MS }),
     );
+    socket.on('mentions:update', (mention) => dispatch({ type: 'mentions:update', mention }));
     socket.on('presence:update', ({ userId, status }) => dispatch({ type: 'presence', userId, status }));
     socket.on('member:joined', ({ member, user }) => dispatch({ type: 'member:joined', member, user }));
     socket.on('voice:update', ({ channelId, participants }) =>
@@ -741,6 +788,15 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
       voiceRef.current = null;
     };
   }, [identity, actions]);
+
+  // Canal aberto com menções pendentes: elas acabaram de ser vistas.
+  const openChannelId = state.snapshot ? state.activeChannelBySpace[state.snapshot.space.id] : undefined;
+  const openChannelMentions = openChannelId && state.activeSpaceId ? (state.mentions[openChannelId]?.count ?? 0) : 0;
+  useEffect(() => {
+    if (!openChannelId || openChannelMentions === 0) return;
+    socketRef.current?.emit('mentions:ack', { channelId: openChannelId });
+    dispatch({ type: 'mentions:update', mention: { ...stateRef.current.mentions[openChannelId], count: 0 } });
+  }, [openChannelId, openChannelMentions]);
 
   const value = useMemo(() => ({ state, actions }), [state, actions]);
   return <RealtimeContext.Provider value={value}>{children}</RealtimeContext.Provider>;
