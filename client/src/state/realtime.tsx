@@ -13,7 +13,12 @@ import type {
   VoiceParticipant,
 } from '@shared/models';
 import { hasPermission, Permission } from '@shared/permissions';
-import type { DirectConversationPayload, SelectableStatus } from '@shared/protocol';
+import type {
+  ChannelCreatedPayload,
+  CreateChannelRequest,
+  DirectConversationPayload,
+  SelectableStatus,
+} from '@shared/protocol';
 import { createContext, useContext, useEffect, useMemo, useReducer, useRef, type ReactNode } from 'react';
 import type { Identity } from '../lib/identity';
 import { createSocket, type AppSocket } from '../lib/socket';
@@ -87,6 +92,8 @@ const initialState: RealtimeState = {
 type Action =
   | { type: 'connection'; connection: RealtimeState['connection']; error?: string }
   | { type: 'session'; user: User; spaces: Space[]; directs: DirectConversation[]; directUsers: User[] }
+  | { type: 'space:created'; space: Space }
+  | { type: 'channel:created'; payload: ChannelCreatedPayload }
   | { type: 'dm:upsert'; payload: DirectConversationPayload }
   | { type: 'dm:select'; conversationId: Id }
   | { type: 'space:select'; spaceId: Id | null }
@@ -124,6 +131,25 @@ function reducer(state: RealtimeState, action: Action): RealtimeState {
         spaces: action.spaces,
         users,
         directs,
+      };
+    }
+
+    case 'space:created':
+      if (state.spaces.some((s) => s.id === action.space.id)) return state;
+      return { ...state, spaces: [...state.spaces, action.space] };
+
+    case 'channel:created': {
+      const { channel, permissions } = action.payload;
+      const snapshot = state.snapshot;
+      if (!snapshot || snapshot.space.id !== channel.spaceId) return state;
+      if (snapshot.channels.some((c) => c.id === channel.id)) return state;
+      return {
+        ...state,
+        snapshot: {
+          ...snapshot,
+          channels: [...snapshot.channels, channel].sort((a, b) => a.position - b.position),
+          permissions: { ...snapshot.permissions, [channel.id]: permissions },
+        },
       };
     }
 
@@ -225,6 +251,10 @@ function reducer(state: RealtimeState, action: Action): RealtimeState {
 export interface RealtimeActions {
   selectSpace(spaceId: Id | null): void;
   selectChannel(channelId: Id): void;
+  /** Cria um espaço e abre ele. Resolve com erro ou `null`. */
+  createSpace(name: string): Promise<string | null>;
+  /** Cria um canal no espaço aberto e abre ele, se for de texto. Resolve com erro ou `null`. */
+  createChannel(req: Omit<CreateChannelRequest, 'spaceId'>): Promise<string | null>;
   /** Abre (ou cria) a conversa direta com alguém. Resolve com erro ou `null`. */
   openDirect(userId: Id): Promise<string | null>;
   selectDirect(conversationId: Id): void;
@@ -306,6 +336,32 @@ export function RealtimeProvider({ identity, children }: { identity: Identity; c
       selectSpace: (spaceId) => void selectSpace(spaceId),
       selectChannel,
       selectDirect,
+
+      async createSpace(name) {
+        const socket = socketRef.current;
+        if (!socket) return 'Sem conexão com o servidor.';
+        const res = await socket.emitWithAck('space:create', { name });
+        if (!res.ok) return res.error;
+        dispatch({ type: 'space:created', space: res.data });
+        void selectSpace(res.data.id);
+        return null;
+      },
+
+      async createChannel(req) {
+        const socket = socketRef.current;
+        const snapshot = stateRef.current.snapshot;
+        if (!socket || !snapshot) return 'Sem conexão com o servidor.';
+        const res = await socket.emitWithAck('channel:create', { ...req, spaceId: snapshot.space.id });
+        if (!res.ok) return res.error;
+        dispatch({ type: 'channel:created', payload: res.data });
+        if (res.data.channel.kind === 'text') {
+          openChannel(
+            { ...snapshot, channels: [...snapshot.channels, res.data.channel] },
+            res.data.channel.id,
+          );
+        }
+        return null;
+      },
 
       async openDirect(userId) {
         const socket = socketRef.current;
@@ -424,6 +480,8 @@ export function RealtimeProvider({ identity, children }: { identity: Identity; c
       firstSessionRef.current = false;
       actions.selectSpace(target);
     });
+    socket.on('space:created', (space) => dispatch({ type: 'space:created', space }));
+    socket.on('channel:created', (payload) => dispatch({ type: 'channel:created', payload }));
     socket.on('dm:upsert', (payload) => dispatch({ type: 'dm:upsert', payload }));
     socket.on('message:new', (message) => dispatch({ type: 'message:new', message }));
     socket.on('typing', ({ channelId, userId }) =>

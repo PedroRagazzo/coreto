@@ -1,14 +1,17 @@
 import type { Channel, Id } from '@shared/models';
-import { Permission } from '@shared/permissions';
-import { ChevronDown, ChevronRight, Hash, HeadphoneOff, Lock, MicOff, Volume2 } from 'lucide-react';
+import { hasPermission, Permission } from '@shared/permissions';
+import { ChevronDown, ChevronRight, Hash, HeadphoneOff, Lock, MicOff, Plus, Volume2 } from 'lucide-react';
 import { useState } from 'react';
 import { useRealtime } from '../state/realtime';
 import { can, displayNameOf, groupChannels } from '../state/selectors';
 import { Avatar } from './Avatar';
+import { CreateChannelDialog } from './CreateChannelDialog';
 
 export function ChannelSidebar() {
   const { state } = useRealtime();
   const [collapsed, setCollapsed] = useState<Record<Id, boolean>>({});
+  /** Categoria em que o diálogo de criar canal foi aberto; `null` = fechado. */
+  const [creatingIn, setCreatingIn] = useState<{ categoryId: Id | null } | null>(null);
   const { snapshot } = state;
 
   if (!snapshot) {
@@ -22,15 +25,27 @@ export function ChannelSidebar() {
   }
 
   const activeChannelId = state.activeChannelBySpace[snapshot.space.id];
+  const canManage = hasPermission(snapshot.spacePermissions, Permission.MANAGE_CHANNELS);
 
   return (
     <>
-      <header className="flex h-12 shrink-0 items-center border-b border-line px-4 shadow-sm">
-        <h1 className="truncate font-semibold">{snapshot.space.name}</h1>
+      <header className="flex h-12 shrink-0 items-center gap-2 border-b border-line px-4 shadow-sm">
+        <h1 className="flex-1 truncate font-semibold">{snapshot.space.name}</h1>
+        {canManage && (
+          <button
+            type="button"
+            title="Criar canal"
+            aria-label="Criar canal"
+            onClick={() => setCreatingIn({ categoryId: null })}
+            className="rounded p-1 text-muted hover:bg-hover hover:text-fg"
+          >
+            <Plus size={18} />
+          </button>
+        )}
       </header>
 
       <nav aria-label="Canais" className="flex-1 overflow-y-auto px-2 py-3">
-        {groupChannels(snapshot).map(({ category, channels }) => {
+        {groupChannels(snapshot, canManage).map(({ category, channels }) => {
           const isCollapsed = category ? Boolean(collapsed[category.id]) : false;
           // Recolhida, a categoria ainda mostra o canal aberto e a sala de voz em que você está.
           const visible = isCollapsed
@@ -40,15 +55,28 @@ export function ChannelSidebar() {
           return (
             <section key={category?.id ?? 'sem-categoria'} className="mb-4">
               {category && (
-                <button
-                  type="button"
-                  aria-expanded={!isCollapsed}
-                  onClick={() => setCollapsed((prev) => ({ ...prev, [category.id]: !isCollapsed }))}
-                  className="flex w-full items-center gap-0.5 px-1 text-xs font-semibold tracking-wide text-faint uppercase hover:text-fg"
-                >
-                  {isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
-                  <span className="truncate">{category.name}</span>
-                </button>
+                <div className="group flex items-center pr-1">
+                  <button
+                    type="button"
+                    aria-expanded={!isCollapsed}
+                    onClick={() => setCollapsed((prev) => ({ ...prev, [category.id]: !isCollapsed }))}
+                    className="flex min-w-0 flex-1 items-center gap-0.5 px-1 text-xs font-semibold tracking-wide text-faint uppercase hover:text-fg"
+                  >
+                    {isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+                    <span className="truncate">{category.name}</span>
+                  </button>
+                  {canManage && (
+                    <button
+                      type="button"
+                      title={`Criar canal em ${category.name}`}
+                      aria-label={`Criar canal em ${category.name}`}
+                      onClick={() => setCreatingIn({ categoryId: category.id })}
+                      className="rounded text-faint opacity-0 group-hover:opacity-100 hover:text-fg focus-visible:opacity-100"
+                    >
+                      <Plus size={16} />
+                    </button>
+                  )}
+                </div>
               )}
               <ul className="mt-1 space-y-0.5">
                 {visible.map((channel) =>
@@ -63,6 +91,10 @@ export function ChannelSidebar() {
           );
         })}
       </nav>
+
+      {creatingIn && (
+        <CreateChannelDialog initialCategoryId={creatingIn.categoryId} onClose={() => setCreatingIn(null)} />
+      )}
     </>
   );
 }

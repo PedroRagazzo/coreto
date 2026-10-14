@@ -26,13 +26,16 @@ export interface ChannelGroup {
   channels: Channel[];
 }
 
-/** Canais sem categoria primeiro, depois cada categoria na ordem definida. */
-export function groupChannels(snapshot: SpaceSnapshot): ChannelGroup[] {
+/**
+ * Canais sem categoria primeiro, depois cada categoria na ordem definida.
+ * Categorias vazias só aparecem com `includeEmpty` (para quem pode criar canais nelas).
+ */
+export function groupChannels(snapshot: SpaceSnapshot, includeEmpty = false): ChannelGroup[] {
   const uncategorized = snapshot.channels.filter((c) => c.categoryId === null);
   const groups: ChannelGroup[] = uncategorized.length ? [{ category: null, channels: uncategorized }] : [];
   for (const category of snapshot.categories) {
     const channels = snapshot.channels.filter((c) => c.categoryId === category.id);
-    if (channels.length) groups.push({ category, channels });
+    if (channels.length || includeEmpty) groups.push({ category, channels });
   }
   return groups;
 }

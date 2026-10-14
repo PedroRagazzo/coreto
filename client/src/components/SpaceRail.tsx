@@ -1,10 +1,12 @@
-import { MessageCircle } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { MessageCircle, Plus } from 'lucide-react';
+import { useState, type ReactNode } from 'react';
 import { initials } from '../lib/format';
 import { useRealtime } from '../state/realtime';
+import { CreateSpaceDialog } from './CreateSpaceDialog';
 
 export function SpaceRail() {
   const { state, actions } = useRealtime();
+  const [creating, setCreating] = useState(false);
   const unreadDirects = Object.values(state.unread).reduce((sum, n) => sum + n, 0);
 
   return (
@@ -34,6 +36,11 @@ export function SpaceRail() {
           )}
         </RailButton>
       ))}
+
+      <RailButton label="Criar um espaço" active={false} onClick={() => setCreating(true)}>
+        <Plus size={22} className="text-accent group-hover:text-white" />
+      </RailButton>
+      {creating && <CreateSpaceDialog onClose={() => setCreating(false)} />}
     </nav>
   );
 }

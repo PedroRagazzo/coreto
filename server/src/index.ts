@@ -4,6 +4,7 @@ import { Server } from 'socket.io';
 import { createDb } from './db/client.js';
 import { registerChat } from './realtime/chat.js';
 import { registerDirect } from './realtime/direct.js';
+import { registerManagement } from './realtime/manage.js';
 import { joinPublicSpaces } from './realtime/membership.js';
 import { registerPresence } from './realtime/presence.js';
 import type { IO } from './realtime/types.js';
@@ -71,6 +72,7 @@ function startRealtime(store: Store): IO {
     registerPresence(io, socket, store);
     registerChat(io, socket, store);
     registerDirect(socket, store);
+    registerManagement(io, socket, store);
     registerVoice(io, socket, store);
   });
 

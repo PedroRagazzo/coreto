@@ -1,0 +1,28 @@
+// Regras de nome usadas pelo servidor (validação) e pelo cliente (prévia no formulário).
+
+import type { ChannelKind } from './models.js';
+
+export const MAX_SPACE_NAME = 100;
+export const MAX_CHANNEL_NAME = 100;
+
+export function normalizeSpaceName(name: string): string {
+  return name.trim().replace(/\s+/g, ' ').slice(0, MAX_SPACE_NAME);
+}
+
+/**
+ * Canais de texto viram minúsculas com hífens no lugar dos espaços ("Dúvidas Gerais" → "dúvidas-gerais").
+ * Canais de voz mantêm o nome como foi digitado, só sem espaços sobrando.
+ */
+export function normalizeChannelName(name: string, kind: ChannelKind): string {
+  const trimmed = name.trim().replace(/\s+/g, ' ');
+  const normalized =
+    kind === 'text'
+      ? trimmed
+          .toLocaleLowerCase('pt-BR')
+          .replace(/[\s_]+/g, '-')
+          .replace(/[^\p{L}\p{N}-]/gu, '')
+          .replace(/-+/g, '-')
+          .replace(/^-|-$/g, '')
+      : trimmed;
+  return normalized.slice(0, MAX_CHANNEL_NAME);
+}

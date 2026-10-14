@@ -111,4 +111,6 @@ export interface SpaceSnapshot {
   voice: VoiceParticipant[];
   /** Permissões efetivas do usuário, por id de canal. */
   permissions: Record<Id, number>;
+  /** Permissões do usuário no espaço, antes das sobrescritas de canal (ex.: MANAGE_CHANNELS). */
+  spacePermissions: number;
 }

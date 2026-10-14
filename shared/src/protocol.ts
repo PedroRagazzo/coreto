@@ -1,6 +1,8 @@
 // Contrato dos eventos socket.io. Servidor e cliente tipam o socket com estas interfaces.
 
 import type {
+  Channel,
+  ChannelKind,
   DirectConversation,
   Id,
   Member,
@@ -51,9 +53,24 @@ export interface DirectConversationPayload {
   users: User[];
 }
 
+export interface ChannelCreatedPayload {
+  channel: Channel;
+  /** Permissões efetivas de quem recebe o evento no canal novo. */
+  permissions: number;
+}
+
+export interface CreateChannelRequest {
+  spaceId: Id;
+  categoryId: Id | null;
+  name: string;
+  kind: ChannelKind;
+}
+
 // `channelId` em history/send/typing aceita um canal de texto ou uma conversa direta.
 export interface ClientToServerEvents {
   'space:join': (spaceId: Id, ack: (res: Ack<SpaceSnapshot>) => void) => void;
+  'space:create': (req: { name: string }, ack: (res: Ack<Space>) => void) => void;
+  'channel:create': (req: CreateChannelRequest, ack: (res: Ack<ChannelCreatedPayload>) => void) => void;
   'dm:open': (req: { userId: Id }, ack: (res: Ack<DirectConversationPayload>) => void) => void;
   'channel:history': (
     req: { channelId: Id; before?: Id; limit?: number },
@@ -76,6 +93,10 @@ export interface ServerToClientEvents {
     /** Quem está do outro lado das conversas diretas. */
     directUsers: User[];
   }) => void;
+  /** Um espaço novo foi criado; todos os usuários já são membros dele. */
+  'space:created': (space: Space) => void;
+  /** Um canal novo apareceu no espaço aberto; só chega para quem pode vê-lo. */
+  'channel:created': (payload: ChannelCreatedPayload) => void;
   /** Uma conversa direta foi criada ou recebeu mensagem. Chega antes do `message:new`. */
   'dm:upsert': (payload: DirectConversationPayload) => void;
   'message:new': (message: Message) => void;
