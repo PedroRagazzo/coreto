@@ -72,8 +72,19 @@ export interface Member {
   joinedAt: string;
 }
 
+/**
+ * Conversa privada entre duas pessoas que participam de pelo menos um espaço em comum.
+ * As mensagens dela usam o id da conversa como `Message.channelId`.
+ */
+export interface DirectConversation {
+  id: Id;
+  participantIds: [Id, Id];
+  lastMessageAt: string | null;
+}
+
 export interface Message {
   id: Id;
+  /** Id de um canal de texto ou de uma conversa direta. */
   channelId: Id;
   authorId: Id;
   content: string;

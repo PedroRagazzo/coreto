@@ -1,6 +1,7 @@
 // Contrato dos eventos socket.io. Servidor e cliente tipam o socket com estas interfaces.
 
 import type {
+  DirectConversation,
   Id,
   Member,
   Message,
@@ -44,8 +45,16 @@ export interface VoiceJoinResult {
   iceServers: IceServer[];
 }
 
+export interface DirectConversationPayload {
+  conversation: DirectConversation;
+  /** Os dois participantes, para o cliente conhecer nome, cor e status. */
+  users: User[];
+}
+
+// `channelId` em history/send/typing aceita um canal de texto ou uma conversa direta.
 export interface ClientToServerEvents {
   'space:join': (spaceId: Id, ack: (res: Ack<SpaceSnapshot>) => void) => void;
+  'dm:open': (req: { userId: Id }, ack: (res: Ack<DirectConversationPayload>) => void) => void;
   'channel:history': (
     req: { channelId: Id; before?: Id; limit?: number },
     ack: (res: Ack<Message[]>) => void,
@@ -60,7 +69,15 @@ export interface ClientToServerEvents {
 }
 
 export interface ServerToClientEvents {
-  'session:ready': (payload: { user: User; spaces: Space[] }) => void;
+  'session:ready': (payload: {
+    user: User;
+    spaces: Space[];
+    directs: DirectConversation[];
+    /** Quem está do outro lado das conversas diretas. */
+    directUsers: User[];
+  }) => void;
+  /** Uma conversa direta foi criada ou recebeu mensagem. Chega antes do `message:new`. */
+  'dm:upsert': (payload: DirectConversationPayload) => void;
   'message:new': (message: Message) => void;
   typing: (payload: { channelId: Id; userId: Id }) => void;
   'presence:update': (payload: { userId: Id; status: PresenceStatus }) => void;

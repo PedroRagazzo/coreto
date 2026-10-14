@@ -72,8 +72,17 @@ Cada aba mantém uma conexão socket.io. Os eventos vão para salas do socket.io
 | `space:{id}` | presença, novos membros, lista das salas de voz |
 | `channel:{id}` | mensagens e "digitando" (o socket só entra nos canais que pode ler) |
 | `voice:{id}` | saída de participantes da chamada |
+| `user:{id}` | todas as abas de um usuário: mensagens diretas, "digitando" e presença de quem conversa com ele |
 
 Todo evento do cliente é validado no servidor: tipo do payload, existência do canal e permissão.
+
+## Mensagens diretas
+
+Clique em alguém na lista de membros para abrir uma conversa privada. Só é possível conversar com quem participa de
+pelo menos um espaço em comum com você, e robôs não recebem mensagens diretas. A conversa só aparece para a outra pessoa
+quando a primeira mensagem chega. Ela usa os mesmos eventos dos canais (`channel:history`, `message:send`,
+`typing:start`) com o id da conversa no lugar do id do canal; o evento `dm:upsert` avisa sobre conversas novas ou
+atualizadas. O ícone de mensagens diretas na barra de espaços mostra quantas mensagens ainda não foram lidas.
 
 ## Permissões
 
@@ -97,7 +106,8 @@ Fora de redes locais, configure um servidor TURN em `ICE_SERVERS`.
 
 - Login provisório: token aleatório no `localStorage`, sem senha.
 - Dados em memória: reiniciar o servidor apaga tudo. O esquema Prisma está pronto, mas não está ligado.
-- Mensagens diretas: só o lugar no layout.
+- Mensagens diretas só entre duas pessoas (sem grupos) e sem lista para buscar usuários: comece pela lista de membros.
+- Mensagens não lidas só são contadas nas conversas diretas, e a contagem zera ao recarregar a página.
 - Sem edição/remoção de mensagens, anexos, vídeo, compartilhamento de tela ou indicador de quem está falando.
 - Todos os espaços são públicos: quem conecta vira membro de todos.
 

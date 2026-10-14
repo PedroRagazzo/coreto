@@ -1,4 +1,5 @@
-import type { Member, User } from '@shared/models';
+import type { Id, Member, User } from '@shared/models';
+import { useState } from 'react';
 import { useRealtime } from '../state/realtime';
 import { displayNameOf, roleColorOf } from '../state/selectors';
 import { Avatar } from './Avatar';
@@ -10,9 +11,12 @@ interface Entry {
 }
 
 export function MemberList() {
-  const { state } = useRealtime();
+  const { state, actions } = useRealtime();
+  const [error, setError] = useState<string | null>(null);
   const { snapshot } = state;
   if (!snapshot) return null;
+
+  const openDirect = async (userId: Id) => setError(await actions.openDirect(userId));
 
   const entries: Entry[] = snapshot.members.flatMap((member) => {
     const user = state.users[member.userId];
@@ -24,13 +28,25 @@ export function MemberList() {
 
   return (
     <aside aria-label="Membros" className="hidden w-60 shrink-0 overflow-y-auto bg-sidebar px-2 py-4 lg:block">
-      <MemberGroup title="Online" entries={online} />
-      <MemberGroup title="Indisponível" entries={offline} dimmed />
+      {error && (
+        <p role="alert" className="mb-3 px-2 text-xs text-dnd">
+          {error}
+        </p>
+      )}
+      <MemberGroup title="Online" entries={online} onMessage={openDirect} />
+      <MemberGroup title="Indisponível" entries={offline} onMessage={openDirect} dimmed />
     </aside>
   );
 }
 
-function MemberGroup({ title, entries, dimmed = false }: { title: string; entries: Entry[]; dimmed?: boolean }) {
+interface MemberGroupProps {
+  title: string;
+  entries: Entry[];
+  onMessage: (userId: Id) => void;
+  dimmed?: boolean;
+}
+
+function MemberGroup({ title, entries, onMessage, dimmed = false }: MemberGroupProps) {
   const { state } = useRealtime();
   if (entries.length === 0) return null;
 
@@ -40,23 +56,34 @@ function MemberGroup({ title, entries, dimmed = false }: { title: string; entrie
         {title} — {entries.length}
       </h3>
       <ul>
-        {entries.map(({ user, name }) => (
-          <li
-            key={user.id}
-            className={`flex items-center gap-3 rounded-md px-2 py-1.5 hover:bg-hover/60 ${dimmed ? 'opacity-45' : ''}`}
-          >
-            <Avatar name={name} color={user.avatarColor} status={user.status} size="sm" />
-            <span
-              className="truncate text-[15px] font-medium text-muted"
-              style={{ color: roleColorOf(state.snapshot, user.id) ?? undefined }}
-            >
-              {name}
-            </span>
-            {user.isBot && (
-              <span className="shrink-0 rounded bg-accent px-1 text-[10px] font-semibold text-white">ROBÔ</span>
-            )}
-          </li>
-        ))}
+        {entries.map(({ user, name }) => {
+          // Clicar em alguém abre a conversa direta; não vale para você mesmo nem para robôs.
+          const canMessage = user.id !== state.me?.id && !user.isBot;
+          return (
+            <li key={user.id}>
+              <button
+                type="button"
+                disabled={!canMessage}
+                onClick={() => onMessage(user.id)}
+                title={canMessage ? `Enviar mensagem para ${name}` : undefined}
+                className={`flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left enabled:hover:bg-hover/60 disabled:cursor-default ${
+                  dimmed ? 'opacity-45' : ''
+                }`}
+              >
+                <Avatar name={name} color={user.avatarColor} status={user.status} size="sm" />
+                <span
+                  className="truncate text-[15px] font-medium text-muted"
+                  style={{ color: roleColorOf(state.snapshot, user.id) ?? undefined }}
+                >
+                  {name}
+                </span>
+                {user.isBot && (
+                  <span className="shrink-0 rounded bg-accent px-1 text-[10px] font-semibold text-white">ROBÔ</span>
+                )}
+              </button>
+            </li>
+          );
+        })}
       </ul>
     </section>
   );

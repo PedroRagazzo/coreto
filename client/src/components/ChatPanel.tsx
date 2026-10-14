@@ -50,8 +50,24 @@ export function ChatPanel({ showMembers, onToggleMembers }: ChatPanelProps) {
         <section aria-label="Conversa" className="flex min-w-0 flex-1 flex-col">
           {channel ? (
             <>
-              <MessageList channel={channel} messages={state.messages[channel.id] ?? []} />
-              <MessageInput channel={channel} canSend={can(snapshot, channel.id, Permission.SEND_MESSAGES)} />
+              <MessageList
+                conversationId={channel.id}
+                messages={state.messages[channel.id] ?? []}
+                welcome={
+                  <>
+                    <div className="mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-elevated">
+                      <Hash size={36} className="text-muted" />
+                    </div>
+                    <h3 className="text-2xl font-bold">Boas-vindas a #{channel.name}</h3>
+                    <p className="text-muted">Este é o começo do canal #{channel.name}.</p>
+                  </>
+                }
+              />
+              <MessageInput
+                targetId={channel.id}
+                label={`#${channel.name}`}
+                canSend={can(snapshot, channel.id, Permission.SEND_MESSAGES)}
+              />
               <TypingIndicator channelId={channel.id} />
             </>
           ) : (

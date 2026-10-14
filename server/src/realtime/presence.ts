@@ -1,5 +1,6 @@
 import type { Id, PresenceStatus } from '../../../shared/src/models.js';
 import type { Store } from '../store.js';
+import { otherParticipant } from './direct.js';
 import { rooms, type AppSocket, type IO } from './types.js';
 
 /** Conexões abertas por usuário: várias abas contam como uma presença só. */
@@ -10,11 +11,14 @@ export function registerPresence(io: IO, socket: AppSocket, store: Store): void 
   const user = store.users.get(userId);
   if (!user) return;
 
+  void socket.join(rooms.user(userId));
   const count = (connectionCount.get(userId) ?? 0) + 1;
   connectionCount.set(userId, count);
   if (count === 1) setStatus(io, store, userId, 'online');
 
-  socket.emit('session:ready', { user, spaces: store.spacesForUser(userId) });
+  const directs = store.directsFor(userId);
+  const directUsers = directs.flatMap((c) => store.users.get(otherParticipant(c, userId)) ?? []);
+  socket.emit('session:ready', { user, spaces: store.spacesForUser(userId), directs, directUsers });
 
   socket.on('presence:set', (status) => {
     if (status === 'online' || status === 'idle' || status === 'dnd') setStatus(io, store, userId, status);
@@ -31,11 +35,14 @@ export function registerPresence(io: IO, socket: AppSocket, store: Store): void 
   });
 }
 
+/** Avisa quem divide um espaço e quem conversa diretamente com o usuário. */
 function setStatus(io: IO, store: Store, userId: Id, status: PresenceStatus): void {
   const user = store.users.get(userId);
   if (!user || user.status === status) return;
   user.status = status;
-  for (const space of store.spacesForUser(userId)) {
-    io.to(rooms.space(space.id)).emit('presence:update', { userId, status });
-  }
+  const audience = [
+    ...store.spacesForUser(userId).map((space) => rooms.space(space.id)),
+    ...store.directsFor(userId).map((c) => rooms.user(otherParticipant(c, userId))),
+  ];
+  if (audience.length) io.to(audience).emit('presence:update', { userId, status });
 }

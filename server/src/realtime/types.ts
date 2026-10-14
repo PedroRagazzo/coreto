@@ -12,4 +12,6 @@ export const rooms = {
   space: (spaceId: string) => `space:${spaceId}`,
   channel: (channelId: string) => `channel:${channelId}`,
   voice: (channelId: string) => `voice:${channelId}`,
+  /** Todas as abas de um usuário; usada para conversas diretas. */
+  user: (userId: string) => `user:${userId}`,
 };

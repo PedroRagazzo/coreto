@@ -6,6 +6,7 @@ import type {
   Category,
   Channel,
   ChannelKind,
+  DirectConversation,
   Id,
   Member,
   Message,
@@ -43,6 +44,7 @@ export class Store {
   readonly channels = new Map<Id, Channel>();
   /** userId → sessão de voz ativa */
   readonly voice = new Map<Id, VoiceSession>();
+  readonly directs = new Map<Id, DirectConversation>();
 
   private readonly tokens = new Map<string, Id>();
   private readonly categories = new Map<Id, Category>();
@@ -187,6 +189,37 @@ export class Store {
     };
   }
 
+  sharesSpace(a: Id, b: Id): boolean {
+    return this.spacesForUser(a).some((space) => this.members.has(`${space.id}:${b}`));
+  }
+
+  // ── Conversas diretas ──────────────────────────────────────────────────────
+
+  /** Devolve a conversa entre duas pessoas, criando-a na primeira vez. */
+  directBetween(a: Id, b: Id): DirectConversation {
+    for (const conversation of this.directs.values()) {
+      const [x, y] = conversation.participantIds;
+      if ((x === a && y === b) || (x === b && y === a)) return conversation;
+    }
+    const conversation: DirectConversation = { id: randomUUID(), participantIds: [a, b], lastMessageAt: null };
+    this.directs.set(conversation.id, conversation);
+    this.messages.set(conversation.id, []);
+    return conversation;
+  }
+
+  /** A conversa, se ela existir e o usuário participar dela. */
+  directFor(userId: Id, conversationId: Id): DirectConversation | null {
+    const conversation = this.directs.get(conversationId);
+    return conversation?.participantIds.includes(userId) ? conversation : null;
+  }
+
+  /** Conversas com pelo menos uma mensagem, da mais recente para a mais antiga. */
+  directsFor(userId: Id): DirectConversation[] {
+    return [...this.directs.values()]
+      .filter((c) => c.lastMessageAt !== null && c.participantIds.includes(userId))
+      .sort((a, b) => b.lastMessageAt!.localeCompare(a.lastMessageAt!));
+  }
+
   // ── Mensagens ──────────────────────────────────────────────────────────────
 
   /** Mensagens em ordem cronológica; `before` pagina para trás a partir de uma mensagem. */
@@ -207,8 +240,10 @@ export class Store {
       editedAt: null,
     };
     const list = this.messages.get(channelId);
-    if (!list) throw new Error(`Canal de texto inexistente: ${channelId}`);
+    if (!list) throw new Error(`Canal de texto ou conversa inexistente: ${channelId}`);
     list.push(message);
+    const direct = this.directs.get(channelId);
+    if (direct) direct.lastMessageAt = message.createdAt;
     if (list.length > HISTORY_LIMIT_PER_CHANNEL) list.splice(0, list.length - HISTORY_LIMIT_PER_CHANNEL);
     return message;
   }

@@ -1,4 +1,4 @@
-import type { Channel } from '@shared/models';
+import type { Id } from '@shared/models';
 import { SendHorizontal } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useRealtime } from '../state/realtime';
@@ -6,7 +6,15 @@ import { useRealtime } from '../state/realtime';
 const MAX_LENGTH = 2000;
 const MAX_HEIGHT_PX = 192;
 
-export function MessageInput({ channel, canSend }: { channel: Channel; canSend: boolean }) {
+interface MessageInputProps {
+  /** Canal de texto ou conversa direta. */
+  targetId: Id;
+  /** Como o destino aparece no texto de ajuda: "#geral" ou "@Bruno". */
+  label: string;
+  canSend: boolean;
+}
+
+export function MessageInput({ targetId, label, canSend }: MessageInputProps) {
   const { actions } = useRealtime();
   const [draft, setDraft] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -17,7 +25,7 @@ export function MessageInput({ channel, canSend }: { channel: Channel; canSend: 
     setDraft('');
     setError(null);
     textareaRef.current?.focus();
-  }, [channel.id]);
+  }, [targetId]);
 
   // Cresce com o texto até um limite; depois rola.
   useLayoutEffect(() => {
@@ -31,7 +39,7 @@ export function MessageInput({ channel, canSend }: { channel: Channel; canSend: 
     const content = draft.trim();
     if (!content || sending || !canSend) return;
     setSending(true);
-    const err = await actions.sendMessage(content);
+    const err = await actions.sendMessage(targetId, content);
     setSending(false);
     setError(err);
     if (!err) setDraft('');
@@ -52,13 +60,13 @@ export function MessageInput({ channel, canSend }: { channel: Channel; canSend: 
           value={draft}
           maxLength={MAX_LENGTH}
           disabled={!canSend}
-          aria-label={`Mensagem para #${channel.name}`}
+          aria-label={`Mensagem para ${label}`}
           placeholder={
-            canSend ? `Conversar em #${channel.name}` : 'Você não tem permissão para enviar mensagens neste canal.'
+            canSend ? `Conversar em ${label}` : 'Você não tem permissão para enviar mensagens aqui.'
           }
           onChange={(e) => {
             setDraft(e.target.value);
-            if (e.target.value.trim()) actions.notifyTyping();
+            if (e.target.value.trim()) actions.notifyTyping(targetId);
           }}
           onKeyDown={(e) => {
             // Enter envia; Shift+Enter quebra linha; não interfere na composição de acentos (IME).

@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { Server } from 'socket.io';
 import { registerChat } from './realtime/chat.js';
+import { registerDirect } from './realtime/direct.js';
 import { joinPublicSpaces } from './realtime/membership.js';
 import { registerPresence } from './realtime/presence.js';
 import type { IO } from './realtime/types.js';
@@ -40,6 +41,7 @@ io.on('connection', (socket) => {
   joinPublicSpaces(io, store, socket.data.userId);
   registerPresence(io, socket, store);
   registerChat(io, socket, store);
+  registerDirect(socket, store);
   registerVoice(io, socket, store);
 });
 

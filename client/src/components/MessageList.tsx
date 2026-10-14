@@ -1,6 +1,5 @@
-import type { Channel, Id, Message } from '@shared/models';
-import { Hash } from 'lucide-react';
-import { useLayoutEffect, useRef } from 'react';
+import type { Id, Message } from '@shared/models';
+import { useLayoutEffect, useRef, type ReactNode } from 'react';
 import { formatMessageTime, formatShortTime } from '../lib/format';
 import { useRealtime } from '../state/realtime';
 import { displayNameOf, roleColorOf } from '../state/selectors';
@@ -33,20 +32,28 @@ function groupMessages(messages: Message[]): MessageGroup[] {
   return groups;
 }
 
-export function MessageList({ channel, messages }: { channel: Channel; messages: Message[] }) {
+interface MessageListProps {
+  /** Canal de texto ou conversa direta. */
+  conversationId: Id;
+  /** Bloco de boas-vindas no topo do histórico. */
+  welcome: ReactNode;
+  messages: Message[];
+}
+
+export function MessageList({ conversationId, welcome, messages }: MessageListProps) {
   const { state } = useRealtime();
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
 
-  // Trocar de canal sempre leva ao fim; mensagens novas só rolam se você já estava no fim.
+  // Trocar de conversa sempre leva ao fim; mensagens novas só rolam se você já estava no fim.
   useLayoutEffect(() => {
     stickToBottom.current = true;
-  }, [channel.id]);
+  }, [conversationId]);
 
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (el && stickToBottom.current) el.scrollTop = el.scrollHeight;
-  }, [messages, channel.id]);
+  }, [messages, conversationId]);
 
   const onScroll = () => {
     const el = scrollRef.current;
@@ -56,13 +63,7 @@ export function MessageList({ channel, messages }: { channel: Channel; messages:
   return (
     <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto" role="log" aria-live="polite">
       <div className="flex min-h-full flex-col justify-end pb-4">
-        <div className="px-4 pt-8 pb-4">
-          <div className="mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-elevated">
-            <Hash size={36} className="text-muted" />
-          </div>
-          <h3 className="text-2xl font-bold">Boas-vindas a #{channel.name}</h3>
-          <p className="text-muted">Este é o começo do canal #{channel.name}.</p>
-        </div>
+        <div className="px-4 pt-8 pb-4">{welcome}</div>
 
         {groupMessages(messages).map((group) => {
           const author = state.users[group.authorId];

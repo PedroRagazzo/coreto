@@ -2,6 +2,7 @@
 // viram ações do reducer, e os componentes chamam `actions` para agir.
 
 import type {
+  DirectConversation,
   Id,
   Member,
   Message,
@@ -12,7 +13,7 @@ import type {
   VoiceParticipant,
 } from '@shared/models';
 import { hasPermission, Permission } from '@shared/permissions';
-import type { SelectableStatus } from '@shared/protocol';
+import type { DirectConversationPayload, SelectableStatus } from '@shared/protocol';
 import { createContext, useContext, useEffect, useMemo, useReducer, useRef, type ReactNode } from 'react';
 import type { Identity } from '../lib/identity';
 import { createSocket, type AppSocket } from '../lib/socket';
@@ -41,9 +42,14 @@ export interface RealtimeState {
   activeSpaceId: Id | null;
   activeChannelBySpace: Record<Id, Id>;
   snapshot: SpaceSnapshot | null;
+  directs: Record<Id, DirectConversation>;
+  activeDirectId: Id | null;
+  /** conversa direta → mensagens recebidas e ainda não vistas */
+  unread: Record<Id, number>;
   users: Record<Id, User>;
+  /** canal de texto ou conversa direta → mensagens */
   messages: Record<Id, Message[]>;
-  /** canal → usuário → instante (ms) em que o aviso de digitação expira */
+  /** canal ou conversa → usuário → instante (ms) em que o aviso de digitação expira */
   typing: Record<Id, Record<Id, number>>;
   voice: Record<Id, VoiceParticipant[]>;
   myVoice: MyVoiceState;
@@ -68,6 +74,9 @@ const initialState: RealtimeState = {
   activeSpaceId: null,
   activeChannelBySpace: {},
   snapshot: null,
+  directs: {},
+  activeDirectId: null,
+  unread: {},
   users: {},
   messages: {},
   typing: {},
@@ -77,7 +86,9 @@ const initialState: RealtimeState = {
 
 type Action =
   | { type: 'connection'; connection: RealtimeState['connection']; error?: string }
-  | { type: 'session'; user: User; spaces: Space[] }
+  | { type: 'session'; user: User; spaces: Space[]; directs: DirectConversation[]; directUsers: User[] }
+  | { type: 'dm:upsert'; payload: DirectConversationPayload }
+  | { type: 'dm:select'; conversationId: Id }
   | { type: 'space:select'; spaceId: Id | null }
   | { type: 'space:snapshot'; snapshot: SpaceSnapshot }
   | { type: 'channel:select'; spaceId: Id; channelId: Id }
@@ -99,14 +110,36 @@ function reducer(state: RealtimeState, action: Action): RealtimeState {
     case 'connection':
       return { ...state, connection: action.connection, connectionError: action.error ?? null };
 
-    case 'session':
+    case 'session': {
+      const users = { ...state.users, [action.user.id]: action.user };
+      for (const user of action.directUsers) users[user.id] = user;
+      // Mantém conversas abertas localmente que ainda não têm mensagens (o servidor só lista as com mensagens).
+      const directs = { ...state.directs };
+      for (const conversation of action.directs) directs[conversation.id] = conversation;
       return {
         ...state,
         connection: 'ready',
         connectionError: null,
         me: action.user,
         spaces: action.spaces,
-        users: { ...state.users, [action.user.id]: action.user },
+        users,
+        directs,
+      };
+    }
+
+    case 'dm:upsert': {
+      const { conversation, users: participants } = action.payload;
+      const users = { ...state.users };
+      for (const user of participants) users[user.id] = user;
+      return { ...state, users, directs: { ...state.directs, [conversation.id]: conversation } };
+    }
+
+    case 'dm:select':
+      return {
+        ...state,
+        activeSpaceId: null,
+        activeDirectId: action.conversationId,
+        unread: withoutKey(state.unread, action.conversationId),
       };
 
     case 'space:select':
@@ -142,10 +175,14 @@ function reducer(state: RealtimeState, action: Action): RealtimeState {
       const { channelId, authorId, id } = action.message;
       const list = state.messages[channelId] ?? [];
       if (list.some((m) => m.id === id)) return state;
+      // Conta como não lida a mensagem direta de outra pessoa numa conversa que não está aberta.
+      const isOpen = state.activeSpaceId === null && state.activeDirectId === channelId;
+      const countsAsUnread = channelId in state.directs && authorId !== state.me?.id && !isOpen;
       return {
         ...state,
         messages: { ...state.messages, [channelId]: [...list, action.message] },
         typing: { ...state.typing, [channelId]: withoutKey(state.typing[channelId], authorId) },
+        unread: countsAsUnread ? { ...state.unread, [channelId]: (state.unread[channelId] ?? 0) + 1 } : state.unread,
       };
     }
 
@@ -188,9 +225,12 @@ function reducer(state: RealtimeState, action: Action): RealtimeState {
 export interface RealtimeActions {
   selectSpace(spaceId: Id | null): void;
   selectChannel(channelId: Id): void;
-  /** Resolve com uma mensagem de erro, ou `null` em caso de sucesso. */
-  sendMessage(content: string): Promise<string | null>;
-  notifyTyping(): void;
+  /** Abre (ou cria) a conversa direta com alguém. Resolve com erro ou `null`. */
+  openDirect(userId: Id): Promise<string | null>;
+  selectDirect(conversationId: Id): void;
+  /** Envia para um canal de texto ou conversa direta. Resolve com erro ou `null`. */
+  sendMessage(targetId: Id, content: string): Promise<string | null>;
+  notifyTyping(targetId: Id): void;
   joinVoice(channelId: Id): void;
   leaveVoice(): void;
   toggleMute(): void;
@@ -235,10 +275,20 @@ export function RealtimeProvider({ identity, children }: { identity: Identity; c
 
     const selectChannel = (channelId: Id) => openChannel(stateRef.current.snapshot, channelId);
 
+    const selectDirect = (conversationId: Id) => {
+      dispatch({ type: 'dm:select', conversationId });
+      void loadHistory(conversationId);
+    };
+
     const selectSpace = async (spaceId: Id | null) => {
       dispatch({ type: 'space:select', spaceId });
       const socket = socketRef.current;
-      if (spaceId === null || !socket) return;
+      if (spaceId === null) {
+        const { activeDirectId } = stateRef.current;
+        if (activeDirectId) selectDirect(activeDirectId);
+        return;
+      }
+      if (!socket) return;
       const res = await socket.emitWithAck('space:join', spaceId);
       if (!res.ok) {
         dispatch({ type: 'connection', connection: stateRef.current.connection, error: res.error });
@@ -255,12 +305,21 @@ export function RealtimeProvider({ identity, children }: { identity: Identity; c
     return {
       selectSpace: (spaceId) => void selectSpace(spaceId),
       selectChannel,
+      selectDirect,
 
-      async sendMessage(content) {
-        const { snapshot, activeChannelBySpace } = stateRef.current;
-        const channelId = snapshot ? activeChannelBySpace[snapshot.space.id] : undefined;
+      async openDirect(userId) {
         const socket = socketRef.current;
-        if (!channelId || !socket) return 'Nenhum canal selecionado.';
+        if (!socket) return 'Sem conexão com o servidor.';
+        const res = await socket.emitWithAck('dm:open', { userId });
+        if (!res.ok) return res.error;
+        dispatch({ type: 'dm:upsert', payload: res.data });
+        selectDirect(res.data.conversation.id);
+        return null;
+      },
+
+      async sendMessage(channelId, content) {
+        const socket = socketRef.current;
+        if (!socket) return 'Sem conexão com o servidor.';
         lastTypingRef.current = { channelId: null, at: 0 };
         try {
           const res = await socket.timeout(10_000).emitWithAck('message:send', { channelId, content });
@@ -270,10 +329,7 @@ export function RealtimeProvider({ identity, children }: { identity: Identity; c
         }
       },
 
-      notifyTyping() {
-        const { snapshot, activeChannelBySpace } = stateRef.current;
-        const channelId = snapshot ? activeChannelBySpace[snapshot.space.id] : undefined;
-        if (!channelId) return;
+      notifyTyping(channelId) {
         const now = Date.now();
         const last = lastTypingRef.current;
         if (last.channelId === channelId && now - last.at < TYPING_THROTTLE_MS) return;
@@ -361,13 +417,14 @@ export function RealtimeProvider({ identity, children }: { identity: Identity; c
     voiceRef.current = voice;
     firstSessionRef.current = true;
 
-    socket.on('session:ready', ({ user, spaces }) => {
-      dispatch({ type: 'session', user, spaces });
+    socket.on('session:ready', ({ user, spaces, directs, directUsers }) => {
+      dispatch({ type: 'session', user, spaces, directs, directUsers });
       // Na primeira conexão abre o primeiro espaço; nas reconexões, reabre o atual.
       const target = firstSessionRef.current ? (spaces[0]?.id ?? null) : stateRef.current.activeSpaceId;
       firstSessionRef.current = false;
       actions.selectSpace(target);
     });
+    socket.on('dm:upsert', (payload) => dispatch({ type: 'dm:upsert', payload }));
     socket.on('message:new', (message) => dispatch({ type: 'message:new', message }));
     socket.on('typing', ({ channelId, userId }) =>
       dispatch({ type: 'typing', channelId, userId, until: Date.now() + TYPING_TTL_MS }),

@@ -5,13 +5,15 @@ import { useRealtime } from '../state/realtime';
 
 export function SpaceRail() {
   const { state, actions } = useRealtime();
+  const unreadDirects = Object.values(state.unread).reduce((sum, n) => sum + n, 0);
 
   return (
     <nav aria-label="Espaços" className="flex w-[72px] shrink-0 flex-col items-center gap-2 overflow-y-auto bg-rail py-3">
       <RailButton
-        label="Mensagens diretas"
+        label={unreadDirects ? `Mensagens diretas (${unreadDirects} não lidas)` : 'Mensagens diretas'}
         active={state.activeSpaceId === null}
         onClick={() => actions.selectSpace(null)}
+        badge={unreadDirects}
       >
         <MessageCircle size={22} />
       </RailButton>
@@ -40,10 +42,12 @@ interface RailButtonProps {
   label: string;
   active: boolean;
   onClick: () => void;
+  /** Contador no canto inferior direito; 0 esconde. */
+  badge?: number;
   children: ReactNode;
 }
 
-function RailButton({ label, active, onClick, children }: RailButtonProps) {
+function RailButton({ label, active, onClick, badge = 0, children }: RailButtonProps) {
   return (
     <div className="group relative flex w-full justify-center">
       {/* Indicador à esquerda: cresce no hover e fica alto no item ativo. */}
@@ -65,6 +69,14 @@ function RailButton({ label, active, onClick, children }: RailButtonProps) {
       >
         {children}
       </button>
+      {badge > 0 && (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute right-2.5 -bottom-0.5 min-w-5 rounded-full border-[3px] border-rail bg-dnd px-1 text-center text-[11px] leading-[14px] font-bold text-white"
+        >
+          {badge > 99 ? '99+' : badge}
+        </span>
+      )}
     </div>
   );
 }
