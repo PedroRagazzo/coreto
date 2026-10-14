@@ -14,12 +14,13 @@ import type {
   VoiceParticipant,
 } from '@shared/models';
 import { hasPermission, Permission } from '@shared/permissions';
-import type {
-  ChannelCreatedPayload,
-  CreateChannelRequest,
-  DirectConversationPayload,
-  SelectableStatus,
-  UpdateChannelRequest,
+import {
+  INVALID_SESSION,
+  type ChannelCreatedPayload,
+  type CreateChannelRequest,
+  type DirectConversationPayload,
+  type SelectableStatus,
+  type UpdateChannelRequest,
 } from '@shared/protocol';
 import { createContext, useContext, useEffect, useMemo, useReducer, useRef, type ReactNode } from 'react';
 import type { Identity } from '../lib/identity';
@@ -341,8 +342,17 @@ interface RealtimeContextValue {
 
 const RealtimeContext = createContext<RealtimeContextValue | null>(null);
 
-export function RealtimeProvider({ identity, children }: { identity: Identity; children: ReactNode }) {
+interface RealtimeProviderProps {
+  identity: Identity;
+  /** O servidor recusou a sessão guardada: é preciso entrar de novo. */
+  onSessionInvalid: () => void;
+  children: ReactNode;
+}
+
+export function RealtimeProvider({ identity, onSessionInvalid, children }: RealtimeProviderProps) {
   const [state, dispatch] = useReducer(reducer, initialState);
+  const onSessionInvalidRef = useRef(onSessionInvalid);
+  onSessionInvalidRef.current = onSessionInvalid;
   const stateRef = useRef(state);
   stateRef.current = state;
 
@@ -568,7 +578,7 @@ export function RealtimeProvider({ identity, children }: { identity: Identity; c
   }, []);
 
   useEffect(() => {
-    const socket = createSocket(identity);
+    const socket = createSocket(identity.token);
     const voice = new VoiceManager(socket);
     socketRef.current = socket;
     voiceRef.current = voice;
@@ -622,9 +632,13 @@ export function RealtimeProvider({ identity, children }: { identity: Identity; c
       dispatch({ type: 'voice:self', patch: IDLE_VOICE });
       dispatch({ type: 'connection', connection: 'disconnected' });
     });
-    socket.on('connect_error', (err) =>
-      dispatch({ type: 'connection', connection: 'disconnected', error: err.message }),
-    );
+    socket.on('connect_error', (err: Error & { data?: { code?: string } }) => {
+      if (err.data?.code === INVALID_SESSION) {
+        onSessionInvalidRef.current();
+        return;
+      }
+      dispatch({ type: 'connection', connection: 'disconnected', error: err.message });
+    });
 
     dispatch({ type: 'connection', connection: 'connecting' });
     socket.connect();

@@ -16,6 +16,24 @@ import type {
 
 export type Ack<T> = { ok: true; data: T } | { ok: false; error: string };
 
+// ── Login (HTTP POST /login) ─────────────────────────────────────────────────
+// O socket.io só aceita conexões com o token de sessão devolvido aqui.
+
+export interface LoginRequest {
+  name: string;
+  /** Exatamente 4 dígitos. */
+  pin: string;
+}
+
+export type LoginErrorCode = 'invalid_input' | 'wrong_pin' | 'reserved_name' | 'locked';
+
+export type LoginResponse =
+  | { ok: true; token: string; user: User; created: boolean }
+  | { ok: false; code: LoginErrorCode; error: string };
+
+/** Código em `err.data.code` quando o socket.io recusa a conexão. */
+export const INVALID_SESSION = 'invalid_session';
+
 export type SelectableStatus = Exclude<PresenceStatus, 'offline'>;
 
 // Formatos serializáveis de WebRTC, sem depender da lib DOM no servidor.

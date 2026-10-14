@@ -1,10 +1,9 @@
 // Sobe o servidor real numa porta livre contra o banco de teste e conecta
 // clientes socket.io como se fossem navegadores.
 
-import { randomUUID } from 'node:crypto';
 import { io as connectSocket, type Socket } from 'socket.io-client';
 import type { Channel, DirectConversation, Space, SpaceSnapshot, User } from '../../../shared/src/models.js';
-import type { Ack, ClientToServerEvents, ServerToClientEvents } from '../../../shared/src/protocol.js';
+import type { Ack, ClientToServerEvents, LoginResponse, ServerToClientEvents } from '../../../shared/src/protocol.js';
 import { startServer, type RunningServer } from '../../src/app.js';
 import { createDb, type Db } from '../../src/db/client.js';
 import { seedIfEmpty } from '../../src/seed.js';
@@ -12,6 +11,10 @@ import { Store } from '../../src/store.js';
 import { assertTestDatabase, TEST_DATABASE_URL } from './database.js';
 
 export type TestSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
+
+/** PIN de todas as contas criadas por `connect`. */
+export const DEFAULT_PIN = '1234';
+let accountCounter = 0;
 
 export interface TestClient {
   socket: TestSocket;
@@ -62,10 +65,30 @@ export class TestServer {
     await this.db.$disconnect();
   }
 
-  /** Conecta um cliente; o mesmo `token` volta como o mesmo usuário. */
-  async connect(name: string, token = `token-${randomUUID()}`): Promise<TestClient> {
+  /** POST /login cru, para testar as respostas do servidor. */
+  async login(name: string, pin: string): Promise<{ status: number; body: LoginResponse }> {
+    const res = await fetch(`${this.url}/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name, pin }),
+    });
+    return { status: res.status, body: (await res.json()) as LoginResponse };
+  }
+
+  /**
+   * Cria uma conta nova e conecta. Cada chamada gera um nome único
+   * ("Ana 7"), então os testes não dividem usuários sem querer.
+   */
+  async connect(label: string): Promise<TestClient> {
+    const { body } = await this.login(`${label} ${++accountCounter}`, DEFAULT_PIN);
+    if (!body.ok) throw new Error(`Login falhou: ${body.error}`);
+    return this.connectWithToken(body.token);
+  }
+
+  /** Conecta com um token de sessão, como o navegador faz depois do primeiro login. */
+  async connectWithToken(token: string): Promise<TestClient> {
     const socket: TestSocket = connectSocket(this.url, {
-      auth: { token, displayName: name },
+      auth: { token },
       transports: ['websocket'],
       reconnection: false,
       forceNew: true,

@@ -6,7 +6,7 @@ Plataforma aberta de comunidades com chat em tempo real e salas de voz.
 Front-end em React + TypeScript + Tailwind CSS; tempo real em Node.js + socket.io; voz por WebRTC.
 
 > [!WARNING]
-> **Protótipo: não use em produção.** O login não tem senha (qualquer um escolhe um nome e entra), todo espaço é
+> **Protótipo: não use em produção.** O login é só nome + PIN de 4 dígitos, todo espaço é
 > público, e a voz não foi validada com muitas pessoas ou fora da rede local.
 > Veja [Limitações do protótipo](#limitações-do-protótipo).
 
@@ -117,6 +117,19 @@ Cada aba mantém uma conexão socket.io. Os eventos vão para salas do socket.io
 
 Todo evento do cliente é validado no servidor: tipo do payload, existência do canal e permissão.
 
+## Login
+
+Na primeira vez, a pessoa escolhe um **nome** e um **PIN de 4 dígitos**: se o nome estiver livre, a conta é criada na hora;
+se já existir, o PIN precisa bater. Maiúsculas e espaços sobrando não importam ("Ana" e " ana " são a mesma conta).
+Depois disso o navegador guarda um token de sessão que **não expira**, e a pessoa fica sempre conectada.
+
+- O login é um `POST /login` no servidor; o socket.io só aceita conexões com um token de sessão válido.
+- O banco guarda o hash do PIN (scrypt com sal) e só o hash SHA-256 dos tokens.
+- Com só 10 mil PINs possíveis, depois de 5 erros seguidos o nome fica bloqueado por 1 minuto.
+- O nome do robô ("Coreto") é reservado.
+- Se o servidor não reconhecer mais a sessão guardada (por exemplo, depois de apagar o banco), a tela de login volta sozinha.
+- Contas da versão anterior, de antes do PIN, continuam logadas no navegador onde foram criadas.
+
 ## Criar, editar e excluir
 
 - **Espaço:** o botão **+** no fim da barra de espaços. Qualquer pessoa pode criar; quem cria vira dono (todas as
@@ -181,7 +194,7 @@ Fora de redes locais, configure um servidor TURN em `ICE_SERVERS`.
 
 ## Limitações do protótipo
 
-- Login provisório: token aleatório no `localStorage`, sem senha.
+- Login fraco de propósito: nome + PIN de 4 dígitos, sessões que nunca expiram e sem botão de sair.
 - Não há como trocar o ícone do espaço, transferir a posse, reordenar canais, criar categorias, nem criar ou atribuir
   cargos pela interface.
 - Todo espaço é público: quem conecta vira membro de todos, inclusive dos criados por outras pessoas.

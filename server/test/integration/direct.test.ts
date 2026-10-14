@@ -69,12 +69,12 @@ describe.skipIf(!hasTestDatabase)('mensagens diretas', () => {
 
   it('devolve as conversas ao reconectar, com quem está do outro lado', async () => {
     const ana = await server.connect('Ana');
-    const bruno = await server.connect('Bruno', 'token-do-bruno-nas-conversas');
+    const bruno = await server.connect('Bruno');
     const { conversation } = ok(await ana.socket.emitWithAck('dm:open', { userId: bruno.user.id }));
     ok(await ana.socket.emitWithAck('message:send', { channelId: conversation.id, content: 'volta depois' }));
 
     await server.restart();
-    const again = await server.connect('Bruno', 'token-do-bruno-nas-conversas');
+    const again = await server.connectWithToken(bruno.token);
     expect(again.directs.map((d) => d.id)).toContain(conversation.id);
     expect(again.directUsers.map((u) => u.id)).toContain(ana.user.id);
     const history = ok(await again.socket.emitWithAck('channel:history', { channelId: conversation.id }));

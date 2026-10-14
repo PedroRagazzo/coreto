@@ -135,7 +135,7 @@ describe.skipIf(!hasTestDatabase)('gestão de espaços e canais', () => {
     });
     await server.restart();
 
-    const dona = await server.connect('Ana dona', ana.token);
+    const dona = await server.connectWithToken(ana.token);
     const membro: TestClient = await server.connect('Bruno');
     ok(await dona.socket.emitWithAck('space:join', space.id));
     const visible = ok(await membro.socket.emitWithAck('space:join', space.id));

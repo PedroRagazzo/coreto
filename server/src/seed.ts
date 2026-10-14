@@ -31,7 +31,8 @@ export async function seedIfEmpty(db: Db): Promise<boolean> {
   const at = (offsetMs: number) => new Date(Date.now() + offsetMs);
 
   await db.$transaction([
-    db.user.create({ data: { id: bot, displayName: 'Coreto', avatarColor: '#2bb39a', isBot: true } }),
+    // O robô reserva o próprio nome: sem PIN, ninguém entra como "Coreto".
+    db.user.create({ data: { id: bot, displayName: 'Coreto', loginName: 'coreto', avatarColor: '#2bb39a', isBot: true } }),
     db.space.createMany({
       data: [
         { id: dev, name: 'Coreto Dev', ownerId: bot },

@@ -35,7 +35,9 @@ import {
   toSpace,
   toUser,
 } from './db/mappers.js';
+import { loginKey, normalizeDisplayName } from '../../shared/src/names.js';
 import { DEFAULT_EVERYONE_PERMISSIONS } from '../../shared/src/permissions.js';
+import { hashPin, newSessionToken, verifyPin } from './auth.js';
 import { computeChannelPermissions, computeSpacePermissions } from './permissions.js';
 
 const AVATAR_COLORS = ['#2bb39a', '#5b8def', '#b07de0', '#e5a54b', '#e06c75', '#4fb3c8', '#8cbf5a'];
@@ -52,6 +54,11 @@ export const toParticipant = ({ userId, channelId, muted, deafened }: VoiceSessi
   muted,
   deafened,
 });
+
+export type LoginResult =
+  | { status: 'ok'; user: User; token: string; created: boolean }
+  | { status: 'wrong_pin' }
+  | { status: 'reserved_name' };
 
 const byPosition = (a: { position: number }, b: { position: number }) => a.position - b.position;
 const memberKey = (spaceId: Id, userId: Id) => `${spaceId}:${userId}`;
@@ -94,33 +101,46 @@ export class Store {
 
   // ── Usuários ───────────────────────────────────────────────────────────────
 
+  /** Dono do token de sessão, ou `null` se ele não existir. Sessões não expiram. */
+  async userForSession(token: string): Promise<User | null> {
+    const session = await this.db.session.findUnique({ where: { tokenHash: hashToken(token) } });
+    return session ? (this.users.get(session.userId) ?? null) : null;
+  }
+
   /**
-   * Autenticação provisória: o navegador gera um token aleatório e o guarda no
-   * localStorage; o banco guarda só o hash. Substituir por login de verdade
-   * (OAuth, senha + JWT) antes de produção.
+   * Entra com nome e PIN e abre uma sessão nova. Se o nome estiver livre, cria
+   * a conta com esse PIN. Espera nome e PIN já validados.
    */
-  async resolveSession(token: string, displayName: string): Promise<User> {
-    const tokenHash = hashToken(token);
-    const session = await this.db.session.findUnique({ where: { tokenHash } });
-    const existing = session ? this.users.get(session.userId) : undefined;
+  async login(name: string, pin: string): Promise<LoginResult> {
+    const loginName = loginKey(name);
+    const existing = await this.db.user.findUnique({ where: { loginName } });
+    const token = newSessionToken();
+
     if (existing) {
-      if (existing.displayName !== displayName) {
-        await this.db.user.update({ where: { id: existing.id }, data: { displayName } });
-        existing.displayName = displayName;
-      }
-      return existing;
+      if (!existing.pinHash) return { status: 'reserved_name' };
+      if (!(await verifyPin(pin, existing.pinHash))) return { status: 'wrong_pin' };
+      await this.db.session.create({ data: { tokenHash: hashToken(token), userId: existing.id } });
+      return { status: 'ok', user: this.users.get(existing.id) ?? toUser(existing), token, created: false };
     }
 
-    const row = await this.db.user.create({
-      data: {
-        displayName,
-        avatarColor: AVATAR_COLORS[this.users.size % AVATAR_COLORS.length],
-        sessions: { create: { tokenHash } },
-      },
-    });
-    const user = toUser(row);
-    this.users.set(user.id, user);
-    return user;
+    try {
+      const row = await this.db.user.create({
+        data: {
+          displayName: normalizeDisplayName(name),
+          loginName,
+          pinHash: await hashPin(pin),
+          avatarColor: AVATAR_COLORS[this.users.size % AVATAR_COLORS.length],
+          sessions: { create: { tokenHash: hashToken(token) } },
+        },
+      });
+      const user = toUser(row);
+      this.users.set(user.id, user);
+      return { status: 'ok', user, token, created: true };
+    } catch (err) {
+      // Duas pessoas criando o mesmo nome ao mesmo tempo: quem perdeu tenta entrar na conta criada.
+      if ((err as { code?: string }).code === 'P2002') return this.login(name, pin);
+      throw err;
+    }
   }
 
   // ── Membros ────────────────────────────────────────────────────────────────

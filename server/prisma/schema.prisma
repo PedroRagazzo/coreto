@@ -23,6 +23,10 @@ enum OverwriteTarget {
 model User {
   id            String               @id @default(uuid())
   displayName   String               @db.VarChar(32)
+  /// Nome em minúsculas usado no login; único. Nulo nas contas de antes do PIN.
+  loginName     String?              @unique @db.VarChar(32)
+  /// "sal:hash" (scrypt, hex) do PIN de 4 dígitos. Nulo = ninguém entra por nome e PIN (robôs, contas antigas).
+  pinHash       String?
   avatarColor   String               @db.VarChar(7)
   isBot         Boolean              @default(false)
   createdAt     DateTime             @default(now())
@@ -34,7 +38,7 @@ model User {
   directsAsB    DirectConversation[] @relation("DirectUserB")
 }
 
-/// Login provisório: guarda só o hash SHA-256 do token gerado pelo navegador.
+/// Sessão de login sem expiração: o navegador fica sempre logado. O banco guarda só o hash SHA-256 do token.
 model Session {
   tokenHash String   @id @db.Char(64)
   userId    String
