@@ -1,0 +1,17 @@
+{
+  "name": "coreto",
+  "private": true,
+  "description": "Plataforma aberta de comunidades com chat em tempo real e salas de voz",
+  "workspaces": [
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,client -c cyan,magenta \"npm run dev -w server\" \"npm run dev -w client\"",
+    "typecheck": "npm run typecheck -w server && npm run typecheck -w client",
+    "build": "npm run build -w client"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}

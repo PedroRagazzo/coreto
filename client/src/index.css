@@ -1,0 +1,45 @@
+@import "tailwindcss";
+
+/* Paleta grafite: contraste alto no texto, fundos escalonados sem preto puro. */
+@theme {
+  --color-rail: #121417;
+  --color-sidebar: #191c21;
+  --color-panel: #20242a;
+  --color-elevated: #2a2f37;
+  --color-hover: #313741;
+  --color-line: #2d323a;
+
+  --color-fg: #e6e8eb;
+  --color-muted: #a0a7b1;
+  --color-faint: #707883;
+
+  --color-accent: #2bb39a;
+  --color-accent-strong: #22967f;
+
+  --color-online: #3ecf6e;
+  --color-idle: #e8b339;
+  --color-dnd: #e5534b;
+  --color-offline: #6b7380;
+
+  --font-sans: "Inter", "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-panel);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Barras de rolagem discretas no tema escuro. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-elevated) transparent;
+}

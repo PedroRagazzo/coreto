@@ -1,0 +1,138 @@
+// Esquema relacional (PostgreSQL) para quando o armazenamento em memória
+// (src/store.ts) for substituído por um banco. Presença e estado de voz são
+// efêmeros e ficam fora daqui (memória ou Redis).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ChannelKind {
+  TEXT
+  VOICE
+}
+
+enum OverwriteTarget {
+  ROLE
+  MEMBER
+}
+
+model User {
+  id          String    @id @default(uuid())
+  displayName String    @db.VarChar(32)
+  avatarColor String    @db.VarChar(7)
+  isBot       Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  ownedSpaces Space[]   @relation("SpaceOwner")
+  memberships Member[]
+  messages    Message[]
+}
+
+/// Comunidade ("Espaço").
+model Space {
+  id         String     @id @default(uuid())
+  name       String     @db.VarChar(100)
+  iconUrl    String?
+  ownerId    String
+  owner      User       @relation("SpaceOwner", fields: [ownerId], references: [id])
+  createdAt  DateTime   @default(now())
+  roles      Role[]
+  categories Category[]
+  channels   Channel[]
+  members    Member[]
+}
+
+/// Cargo. O cargo "@everyone" usa o mesmo id do espaço.
+model Role {
+  id          String       @id @default(uuid())
+  spaceId     String
+  space       Space        @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  name        String       @db.VarChar(100)
+  color       String?      @db.VarChar(7)
+  position    Int
+  /// Bit flags de shared/src/permissions.ts
+  permissions BigInt       @default(0)
+  hoist       Boolean      @default(false)
+  members     MemberRole[]
+
+  @@index([spaceId])
+}
+
+model Member {
+  spaceId  String
+  userId   String
+  nickname String?      @db.VarChar(32)
+  joinedAt DateTime     @default(now())
+  space    Space        @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  user     User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  roles    MemberRole[]
+
+  @@id([spaceId, userId])
+}
+
+model MemberRole {
+  spaceId String
+  userId  String
+  roleId  String
+  member  Member @relation(fields: [spaceId, userId], references: [spaceId, userId], onDelete: Cascade)
+  role    Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([spaceId, userId, roleId])
+}
+
+model Category {
+  id       String    @id @default(uuid())
+  spaceId  String
+  space    Space     @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  name     String    @db.VarChar(100)
+  position Int
+  channels Channel[]
+
+  @@index([spaceId])
+}
+
+model Channel {
+  id         String                @id @default(uuid())
+  spaceId    String
+  space      Space                 @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  categoryId String?
+  category   Category?             @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  name       String                @db.VarChar(100)
+  kind       ChannelKind
+  position   Int
+  topic      String?               @db.VarChar(1024)
+  overwrites PermissionOverwrite[]
+  messages   Message[]
+
+  @@index([spaceId])
+}
+
+/// Permissões por canal (ler, escrever, conectar...) para um cargo ou membro.
+model PermissionOverwrite {
+  channelId  String
+  channel    Channel         @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  targetType OverwriteTarget
+  targetId   String
+  allow      BigInt          @default(0)
+  deny       BigInt          @default(0)
+
+  @@id([channelId, targetType, targetId])
+}
+
+model Message {
+  /// Em produção, prefira ids ordenáveis por tempo (UUIDv7 ou snowflake) para paginar pelo id.
+  id        String    @id @default(uuid())
+  channelId String
+  channel   Channel   @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    User      @relation(fields: [authorId], references: [id])
+  content   String    @db.VarChar(2000)
+  createdAt DateTime  @default(now())
+  editedAt  DateTime?
+
+  @@index([channelId, createdAt(sort: Desc)])
+}

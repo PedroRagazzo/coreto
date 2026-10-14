@@ -1,0 +1,5 @@
+{
+  "name": "@coreto/shared",
+  "private": true,
+  "type": "module"
+}
