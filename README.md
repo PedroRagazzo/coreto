@@ -3,6 +3,11 @@
 Plataforma aberta de comunidades com chat em tempo real e salas de voz.
 Front-end em React + TypeScript + Tailwind CSS; tempo real em Node.js + socket.io; voz por WebRTC.
 
+> [!WARNING]
+> **Protótipo: não use em produção.** O login não tem senha (qualquer um escolhe um nome e entra), os dados ficam
+> só em memória e somem quando o servidor reinicia, e a voz não foi validada com muitas pessoas ou fora da rede local.
+> Veja [Limitações do protótipo](#limitações-do-protótipo).
+
 ## Rodando
 
 ```bash
