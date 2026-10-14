@@ -12,6 +12,7 @@ import { registerPresence } from './realtime/presence.js';
 import type { IO } from './realtime/types.js';
 import { registerVoice } from './realtime/voice.js';
 import type { Store } from './store.js';
+import { serveClient } from './static.js';
 import { iceConfigFromEnv, type IceConfig } from './turn.js';
 import { handleUpload, readBody, serveUpload, UploadDir } from './uploads.js';
 
@@ -25,6 +26,8 @@ export interface ServerOptions {
   uploadDir: string;
   /** Padrão: lido das variáveis de ambiente (ver turn.ts). */
   ice?: IceConfig;
+  /** Build do client (client/dist) para servir o site na mesma origem; sem ele, só a API. */
+  clientDist?: string | null;
 }
 
 export interface RunningServer {
@@ -37,7 +40,7 @@ export interface RunningServer {
 /** Sobe o HTTP (saúde, login e anexos) + socket.io sobre um Store já carregado. */
 export async function startServer(
   store: Store,
-  { port, clientOrigins, uploadDir, ice = iceConfigFromEnv() }: ServerOptions,
+  { port, clientOrigins, uploadDir, ice = iceConfigFromEnv(), clientDist = null }: ServerOptions,
 ): Promise<RunningServer> {
   const throttle = new LoginThrottle();
   const uploads = new UploadDir(uploadDir);
@@ -61,6 +64,12 @@ export async function startServer(
     if (file && req.method === 'GET') {
       return void serveUpload(file[1], res, store, uploads).catch((err: unknown) => {
         console.error('[upload]', err);
+        if (!res.headersSent) res.writeHead(500).end();
+      });
+    }
+    if (clientDist) {
+      return void serveClient(req, res, clientDist).catch((err: unknown) => {
+        console.error('[site]', err);
         if (!res.headersSent) res.writeHead(500).end();
       });
     }

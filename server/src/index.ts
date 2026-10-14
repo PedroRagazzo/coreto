@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { startServer } from './app.js';
 import { createDb } from './db/client.js';
@@ -12,6 +13,8 @@ const CLIENT_ORIGINS = (process.env.CLIENT_ORIGIN ?? 'http://localhost:5173,http
 /** Pasta das imagens enviadas; relativa à pasta server/. */
 const UPLOAD_DIR = resolve(process.env.UPLOAD_DIR ?? 'uploads');
 const SWEEP_INTERVAL_MS = 60 * 60_000;
+/** Build do site; em produção o servidor entrega site e API no mesmo endereço. */
+const CLIENT_DIST = resolve(process.env.CLIENT_DIST ?? '../client/dist');
 
 main().catch((err: unknown) => {
   console.error('Coreto: falha ao iniciar o servidor.', err);
@@ -22,8 +25,15 @@ async function main() {
   const db = createDb();
   if (await seedIfEmpty(db)) console.log('Coreto: banco vazio, dados de demonstração criados.');
   const store = await Store.load(db);
-  const server = await startServer(store, { port: PORT, clientOrigins: CLIENT_ORIGINS, uploadDir: UPLOAD_DIR });
+  const clientDist = existsSync(resolve(CLIENT_DIST, 'index.html')) ? CLIENT_DIST : null;
+  const server = await startServer(store, {
+    port: PORT,
+    clientOrigins: CLIENT_ORIGINS,
+    uploadDir: UPLOAD_DIR,
+    clientDist,
+  });
   console.log(`Coreto: servidor em tempo real em http://localhost:${server.port}`);
+  if (clientDist) console.log(`Coreto: site servido de ${clientDist}`);
 
   // Limpa anexos nunca usados e arquivos de canais e espaços excluídos.
   const uploads = new UploadDir(UPLOAD_DIR);

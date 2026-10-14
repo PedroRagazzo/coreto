@@ -54,3 +54,49 @@ jobs:
 
       - name: Build do client
         run: npm run build
+
+  docker:
+    name: Imagem Docker
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: coreto
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Construir a imagem
+        run: docker build -t coreto:ci .
+
+      # Sobe como no Dokploy: aplica as migrations num banco vazio e entrega site e API.
+      - name: Subir o container e conferir site, API e anexos
+        run: |
+          docker run -d --name coreto --network host \
+            -e DATABASE_URL=postgresql://postgres:postgres@localhost:5432/coreto \
+            coreto:ci
+          for i in $(seq 1 60); do
+            curl -fs http://localhost:3000/health && break
+            sleep 2
+          done
+          curl -fs http://localhost:3000/health
+          curl -fs http://localhost:3000/ | grep -q '<div id="root">'
+          curl -fsI http://localhost:3000/ | grep -qi 'content-security-policy'
+          curl -fs -X POST http://localhost:3000/login -H 'content-type: application/json' \
+            -d '{"name":"CI","pin":"1234"}' | grep -q '"ok":true'
+
+      - name: Logs do container
+        if: always()
+        run: docker logs coreto

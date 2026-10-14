@@ -222,15 +222,23 @@ export class VoiceManager {
    * Abre o seletor de tela do navegador. Chame direto do clique (o navegador
    * exige um gesto). Ninguém recebe nada até `setScreenViewers` dizer quem assiste.
    */
-  async startScreen(options: ScreenShareOptions): Promise<MediaStream> {
+  async startScreen(options: ScreenShareOptions): Promise<{ stream: MediaStream; audioFailed: boolean }> {
     if (!this.localStream) throw new Error('Entre em um canal de voz para compartilhar a tela.');
-    const stream = await navigator.mediaDevices.getDisplayMedia({
-      video: {
-        frameRate: { ideal: options.frameRate, max: options.frameRate },
-        ...(options.height && { height: { ideal: options.height, max: options.height } }),
-      },
-      audio: options.audio,
-    });
+    const constraints: MediaTrackConstraints = {
+      frameRate: { ideal: options.frameRate, max: options.frameRate },
+      ...(options.height && { height: { ideal: options.height, max: options.height } }),
+    };
+    let stream: MediaStream;
+    let audioFailed = false;
+    try {
+      stream = await navigator.mediaDevices.getDisplayMedia({ video: constraints, audio: options.audio });
+    } catch (err) {
+      // Alguns sistemas não liberam o som (no app de desktop, "Could not start audio source"):
+      // em vez de falhar, transmite só a imagem.
+      if (!options.audio || !(err instanceof DOMException) || err.name !== 'NotReadableError') throw err;
+      stream = await navigator.mediaDevices.getDisplayMedia({ video: constraints, audio: false });
+      audioFailed = true;
+    }
     this.stopScreen();
     const [video] = stream.getVideoTracks();
     // Texto e código pedem nitidez; jogos e vídeos, fluidez.
@@ -241,7 +249,7 @@ export class VoiceManager {
     });
     this.screen = { stream, options };
     this.applyScreenViewers();
-    return stream;
+    return { stream, audioFailed };
   }
 
   stopScreen(): void {

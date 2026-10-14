@@ -1,0 +1,141 @@
+:root {
+  color-scheme: dark;
+  --bg: #191c21;
+  --panel: #20242a;
+  --hover: #313741;
+  --fg: #e6e8eb;
+  --muted: #a0a7b1;
+  --accent: #2bb39a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  display: flex;
+  height: 100vh;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--fg);
+  font: 14px/1.4 "Segoe UI", system-ui, sans-serif;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px 8px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 18px;
+}
+
+[role="tablist"] {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 8px;
+  background: #121417;
+}
+
+[role="tab"] {
+  border: 0;
+  border-radius: 6px;
+  padding: 6px 14px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+[role="tab"][aria-selected="true"] {
+  background: var(--accent);
+  color: #fff;
+}
+
+#sources {
+  display: grid;
+  flex: 1;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  align-content: start;
+  gap: 12px;
+  margin: 0;
+  padding: 12px 20px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+[role="option"] {
+  border: 2px solid transparent;
+  border-radius: 8px;
+  padding: 8px;
+  background: var(--panel);
+  cursor: pointer;
+  outline: none;
+}
+
+[role="option"]:hover,
+[role="option"]:focus-visible {
+  background: var(--hover);
+}
+
+[role="option"][aria-selected="true"] {
+  border-color: var(--accent);
+}
+
+[role="option"] > img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 4px;
+  background: #000;
+  object-fit: contain;
+}
+
+[role="option"] > span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.icon {
+  width: 16px;
+  height: 16px;
+}
+
+footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 20px 16px;
+  border-top: 1px solid #2d323a;
+}
+
+footer button {
+  border: 0;
+  border-radius: 6px;
+  padding: 8px 16px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+footer button.primary {
+  background: var(--accent);
+  color: #fff;
+}
+
+footer button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

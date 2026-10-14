@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'" />
+    <title>Coreto</title>
+    <link rel="stylesheet" href="picker.css" />
+    <link rel="stylesheet" href="offline.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Não deu para abrir o Coreto</h1>
+      <p>O servidor <strong id="url"></strong> não respondeu. Confira a internet e tente de novo.</p>
+      <p id="erro" class="detail"></p>
+      <button id="retry" type="button" class="primary">Tentar de novo</button>
+    </main>
+    <script src="offline.js"></script>
+  </body>
+</html>

@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="fundo" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#34c4a9"/>
+      <stop offset="1" stop-color="#1c8a76"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#fundo)"/>
+  <g fill="#fff">
+    <!-- Coreto: telhado com pináculo, beiral, quatro colunas e base com degrau -->
+    <circle cx="256" cy="86" r="16"/>
+    <path d="M256 100 L414 206 H98 Z"/>
+    <rect x="86" y="204" width="340" height="28" rx="10"/>
+    <rect x="124" y="232" width="26" height="140" rx="6" opacity=".92"/>
+    <rect x="200" y="232" width="26" height="140" rx="6" opacity=".92"/>
+    <rect x="286" y="232" width="26" height="140" rx="6" opacity=".92"/>
+    <rect x="362" y="232" width="26" height="140" rx="6" opacity=".92"/>
+    <rect x="80" y="368" width="352" height="34" rx="10"/>
+    <rect x="136" y="402" width="240" height="28" rx="8" opacity=".85"/>
+  </g>
+</svg>

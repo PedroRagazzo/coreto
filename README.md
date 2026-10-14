@@ -43,7 +43,52 @@ Abra duas janelas (uma anônima) com nomes diferentes para ver mensagens, digita
 | `SERVER_PORT` | server | `3001` |
 | `CLIENT_ORIGIN` | server | `http://localhost:5173,http://127.0.0.1:5173` |
 | `ICE_SERVERS` | server | STUN público do Google (JSON de `RTCIceServer[]`) |
-| `VITE_SERVER_URL` | client | `http://localhost:3001` |
+| `UPLOAD_DIR` | server | `uploads` (pasta das imagens enviadas) |
+| `CLIENT_DIST` | server | `../client/dist`: se existir, o servidor também entrega o site |
+| `VITE_SERVER_URL` | client | em dev, `http://localhost:3001`; no build, a mesma origem do site |
+
+## Publicar (Docker e Dokploy)
+
+Em produção, um container só entrega o site, a API e o socket.io no mesmo endereço. O `Dockerfile` da raiz gera
+a imagem; ao iniciar, ela aplica as migrations (`prisma migrate deploy`) e sobe o servidor na porta 3000. O CI
+constrói a imagem e sobe o container contra um PostgreSQL vazio a cada push.
+
+```bash
+docker build -t coreto .
+docker run -p 3000:3000 -e DATABASE_URL=postgresql://... -v coreto-uploads:/data/uploads coreto
+```
+
+No [Dokploy](https://dokploy.com):
+
+1. **Banco:** crie um PostgreSQL no projeto e copie a "Internal Connection URL".
+2. **App:** crie uma Application com o provedor Git apontando para este repositório (branch `main`) e build
+   type **Dockerfile**.
+3. **Variáveis:** `DATABASE_URL` (a URL interna do banco). Para TURN, veja [TURN](#turn).
+4. **Volume:** monte um volume em `/data/uploads`, senão as imagens somem a cada deploy.
+5. **Domínio:** porta 3000, com HTTPS (Let's Encrypt). Sem domínio próprio, use `coreto.<IP-da-VPS>.sslip.io`.
+   **Microfone, câmera e tela só funcionam em HTTPS.**
+6. **Deploy.** O primeiro deploy cria as tabelas e os espaços de demonstração.
+
+## App de desktop (Windows)
+
+`desktop/` é um app Electron que abre o servidor de `desktop/coreto.config.json`, como o app do Discord abre o
+site. O site roda isolado, sem acesso ao Node. O app só acrescenta três coisas:
+
+- um seletor de telas e janelas para compartilhar (o Electron não tem um próprio);
+- permissão de microfone, câmera e tela só para o servidor configurado;
+- links de fora abrindo no navegador padrão.
+
+Se o servidor não responder, aparece uma página para tentar de novo.
+
+```bash
+cd desktop
+npm install
+npm start -- --url=http://localhost:3001   # abre apontando para outro servidor
+npm run dist                               # gera release/Coreto-Setup-<versão>.exe
+```
+
+Uma tag `v<versão>` (a mesma de `desktop/package.json`) faz o GitHub Actions gerar o instalador e publicar a
+release com ele. O instalador não é assinado, então o Windows mostra um aviso na primeira vez.
 
 ## Testes
 
@@ -73,6 +118,8 @@ coreto/
 │   ├── search.ts            Texto normalizado da busca (sem acentos, minúsculo)
 │   ├── permissions.ts       Bit flags (ler, escrever, conectar, falar...)
 │   └── protocol.ts          Eventos socket.io tipados + formatos de sinalização WebRTC
+├── Dockerfile               Imagem de produção: site + API + socket.io num container
+├── desktop/                 App de desktop (Electron) e instalador do Windows
 ├── server/
 │   ├── prisma/              Esquema (schema.prisma) e migrations do PostgreSQL
 │   ├── prisma.config.ts     Configuração do Prisma (lê DATABASE_URL de server/.env)
@@ -84,6 +131,7 @@ coreto/
 │       ├── uploads.ts       POST/GET /uploads, pasta dos arquivos e limpeza
 │       ├── images.ts        Reconhece PNG/JPEG/GIF/WebP pelo conteúdo e lê as dimensões
 │       ├── turn.ts          Servidores ICE e credenciais TURN temporárias
+│       ├── static.ts        Entrega o build do site em produção (com política de segurança)
 │       ├── db/              Cliente Prisma e conversão linha ↔ modelo de domínio
 │       ├── generated/       Cliente gerado pelo `prisma generate` (fora do Git)
 │       ├── permissions.ts   Cálculo de permissões efetivas por canal

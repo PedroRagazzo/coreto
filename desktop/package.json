@@ -1,0 +1,66 @@
+{
+  "name": "coreto-desktop",
+  "productName": "Coreto",
+  "version": "0.1.0",
+  "description": "App de desktop do Coreto: abre o servidor configurado em coreto.config.json",
+  "author": "PedroRagazzo",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "icon": "node scripts/make-icon.js",
+    "typecheck": "tsc --noEmit -p jsconfig.json",
+    "dist": "npm run icon && electron-builder --win --publish never"
+  },
+  "devDependencies": {
+    "@resvg/resvg-js": "2.6.2",
+    "electron": "44.5.0",
+    "electron-builder": "26.15.3",
+    "typescript": "^5.7.2"
+  },
+  "build": {
+    "appId": "io.github.pedroragazzo.coreto",
+    "productName": "Coreto",
+    "copyright": "Copyright (c) 2026 PedroRagazzo",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "coreto.config.json",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "artifactName": "Coreto-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "shortcutName": "Coreto",
+      "uninstallDisplayName": "Coreto"
+    },
+    "electronFuses": {
+      "runAsNode": false,
+      "enableCookieEncryption": true,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "enableEmbeddedAsarIntegrityValidation": true,
+      "onlyLoadAppFromAsar": true
+    }
+  },
+  "allowScripts": {
+    "electron@44.5.0": true
+  }
+}

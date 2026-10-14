@@ -1,0 +1,35 @@
+body {
+  align-items: center;
+  justify-content: center;
+  background: #121417;
+}
+
+main {
+  max-width: 440px;
+  padding: 24px;
+  text-align: center;
+}
+
+h1 {
+  margin-bottom: 8px;
+}
+
+p {
+  color: var(--muted);
+}
+
+.detail {
+  font-size: 12px;
+}
+
+button.primary {
+  margin-top: 8px;
+  border: 0;
+  border-radius: 6px;
+  padding: 10px 20px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}

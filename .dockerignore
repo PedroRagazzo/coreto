@@ -1,0 +1,10 @@
+**/node_modules
+**/dist
+**/.env
+**/*.log
+.git
+.github
+.claude
+desktop
+server/src/generated
+server/uploads

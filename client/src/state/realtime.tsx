@@ -898,8 +898,9 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
           return 'Entre em um canal de voz para compartilhar a tela.';
         }
         let stream: MediaStream;
+        let audioFailed: boolean;
         try {
-          stream = await voice.startScreen(options);
+          ({ stream, audioFailed } = await voice.startScreen(options));
         } catch (err) {
           return describeScreenError(err);
         }
@@ -909,6 +910,9 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
           return res.error;
         }
         dispatch({ type: 'screen:mine', stream });
+        if (audioFailed) {
+          dispatch({ type: 'voice:self', patch: { error: 'O sistema não liberou o som: a tela está indo sem áudio.' } });
+        }
         dispatch({ type: 'stage', userId: stateRef.current.me?.id ?? null });
         return null;
       },

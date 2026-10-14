@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src data:" />
+    <title>Compartilhar tela</title>
+    <link rel="stylesheet" href="picker.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Compartilhar tela</h1>
+      <div role="tablist" aria-label="Tipo">
+        <button role="tab" aria-selected="true" data-kind="screen">Telas</button>
+        <button role="tab" aria-selected="false" data-kind="window">Janelas</button>
+      </div>
+    </header>
+    <ul id="sources" role="listbox" aria-label="Escolha o que compartilhar"></ul>
+    <footer>
+      <button id="cancel" type="button">Cancelar</button>
+      <button id="share" type="button" class="primary" disabled>Compartilhar</button>
+    </footer>
+    <script src="picker.js"></script>
+  </body>
+</html>

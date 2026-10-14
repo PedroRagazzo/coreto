@@ -1,0 +1,68 @@
+name: Release
+
+# Uma tag "v1.2.3" gera o instalador do Windows e publica a release com ele.
+#   git tag v0.1.0 && git push origin v0.1.0
+# A versão da tag precisa ser a mesma de desktop/package.json.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    name: Instalador do Windows
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: desktop
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Conferir a versão
+        shell: bash
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "A tag $GITHUB_REF_NAME não bate com desktop/package.json ($version)." >&2
+            exit 1
+          fi
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Checar tipos
+        run: npm run typecheck
+
+      - name: Gerar o instalador
+        run: npm run dist
+
+      - name: Publicar a release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          url=$(node -p "require('./coreto.config.json').url")
+          {
+            echo "## Instalar"
+            echo
+            echo "Baixe **Coreto-Setup-${GITHUB_REF_NAME#v}.exe** abaixo e abra. O app conecta em $url."
+            echo
+            echo "O instalador não é assinado: se o Windows mostrar \"O Windows protegeu o computador\","
+            echo "clique em **Mais informações** e depois em **Executar assim mesmo**."
+            echo
+            echo "Também dá para usar pelo navegador: $url"
+          } > notes.md
+          gh release create "$GITHUB_REF_NAME" release/*.exe \
+            --title "Coreto $GITHUB_REF_NAME" \
+            --notes-file notes.md \
+            --generate-notes
