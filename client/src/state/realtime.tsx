@@ -95,6 +95,8 @@ type Action =
   | { type: 'connection'; connection: RealtimeState['connection']; error?: string }
   | { type: 'session'; user: User; spaces: Space[]; directs: DirectConversation[]; directUsers: User[] }
   | { type: 'space:created'; space: Space }
+  | { type: 'space:updated'; space: Space }
+  | { type: 'space:deleted'; spaceId: Id }
   | { type: 'channel:created'; payload: ChannelCreatedPayload }
   | { type: 'channel:updated'; channel: Channel }
   | { type: 'channel:deleted'; spaceId: Id; channelId: Id }
@@ -141,6 +143,24 @@ function reducer(state: RealtimeState, action: Action): RealtimeState {
     case 'space:created':
       if (state.spaces.some((s) => s.id === action.space.id)) return state;
       return { ...state, spaces: [...state.spaces, action.space] };
+
+    case 'space:updated':
+      return {
+        ...state,
+        spaces: state.spaces.map((s) => (s.id === action.space.id ? action.space : s)),
+        snapshot: state.snapshot?.space.id === action.space.id ? { ...state.snapshot, space: action.space } : state.snapshot,
+      };
+
+    case 'space:deleted': {
+      const wasOpen = state.snapshot?.space.id === action.spaceId;
+      return {
+        ...state,
+        spaces: state.spaces.filter((s) => s.id !== action.spaceId),
+        activeChannelBySpace: withoutKey(state.activeChannelBySpace, action.spaceId),
+        snapshot: wasOpen ? null : state.snapshot,
+        voice: wasOpen ? {} : state.voice,
+      };
+    }
 
     case 'channel:created': {
       const { channel, permissions } = action.payload;
@@ -290,6 +310,10 @@ export interface RealtimeActions {
   selectChannel(channelId: Id): void;
   /** Cria um espaço e abre ele. Resolve com erro ou `null`. */
   createSpace(name: string): Promise<string | null>;
+  /** Renomeia o espaço aberto. Resolve com erro ou `null`. */
+  renameSpace(name: string): Promise<string | null>;
+  /** Exclui o espaço aberto com tudo dentro. Resolve com erro ou `null`. */
+  deleteSpace(): Promise<string | null>;
   /** Cria um canal no espaço aberto e abre ele, se for de texto. Resolve com erro ou `null`. */
   createChannel(req: Omit<CreateChannelRequest, 'spaceId'>): Promise<string | null>;
   /** Altera nome, tópico ou categoria. Resolve com erro ou `null`. */
@@ -386,6 +410,25 @@ export function RealtimeProvider({ identity, children }: { identity: Identity; c
         dispatch({ type: 'space:created', space: res.data });
         void selectSpace(res.data.id);
         return null;
+      },
+
+      async renameSpace(name) {
+        const socket = socketRef.current;
+        const spaceId = stateRef.current.snapshot?.space.id;
+        if (!socket || !spaceId) return 'Sem conexão com o servidor.';
+        const res = await socket.emitWithAck('space:update', { spaceId, name });
+        if (!res.ok) return res.error;
+        dispatch({ type: 'space:updated', space: res.data });
+        return null;
+      },
+
+      async deleteSpace() {
+        const socket = socketRef.current;
+        const spaceId = stateRef.current.snapshot?.space.id;
+        if (!socket || !spaceId) return 'Sem conexão com o servidor.';
+        // O estado é atualizado pelo evento `space:deleted`, que chega para todos.
+        const res = await socket.emitWithAck('space:delete', { spaceId });
+        return res.ok ? null : res.error;
       },
 
       async createChannel(req) {
@@ -539,6 +582,15 @@ export function RealtimeProvider({ identity, children }: { identity: Identity; c
       actions.selectSpace(target);
     });
     socket.on('space:created', (space) => dispatch({ type: 'space:created', space }));
+    socket.on('space:updated', (space) => dispatch({ type: 'space:updated', space }));
+    socket.on('space:deleted', ({ spaceId }) => {
+      const before = stateRef.current;
+      dispatch({ type: 'space:deleted', spaceId });
+      // Quem estava no espaço excluído vai para o primeiro que sobrou (ou para as mensagens diretas).
+      if (before.activeSpaceId === spaceId) {
+        actions.selectSpace(before.spaces.find((s) => s.id !== spaceId)?.id ?? null);
+      }
+    });
     socket.on('channel:created', (payload) => dispatch({ type: 'channel:created', payload }));
     socket.on('channel:updated', (channel) => dispatch({ type: 'channel:updated', channel }));
     socket.on('channel:deleted', ({ spaceId, channelId }) => {

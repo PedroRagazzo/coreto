@@ -7,6 +7,7 @@ import { can, displayNameOf, groupChannels } from '../state/selectors';
 import { Avatar } from './Avatar';
 import { CreateChannelDialog } from './CreateChannelDialog';
 import { EditChannelDialog } from './EditChannelDialog';
+import { EditSpaceDialog } from './EditSpaceDialog';
 
 export function ChannelSidebar() {
   const { state } = useRealtime();
@@ -14,6 +15,7 @@ export function ChannelSidebar() {
   /** Categoria em que o diálogo de criar canal foi aberto; `null` = fechado. */
   const [creatingIn, setCreatingIn] = useState<{ categoryId: Id | null } | null>(null);
   const [editing, setEditing] = useState<Channel | null>(null);
+  const [editingSpace, setEditingSpace] = useState(false);
   const { snapshot } = state;
 
   if (!snapshot) {
@@ -28,11 +30,24 @@ export function ChannelSidebar() {
 
   const activeChannelId = state.activeChannelBySpace[snapshot.space.id];
   const canManage = hasPermission(snapshot.spacePermissions, Permission.MANAGE_CHANNELS);
+  const isAdmin = hasPermission(snapshot.spacePermissions, Permission.ADMINISTRATOR);
+  const isOwner = snapshot.space.ownerId === state.me?.id;
 
   return (
     <>
       <header className="flex h-12 shrink-0 items-center gap-2 border-b border-line px-4 shadow-sm">
         <h1 className="flex-1 truncate font-semibold">{snapshot.space.name}</h1>
+        {isAdmin && (
+          <button
+            type="button"
+            title="Configurações do espaço"
+            aria-label="Configurações do espaço"
+            onClick={() => setEditingSpace(true)}
+            className="rounded p-1 text-muted hover:bg-hover hover:text-fg"
+          >
+            <Settings size={17} />
+          </button>
+        )}
         {canManage && (
           <button
             type="button"
@@ -104,6 +119,9 @@ export function ChannelSidebar() {
         <CreateChannelDialog initialCategoryId={creatingIn.categoryId} onClose={() => setCreatingIn(null)} />
       )}
       {editing && <EditChannelDialog channel={editing} onClose={() => setEditing(null)} />}
+      {editingSpace && (
+        <EditSpaceDialog space={snapshot.space} canDelete={isOwner} onClose={() => setEditingSpace(false)} />
+      )}
     </>
   );
 }

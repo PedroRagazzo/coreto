@@ -1,4 +1,4 @@
-// Criação de espaços; criação, edição e exclusão de canais.
+// Criação, edição e exclusão de espaços e de canais.
 
 import { normalizeChannelName, normalizeSpaceName, normalizeTopic } from '../../../shared/src/names.js';
 import { hasPermission, Permission } from '../../../shared/src/permissions.js';
@@ -23,6 +23,46 @@ export function registerManagement(io: IO, socket: AppSocket, store: Store): voi
     } catch (err) {
       ack(storageError('space:create', err));
     }
+  });
+
+  socket.on('space:update', async (req, ack) => {
+    if (!isFunction(ack)) return;
+    const spaceId = typeof req?.spaceId === 'string' ? req.spaceId : '';
+    if (!hasPermission(store.spacePermissionsFor(userId, spaceId), Permission.ADMINISTRATOR)) {
+      return ack({ ok: false, error: 'Só administradores podem editar o espaço.' });
+    }
+    const name = typeof req.name === 'string' ? normalizeSpaceName(req.name) : '';
+    if (!name) return ack({ ok: false, error: 'Dê um nome ao espaço.' });
+    try {
+      const space = await store.updateSpace(spaceId, name);
+      io.emit('space:updated', space);
+      ack({ ok: true, data: space });
+    } catch (err) {
+      ack(storageError('space:update', err));
+    }
+  });
+
+  // Excluir apaga tudo de todo mundo: só o dono pode.
+  socket.on('space:delete', async (req, ack) => {
+    if (!isFunction(ack)) return;
+    const space = typeof req?.spaceId === 'string' ? store.spaces.get(req.spaceId) : undefined;
+    if (!space || space.ownerId !== userId) return ack({ ok: false, error: 'Só o dono pode excluir o espaço.' });
+
+    // Guarda o que vai sumir da memória antes de apagar.
+    const channelIds = [...store.channels.values()].filter((c) => c.spaceId === space.id).map((c) => c.id);
+    const voiceSessions = [...store.voice.values()].filter((v) => v.spaceId === space.id);
+    try {
+      await store.deleteSpace(space.id);
+    } catch (err) {
+      return ack(storageError('space:delete', err));
+    }
+
+    for (const session of voiceSessions) {
+      endVoiceSession(io, store, session, `O espaço ${space.name} foi excluído.`);
+    }
+    io.socketsLeave([rooms.space(space.id), ...channelIds.map(rooms.channel)]);
+    io.emit('space:deleted', { spaceId: space.id });
+    ack({ ok: true, data: null });
   });
 
   // Criar canal exige MANAGE_CHANNELS no espaço.

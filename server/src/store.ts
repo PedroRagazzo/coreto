@@ -225,6 +225,25 @@ export class Store {
     return space;
   }
 
+  async updateSpace(spaceId: Id, name: string): Promise<Space> {
+    const space = toSpace(await this.db.space.update({ where: { id: spaceId }, data: { name } }));
+    this.spaces.set(space.id, space);
+    return space;
+  }
+
+  /**
+   * Apaga o espaço. O banco apaga em cascata cargos, categorias, canais (com
+   * mensagens e sobrescritas) e membros; aqui a memória acompanha.
+   */
+  async deleteSpace(spaceId: Id): Promise<void> {
+    await this.db.space.delete({ where: { id: spaceId } });
+    this.spaces.delete(spaceId);
+    for (const [id, role] of this.roles) if (role.spaceId === spaceId) this.roles.delete(id);
+    for (const [id, category] of this.categories) if (category.spaceId === spaceId) this.categories.delete(id);
+    for (const [id, channel] of this.channels) if (channel.spaceId === spaceId) this.channels.delete(id);
+    for (const [key, member] of this.members) if (member.spaceId === spaceId) this.members.delete(key);
+  }
+
   categoryIn(spaceId: Id, categoryId: Id): Category | null {
     const category = this.categories.get(categoryId);
     return category?.spaceId === spaceId ? category : null;

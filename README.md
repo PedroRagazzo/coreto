@@ -99,6 +99,10 @@ Todo evento do cliente é validado no servidor: tipo do payload, existência do 
 - **Espaço:** o botão **+** no fim da barra de espaços. Qualquer pessoa pode criar; quem cria vira dono (todas as
   permissões). O espaço nasce com as categorias "Canais de texto" e "Canais de voz", o canal `#geral` e a sala "Geral".
   Como todo espaço é público, todos os usuários viram membros na hora e recebem o espaço pelo evento `space:created`.
+- **Editar ou excluir espaço:** a engrenagem no cabeçalho da lista de canais. Renomear exige `ADMINISTRATOR` (o dono tem);
+  excluir é só para o dono e pede que o nome do espaço seja digitado para confirmar. A exclusão apaga em cascata cargos,
+  categorias, canais, mensagens e membros, desconecta quem estava numa sala de voz do espaço e manda quem estava nele
+  para outro espaço. Os espaços de demonstração pertencem ao robô, então ninguém os edita nem exclui.
 - **Canal:** o **+** no cabeçalho da lista de canais ou ao lado de cada categoria. Só aparece para quem tem
   `MANAGE_CHANNELS` no espaço (dono, administradores ou cargos com essa permissão), e o servidor confere de novo.
   Nomes de canais de texto são normalizados (`Dúvidas Gerais` → `#dúvidas-gerais`, ver `shared/src/names.ts`).
@@ -155,7 +159,8 @@ Fora de redes locais, configure um servidor TURN em `ICE_SERVERS`.
 ## Limitações do protótipo
 
 - Login provisório: token aleatório no `localStorage`, sem senha.
-- Não há como editar ou apagar espaços, reordenar canais, criar categorias, nem criar ou atribuir cargos pela interface.
+- Não há como trocar o ícone do espaço, transferir a posse, reordenar canais, criar categorias, nem criar ou atribuir
+  cargos pela interface.
 - Todo espaço é público: quem conecta vira membro de todos, inclusive dos criados por outras pessoas.
 - Mensagens diretas só entre duas pessoas (sem grupos) e sem lista para buscar usuários: comece pela lista de membros.
 - Mensagens não lidas só são contadas nas conversas diretas, e a contagem zera ao recarregar a página.

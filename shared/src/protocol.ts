@@ -78,6 +78,10 @@ export interface UpdateChannelRequest {
 export interface ClientToServerEvents {
   'space:join': (spaceId: Id, ack: (res: Ack<SpaceSnapshot>) => void) => void;
   'space:create': (req: { name: string }, ack: (res: Ack<Space>) => void) => void;
+  /** Renomeia o espaço; exige ADMINISTRATOR (o dono tem). */
+  'space:update': (req: { spaceId: Id; name: string }, ack: (res: Ack<Space>) => void) => void;
+  /** Apaga o espaço com tudo dentro; só o dono. */
+  'space:delete': (req: { spaceId: Id }, ack: (res: Ack<null>) => void) => void;
   'channel:create': (req: CreateChannelRequest, ack: (res: Ack<ChannelCreatedPayload>) => void) => void;
   'channel:update': (req: UpdateChannelRequest, ack: (res: Ack<Channel>) => void) => void;
   /** Apaga o canal e todas as mensagens dele. */
@@ -106,6 +110,8 @@ export interface ServerToClientEvents {
   }) => void;
   /** Um espaço novo foi criado; todos os usuários já são membros dele. */
   'space:created': (space: Space) => void;
+  'space:updated': (space: Space) => void;
+  'space:deleted': (payload: { spaceId: Id }) => void;
   /** Um canal novo apareceu no espaço aberto; só chega para quem pode vê-lo. */
   'channel:created': (payload: ChannelCreatedPayload) => void;
   /** Nome, tópico ou categoria mudaram; só chega para quem pode ver o canal. */
