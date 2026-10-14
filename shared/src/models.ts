@@ -117,6 +117,8 @@ export interface VoiceParticipant {
   channelId: Id;
   muted: boolean;
   deafened: boolean;
+  /** Câmera ligada. */
+  video: boolean;
   /** Está compartilhando a tela ("ao vivo"). */
   streaming: boolean;
   /** De quem está assistindo a transmissão, na mesma sala. */

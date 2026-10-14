@@ -12,7 +12,7 @@ export const Permission = {
   MANAGE_MESSAGES: 1 << 4,
   MANAGE_CHANNELS: 1 << 5,
   MANAGE_ROLES: 1 << 6,
-  /** Compartilhar a tela em canais de voz. */
+  /** Vídeo em canais de voz: ligar a câmera e compartilhar a tela (como o "Vídeo" do Discord). */
   STREAM: 1 << 7,
   /** Ignora todas as sobrescritas de canal. */
   ADMINISTRATOR: 1 << 30,

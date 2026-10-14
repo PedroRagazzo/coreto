@@ -4,6 +4,10 @@
 // com o padrão "perfect negotiation" resolvendo ofertas simultâneas.
 // Quem está falando é medido aqui mesmo, no áudio que chega (e no microfone):
 // nada disso passa pelo servidor.
+//
+// Câmera e tela vão em fluxos "portadores" fixos durante a chamada; ao abrir
+// cada conexão, os dois lados anunciam os ids deles (sinal `media`), e é assim
+// que quem recebe sabe qual vídeo é a câmera e qual é a tela.
 
 import type { Id } from '@shared/models';
 import type { IceServer, SignalPayload } from '@shared/protocol';
@@ -90,11 +94,21 @@ function maxBitrate({ height, frameRate }: ScreenShareOptions): number {
   return frameRate === 60 ? base * 1.5 : frameRate === 15 ? base * 0.6 : base;
 }
 
+/** Câmera leve para caber na malha: cada pessoa envia uma cópia para cada outra. */
+const CAMERA_CONSTRAINTS: MediaTrackConstraints = {
+  width: { ideal: 640 },
+  height: { ideal: 360 },
+  frameRate: { ideal: 24, max: 30 },
+};
+const CAMERA_MAX_BITRATE = 600_000;
+
 export interface VoiceEvents {
   /** Quem está falando agora (incluindo você), a cada mudança. */
   onSpeaking?: (speaking: Set<Id>) => void;
   /** A tela de alguém começou a chegar (ou parou de existir, com `null`). */
   onRemoteScreen?: (userId: Id, stream: MediaStream | null) => void;
+  /** A câmera de alguém começou a chegar (ou parou de existir, com `null`). */
+  onRemoteCamera?: (userId: Id, stream: MediaStream | null) => void;
   /** Você parou de compartilhar pelo próprio navegador (botão "Parar de compartilhar"). */
   onScreenEnded?: () => void;
 }
@@ -106,12 +120,19 @@ interface Peer {
   makingOffer: boolean;
   ignoreOffer: boolean;
   audio: HTMLAudioElement | null;
-  /** Id do fluxo do microfone remoto; qualquer outro fluxo é a tela. */
-  micStreamId: string | null;
-  /** Transceptores da sua tela para esta pessoa, criados na primeira vez que ela assiste. */
+  /** Seu microfone (e câmera/tela, se houver) já está nesta conexão. */
+  sending: boolean;
+  /** Ids dos fluxos de câmera e tela do outro lado (sinal `media`). */
+  remoteMedia: { camera: string; screen: string } | null;
+  /** Fluxos de vídeo recebidos, por id, até saber se são câmera ou tela. */
+  remoteVideo: Map<string, MediaStream>;
+  /** Transceptores do que você envia: tela (para quem assiste) e câmera (para todos). */
   screenVideo: RTCRtpTransceiver | null;
   screenAudio: RTCRtpTransceiver | null;
+  cameraVideo: RTCRtpTransceiver | null;
 }
+
+type Slot = 'screenVideo' | 'screenAudio' | 'cameraVideo';
 
 export class VoiceManager {
   private localStream: MediaStream | null = null;
@@ -122,6 +143,10 @@ export class VoiceManager {
   private selfId: Id | null = null;
   private readonly detector: SpeakingDetector;
   private screen: { stream: MediaStream; options: ScreenShareOptions } | null = null;
+  private camera: MediaStream | null = null;
+  /** Fluxos fixos onde câmera e tela viajam; os ids são anunciados a cada pessoa. */
+  private cameraCarrier = new MediaStream();
+  private screenCarrier = new MediaStream();
   /** Quem deve receber sua tela agora (quem está assistindo, segundo o servidor). */
   private screenViewers = new Set<Id>();
   /** Sinais são processados um por vez, na ordem de chegada (o candidato não pode passar à frente da oferta). */
@@ -150,6 +175,8 @@ export class VoiceManager {
       throw new Error(res.error);
     }
     this.localStream = stream;
+    this.cameraCarrier = new MediaStream();
+    this.screenCarrier = new MediaStream();
     this.iceServers = res.data.iceServers;
     this.iceTransportPolicy = res.data.iceTransportPolicy;
     this.selfId = selfId;
@@ -169,6 +196,7 @@ export class VoiceManager {
   /** Encerra tudo localmente sem avisar o servidor (ele já encerrou ou caiu). */
   teardown(): void {
     this.stopScreen();
+    this.stopCamera();
     for (const peerId of [...this.peers.keys()]) this.closePeer(peerId);
     if (this.selfId) this.detector.unwatch(this.selfId);
     this.detector.stop();
@@ -237,38 +265,68 @@ export class VoiceManager {
   private applyScreenViewers(): void {
     const video = this.screen?.stream.getVideoTracks()[0] ?? null;
     const audio = this.screen?.stream.getAudioTracks()[0] ?? null;
+    const options = this.screen?.options;
+    const encodings = options ? [{ maxBitrate: maxBitrate(options), maxFramerate: options.frameRate }] : [];
     for (const [peerId, peer] of this.peers) {
       const watching = this.screen !== null && this.screenViewers.has(peerId);
-      this.sendScreenTrack(peer, 'screenVideo', watching ? video : null);
-      this.sendScreenTrack(peer, 'screenAudio', watching ? audio : null);
+      this.sendTrack(peer, 'screenVideo', watching ? video : null, this.screenCarrier, encodings);
+      this.sendTrack(peer, 'screenAudio', watching ? audio : null, this.screenCarrier, []);
     }
   }
 
-  private sendScreenTrack(peer: Peer, slot: 'screenVideo' | 'screenAudio', track: MediaStreamTrack | null): void {
+  /**
+   * Põe a faixa no transceptor da vaga (criando-o na primeira vez, o que
+   * renegocia) ou tira com `null`, sem renegociar.
+   */
+  private sendTrack(
+    peer: Peer,
+    slot: Slot,
+    track: MediaStreamTrack | null,
+    carrier: MediaStream,
+    encodings: RTCRtpEncodingParameters[],
+  ): void {
     const transceiver = peer[slot];
     if (!transceiver) {
-      if (!track || !this.screen) return;
-      const encodings: RTCRtpEncodingParameters[] =
-        track.kind === 'video'
-          ? [{ maxBitrate: maxBitrate(this.screen.options), maxFramerate: this.screen.options.frameRate }]
-          : [];
-      peer[slot] = peer.pc.addTransceiver(track, {
-        direction: 'sendonly',
-        streams: [this.screen.stream],
-        sendEncodings: encodings,
-      });
+      if (!track) return;
+      peer[slot] = peer.pc.addTransceiver(track, { direction: 'sendonly', streams: [carrier], sendEncodings: encodings });
       return;
     }
-    void transceiver.sender.replaceTrack(track).catch((err: unknown) => console.warn('[tela] replaceTrack', err));
-    if (track?.kind === 'video' && this.screen) void this.updateEncoding(transceiver.sender, this.screen.options);
+    void transceiver.sender.replaceTrack(track).catch((err: unknown) => console.warn('[voz] replaceTrack', err));
+    if (track && encodings.length) void this.updateEncoding(transceiver.sender, encodings[0]);
   }
 
-  private async updateEncoding(sender: RTCRtpSender, options: ScreenShareOptions): Promise<void> {
+  private async updateEncoding(sender: RTCRtpSender, encoding: RTCRtpEncodingParameters): Promise<void> {
     const params = sender.getParameters();
     if (!params.encodings?.length) return;
-    params.encodings[0].maxBitrate = maxBitrate(options);
-    params.encodings[0].maxFramerate = options.frameRate;
-    await sender.setParameters(params).catch((err: unknown) => console.warn('[tela] setParameters', err));
+    params.encodings[0].maxBitrate = encoding.maxBitrate;
+    params.encodings[0].maxFramerate = encoding.maxFramerate;
+    await sender.setParameters(params).catch((err: unknown) => console.warn('[voz] setParameters', err));
+  }
+
+  // ── Câmera ─────────────────────────────────────────────────────────────────
+
+  /** Liga a câmera e manda o vídeo para todos da chamada. */
+  async startCamera(): Promise<MediaStream> {
+    if (!this.localStream) throw new Error('Entre em um canal de voz para ligar a câmera.');
+    const stream = await navigator.mediaDevices.getUserMedia({ video: CAMERA_CONSTRAINTS, audio: false });
+    this.stopCamera();
+    this.camera = stream;
+    this.applyCamera();
+    return stream;
+  }
+
+  stopCamera(): void {
+    if (!this.camera) return;
+    this.camera.getTracks().forEach((track) => track.stop());
+    this.camera = null;
+    this.applyCamera();
+  }
+
+  private applyCamera(): void {
+    const track = this.camera?.getVideoTracks()[0] ?? null;
+    for (const peer of this.peers.values()) {
+      this.sendTrack(peer, 'cameraVideo', track, this.cameraCarrier, [{ maxBitrate: CAMERA_MAX_BITRATE }]);
+    }
   }
 
   // ── Conexões ───────────────────────────────────────────────────────────────
@@ -282,11 +340,16 @@ export class VoiceManager {
       makingOffer: false,
       ignoreOffer: false,
       audio: null,
-      micStreamId: null,
+      sending: false,
+      remoteMedia: null,
+      remoteVideo: new Map(),
       screenVideo: null,
       screenAudio: null,
+      cameraVideo: null,
     };
     this.peers.set(peerId, peer);
+    // Antes de qualquer oferta: o outro lado precisa saber qual vídeo é qual.
+    this.signal(peerId, { kind: 'media', camera: this.cameraCarrier.id, screen: this.screenCarrier.id });
 
     pc.onnegotiationneeded = async () => {
       try {
@@ -304,9 +367,13 @@ export class VoiceManager {
     };
     pc.ontrack = ({ track, streams: [remote] }) => {
       if (!remote) return;
-      const isMic = track.kind === 'audio' && (peer.micStreamId ?? remote.id) === remote.id;
-      if (isMic) {
-        peer.micStreamId = remote.id;
+      if (track.kind === 'video') {
+        peer.remoteVideo.set(remote.id, remote);
+        this.announceVideo(peerId, peer);
+        return;
+      }
+      // Áudio que não é da tela é o microfone (o som da tela toca pelo <video> de quem assiste).
+      if (remote.id !== peer.remoteMedia?.screen) {
         const audio = peer.audio ?? new Audio();
         audio.autoplay = true;
         audio.srcObject = remote;
@@ -316,10 +383,7 @@ export class VoiceManager {
         audio.play().catch(() => {
           // O navegador pode bloquear autoplay; o clique em "entrar" normalmente libera.
         });
-      } else if (track.kind === 'video') {
-        this.events.onRemoteScreen?.(peerId, remote);
       }
-      // O som da tela vem no mesmo fluxo do vídeo e toca pelo <video> de quem assiste.
     };
     pc.onconnectionstatechange = () => {
       if (pc.connectionState === 'failed') pc.restartIce();
@@ -327,18 +391,31 @@ export class VoiceManager {
     return peer;
   }
 
+  /** Avisa os vídeos recebidos cuja origem (câmera ou tela) já é conhecida. */
+  private announceVideo(peerId: Id, peer: Peer): void {
+    const media = peer.remoteMedia;
+    if (!media) return;
+    for (const [id, stream] of peer.remoteVideo) {
+      if (id === media.camera) this.events.onRemoteCamera?.(peerId, stream);
+      else if (id === media.screen) this.events.onRemoteScreen?.(peerId, stream);
+    }
+  }
+
   private addLocalAudio(peer: Peer): void {
     const stream = this.localStream;
     stream?.getAudioTracks().forEach((track) => peer.pc.addTrack(track, stream));
+    peer.sending = true;
   }
 
   private async handleSignal(from: Id, signal: SignalPayload): Promise<void> {
     if (!this.localStream) return;
-    const known = this.peers.get(from);
-    const peer = known ?? this.createPeer(from);
+    const peer = this.peers.get(from) ?? this.createPeer(from);
     const { pc } = peer;
     try {
-      if (signal.kind === 'description') {
+      if (signal.kind === 'media') {
+        peer.remoteMedia = { camera: signal.camera, screen: signal.screen };
+        this.announceVideo(from, peer);
+      } else if (signal.kind === 'description') {
         const { description } = signal;
         const collision = description.type === 'offer' && (peer.makingOffer || pc.signalingState !== 'stable');
         peer.ignoreOffer = !peer.polite && collision;
@@ -347,11 +424,15 @@ export class VoiceManager {
         if (description.type === 'offer') {
           // Quem recebe a primeira oferta só adiciona o microfone agora, reaproveitando o
           // transceptor que a oferta criou (antes disso, criaria outro e renegociaria à toa).
-          if (!known) this.addLocalAudio(peer);
+          const first = !peer.sending;
+          if (first) this.addLocalAudio(peer);
           await pc.setLocalDescription();
           this.sendDescription(from, pc);
+          if (first) {
+            this.applyScreenViewers();
+            this.applyCamera();
+          }
         }
-        if (!known) this.applyScreenViewers();
       } else {
         try {
           await pc.addIceCandidate(signal.candidate);
@@ -382,6 +463,7 @@ export class VoiceManager {
     this.detector.unwatch(peerId);
     this.peers.delete(peerId);
     this.events.onRemoteScreen?.(peerId, null);
+    this.events.onRemoteCamera?.(peerId, null);
   }
 }
 
@@ -392,6 +474,15 @@ export function describeMediaError(err: unknown): string {
     if (err.name === 'NotReadableError') return 'O microfone está em uso por outro programa.';
   }
   return err instanceof Error ? err.message : 'Não foi possível entrar na chamada.';
+}
+
+export function describeCameraError(err: unknown): string {
+  if (err instanceof DOMException) {
+    if (err.name === 'NotAllowedError') return 'Permissão da câmera negada pelo navegador.';
+    if (err.name === 'NotFoundError') return 'Nenhuma câmera encontrada.';
+    if (err.name === 'NotReadableError') return 'A câmera está em uso por outro programa.';
+  }
+  return err instanceof Error ? err.message : 'Não foi possível ligar a câmera.';
 }
 
 /** Mensagem para falhas do seletor de tela; `null` quando a pessoa só cancelou. */

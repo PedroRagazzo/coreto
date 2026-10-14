@@ -26,6 +26,7 @@ import type {
   User,
   VoiceParticipant,
 } from '../../shared/src/models.js';
+import type { MessageContext } from '../../shared/src/protocol.js';
 import { hashToken, type Db } from './db/client.js';
 import {
   messageInclude,
@@ -41,6 +42,7 @@ import {
 } from './db/mappers.js';
 import { loginKey, normalizeDisplayName } from '../../shared/src/names.js';
 import { DEFAULT_EVERYONE_PERMISSIONS } from '../../shared/src/permissions.js';
+import { searchKey } from '../../shared/src/search.js';
 import { hashPin, newSessionToken, verifyPin } from './auth.js';
 import { computeChannelPermissions, computeSpacePermissions } from './permissions.js';
 
@@ -57,9 +59,10 @@ export const toParticipant = ({
   channelId,
   muted,
   deafened,
+  video,
   streaming,
   watching,
-}: VoiceSession): VoiceParticipant => ({ userId, channelId, muted, deafened, streaming, watching });
+}: VoiceSession): VoiceParticipant => ({ userId, channelId, muted, deafened, video, streaming, watching });
 
 /** Um anexo do pedido não existe, é de outra pessoa ou já está em outra mensagem. */
 export class AttachmentUnavailableError extends Error {
@@ -88,6 +91,9 @@ export type LoginResult =
   | { status: 'ok'; user: User; token: string; created: boolean }
   | { status: 'wrong_pin' }
   | { status: 'reserved_name' };
+
+/** Posição de uma mensagem no histórico (o id desempata o mesmo milissegundo). */
+type Cursor = { id: Id; createdAt: Date };
 
 const byPosition = (a: { position: number }, b: { position: number }) => a.position - b.position;
 const memberKey = (spaceId: Id, userId: Id) => `${spaceId}:${userId}`;
@@ -413,27 +419,93 @@ export class Store {
 
   // ── Mensagens ──────────────────────────────────────────────────────────────
 
-  /**
-   * Mensagens de um canal ou conversa em ordem cronológica. `before` pagina
-   * para trás a partir de uma mensagem já conhecida.
-   */
-  async history(targetId: Id, before?: Id, limit = 50): Promise<Message[]> {
-    const target = this.directs.has(targetId) ? { directId: targetId } : { channelId: targetId };
-    const cursor = before
-      ? await this.db.message.findUnique({ where: { id: before }, select: { id: true, createdAt: true } })
-      : null;
+  private targetWhere(targetId: Id) {
+    return this.directs.has(targetId) ? { directId: targetId } : { channelId: targetId };
+  }
+
+  /** Antes (`older`) ou depois (`newer`) de uma posição, desempatando pelo id. */
+  private static beyond(cursor: Cursor, direction: 'older' | 'newer') {
+    const cmp = direction === 'older' ? 'lt' : 'gt';
+    return { OR: [{ createdAt: { [cmp]: cursor.createdAt } }, { createdAt: cursor.createdAt, id: { [cmp]: cursor.id } }] };
+  }
+
+  /** Até `take` mensagens a partir do cursor, em ordem cronológica. Sem cursor, as mais recentes. */
+  private async page(targetId: Id, cursor: Cursor | null, direction: 'older' | 'newer', take: number) {
+    const order = direction === 'older' ? 'desc' : 'asc';
     const rows = await this.db.message.findMany({
-      where: {
-        ...target,
-        ...(cursor && {
-          OR: [{ createdAt: { lt: cursor.createdAt } }, { createdAt: cursor.createdAt, id: { lt: cursor.id } }],
-        }),
-      },
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      take: limit,
+      where: { ...this.targetWhere(targetId), ...(cursor && Store.beyond(cursor, direction)) },
+      orderBy: [{ createdAt: order }, { id: order }],
+      take,
       include: messageInclude,
     });
-    return rows.reverse().map(toMessage);
+    return (direction === 'older' ? rows.reverse() : rows).map(toMessage);
+  }
+
+  private async cursorOf(messageId: Id): Promise<Cursor | null> {
+    return this.db.message.findUnique({ where: { id: messageId }, select: { id: true, createdAt: true } });
+  }
+
+  /**
+   * Mensagens de um canal ou conversa em ordem cronológica: as mais recentes,
+   * as anteriores a `before` ou as seguintes a `after`.
+   */
+  async history(targetId: Id, { before, after }: { before?: Id; after?: Id } = {}, limit = 50): Promise<Message[]> {
+    if (after) {
+      const cursor = await this.cursorOf(after);
+      return cursor ? this.page(targetId, cursor, 'newer', limit) : [];
+    }
+    const cursor = before ? await this.cursorOf(before) : null;
+    if (before && !cursor) return [];
+    return this.page(targetId, cursor, 'older', limit);
+  }
+
+  /** A mensagem com até `size` vizinhas, metade de cada lado, e se o histórico acaba antes ou depois. */
+  async context(message: Message, size = 50): Promise<Omit<MessageContext, 'channelId'>> {
+    const cursor = { id: message.id, createdAt: new Date(message.createdAt) };
+    const half = Math.floor(size / 2);
+    // Uma a mais de cada lado só para saber se o histórico continua.
+    const [older, newer] = await Promise.all([
+      this.page(message.channelId, cursor, 'older', half + 1),
+      this.page(message.channelId, cursor, 'newer', half + 1),
+    ]);
+    return {
+      messages: [...older.slice(-half), message, ...newer.slice(0, half)],
+      reachedStart: older.length <= half,
+      reachedEnd: newer.length <= half,
+    };
+  }
+
+  /**
+   * Busca da mais recente para a mais antiga. Todas as palavras precisam
+   * aparecer no texto normalizado (sem acentos, minúsculo).
+   */
+  async search(
+    where: { channelIds?: Id[]; directId?: Id; words: string[]; authorId?: Id; has?: 'image' | 'link'; before?: Id },
+    limit = 25,
+  ): Promise<{ messages: Message[]; total: number }> {
+    const filter = {
+      ...(where.directId ? { directId: where.directId } : { channelId: { in: where.channelIds ?? [] } }),
+      ...(where.authorId && { authorId: where.authorId }),
+      ...(where.has === 'image' && { attachments: { some: {} } }),
+      AND: [
+        // O Prisma passa `contains` direto para o LIKE: sem escape, "%" e "_" seriam curingas.
+        ...where.words.map((word) => ({ searchText: { contains: word.replace(/[\\%_]/g, '\\$&') } })),
+        ...(where.has === 'link'
+          ? [{ OR: [{ searchText: { contains: 'http://' } }, { searchText: { contains: 'https://' } }] }]
+          : []),
+      ],
+    };
+    const cursor = where.before ? await this.cursorOf(where.before) : null;
+    const [total, rows] = await Promise.all([
+      this.db.message.count({ where: filter }),
+      this.db.message.findMany({
+        where: { ...filter, ...(cursor && Store.beyond(cursor, 'older')) },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: limit,
+        include: messageInclude,
+      }),
+    ]);
+    return { total, messages: rows.map(toMessage) };
   }
 
   /**
@@ -461,7 +533,13 @@ export class Store {
     const direct = this.directs.get(targetId);
     const row = await this.db.$transaction(async (tx) => {
       const message = await tx.message.create({
-        data: { ...(direct ? { directId: targetId } : { channelId: targetId }), authorId, content, createdAt },
+        data: {
+          ...(direct ? { directId: targetId } : { channelId: targetId }),
+          authorId,
+          content,
+          searchText: searchKey(content),
+          createdAt,
+        },
       });
       for (const [position, id] of attachmentIds.entries()) {
         const { count } = await tx.attachment.updateMany({
@@ -487,7 +565,11 @@ export class Store {
 
   async editMessage(messageId: Id, content: string, mentions?: MentionChanges): Promise<Message> {
     const [row] = await this.db.$transaction([
-      this.db.message.update({ where: { id: messageId }, data: { content, editedAt: new Date() }, include: messageInclude }),
+      this.db.message.update({
+        where: { id: messageId },
+        data: { content, searchText: searchKey(content), editedAt: new Date() },
+        include: messageInclude,
+      }),
       this.db.mention.deleteMany({ where: { messageId, userId: { in: mentions?.removed ?? [] } } }),
       this.db.mention.createMany({
         data: (mentions?.added ?? []).map((userId) => ({ messageId, userId, channelId: mentions!.channelId })),

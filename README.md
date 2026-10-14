@@ -70,6 +70,7 @@ coreto/
 ├── shared/src/              Contrato único entre servidor e cliente
 │   ├── models.ts            Espaço, Categoria, Canal, Cargo, Membro, Mensagem, Anexo, Voz
 │   ├── markup.ts            Formatação das mensagens e menções (servidor e cliente usam o mesmo parser)
+│   ├── search.ts            Texto normalizado da busca (sem acentos, minúsculo)
 │   ├── permissions.ts       Bit flags (ler, escrever, conectar, falar...)
 │   └── protocol.ts          Eventos socket.io tipados + formatos de sinalização WebRTC
 ├── server/
@@ -88,7 +89,7 @@ coreto/
 │       ├── permissions.ts   Cálculo de permissões efetivas por canal
 │       ├── seed.ts          Espaços e canais de demonstração (só com o banco vazio)
 │       └── realtime/
-│           ├── chat.ts      Entrar no espaço, histórico, mensagens, menções, digitação
+│           ├── chat.ts      Entrar no espaço, histórico, busca, mensagens, menções, digitação
 │           ├── presence.ts  Online / ausente / não perturbe / indisponível
 │           ├── voice.ts     Lista das salas, quem transmite e quem assiste, repasse de sinalização WebRTC
 │           ├── membership.ts
@@ -108,7 +109,9 @@ coreto/
         ├── MemberList.tsx        Membros online / indisponíveis à direita
         ├── MessageContent.tsx    Texto formatado, menções e imagens de uma mensagem
         ├── MentionAutocomplete.tsx  Sugestões ao digitar "@"
+        ├── CallView.tsx          Mosaico da chamada: câmeras, avatares e cartões de quem está ao vivo
         ├── StreamStage.tsx       Transmissão de tela no painel central (assistir ou prévia)
+        ├── Search.tsx            Caixa de busca do cabeçalho e painel de resultados
         ├── ScreenShareDialog.tsx Qualidade da transmissão antes do seletor do navegador
         ├── VoiceStatusBar.tsx, UserPanel.tsx, MessageList.tsx, MessageInput.tsx ...
 ```
@@ -187,6 +190,22 @@ Depois disso o navegador guarda um token de sessão que **não expira**, e a pes
   canais ou espaços excluídos, são limpos ao iniciar e a cada hora. Os arquivos ficam em `server/uploads`
   (`UPLOAD_DIR`). O link de uma imagem é aleatório e não exige login, como num CDN: quem tem o link vê a imagem.
 
+## Busca
+
+A caixa **Buscar** no cabeçalho procura em todos os canais de texto que você vê no espaço, ou na conversa direta aberta.
+Enter abre os resultados à direita, da mensagem mais recente para a mais antiga, com as palavras destacadas. Todas as
+palavras precisam aparecer, sem diferenciar acentos nem maiúsculas ("orcamento" encontra "Orçamento"). Os filtros
+**De** (autor), **Em** (canal), **Com imagem** e **Com link** funcionam sozinhos ou junto com o texto.
+
+Clicar num resultado abre a conversa já rolada até a mensagem, que pisca por um instante, mesmo que ela seja antiga:
+`message:context` traz a mensagem com as vizinhas. A lista fica "parada no passado". Rolar até o fim carrega as
+seguintes (`channel:history` com `after`), e o aviso **Ir para as mais recentes** volta ao presente. Mensagens novas
+que chegam nesse meio-tempo aparecem ao voltar.
+
+No banco, cada mensagem guarda `searchText`, o conteúdo sem acentos, minúsculo e sem os ids das menções
+(`shared/src/search.ts`), com um índice trigram (`pg_trgm`) que acelera a busca por trecho. O servidor só busca nos
+canais em que a pessoa tem `VIEW_CHANNEL` e nas conversas diretas de que ela participa.
+
 ## Mensagens diretas
 
 Clique em alguém na lista de membros para abrir uma conversa privada. Só é possível conversar com quem participa de
@@ -219,7 +238,7 @@ cada uma precisaria ser invalidada (por exemplo, com Redis pub/sub) e o socket.i
 O cálculo (`server/src/permissions.ts`) aplica, em ordem: dono do espaço → cargos (+ `@everyone`) → `ADMINISTRATOR` →
 sobrescrita de `@everyone` → sobrescritas dos cargos → sobrescrita do membro. Sem `VIEW_CHANNEL` o canal some.
 
-`STREAM` (compartilhar a tela) vem ligada no `@everyone`; uma sobrescrita de canal pode tirá-la de uma sala.
+`STREAM` (vídeo: câmera e tela) vem ligada no `@everyone`; uma sobrescrita de canal pode tirá-la de uma sala.
 
 Exemplos na seed: `#avisos` (todos leem, só a Moderação escreve) e `#moderação` (invisível para quem não é da Moderação).
 
@@ -235,6 +254,19 @@ nada pelo servidor.
 A malha funciona bem até umas 5 a 8 pessoas por sala, porque cada participante envia o áudio para todos os outros.
 Para salas maiores, e para impor `SPEAK` no servidor, troque por um SFU (mediasoup, LiveKit ou Janus):
 o protocolo de `voice:join` / `voice:signal` já isola essa troca em `server/src/realtime/voice.ts` e `client/src/lib/voice.ts`.
+
+### Câmera e visão da chamada
+
+Como no Discord, a barra de voz tem os botões **Câmera** e **Tela** lado a lado. Clicar no canal de voz (para entrar,
+ou de novo depois de entrar) abre a **visão da chamada** no painel central. Ela mostra um quadro por pessoa: a câmera
+de quem ligou, ou o avatar, com o anel verde de quem está falando. Também traz um cartão para cada tela ao vivo, com
+**Assistir**, e controles de câmera, tela, microfone e sair. Sua câmera aparece espelhada para você e normal para os
+outros.
+
+A câmera vai para todos da chamada em 640×360 (até 600 kbit/s por pessoa), para caber na malha. O servidor só guarda
+`video` de cada participante (`voice:video`). Câmera e tela viajam em fluxos fixos; ao abrir cada conexão, os dois lados
+anunciam os ids deles (sinal `media`), e é assim que quem recebe sabe qual vídeo é qual. Ligar a câmera usa a mesma
+permissão `STREAM` da tela, como a permissão "Vídeo" do Discord.
 
 ### Compartilhamento de tela
 
@@ -288,8 +320,10 @@ se a chamada ficar muda o problema está nele (porta, segredo ou realm). Servido
 - Anexos só de imagem, sem limite de envios por pessoa, guardados no disco do servidor (para várias instâncias, troque
   por um armazenamento de objetos como S3).
 - O anel de quem está falando só aparece para quem está na mesma chamada.
-- Sem câmera. Na malha P2P, quem transmite a tela manda uma cópia do vídeo para cada pessoa que assiste: até umas 4 ou
-  5 pessoas assistindo, conforme a internet de quem transmite. Cada pessoa assiste a uma transmissão por vez.
+- Na malha P2P, cada câmera vai para todos da chamada e cada tela vai para cada pessoa que assiste. Com vídeo, a
+  chamada aguenta umas 4 ou 5 pessoas, conforme a internet de cada uma. Cada pessoa assiste a uma transmissão por vez.
+- A busca compara trechos de palavras (sem português "inteligente": "correr" não encontra "corri"). Com milhões de
+  mensagens, troque por busca de texto completo (`tsvector`) ou um serviço de busca.
 
 ## Licença
 

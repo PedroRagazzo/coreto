@@ -1,10 +1,12 @@
 import { Permission } from '@shared/permissions';
 import { Hash, Users } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { useRealtime } from '../state/realtime';
 import { can } from '../state/selectors';
 import { MemberList } from './MemberList';
 import { MessageInput } from './MessageInput';
 import { MessageList } from './MessageList';
+import { SearchBox, SearchPanel } from './Search';
 import { TypingIndicator } from './TypingIndicator';
 
 interface ChatPanelProps {
@@ -17,6 +19,10 @@ export function ChatPanel({ showMembers, onToggleMembers }: ChatPanelProps) {
   const { snapshot } = state;
   const channelId = snapshot ? state.activeChannelBySpace[snapshot.space.id] : undefined;
   const channel = snapshot?.channels.find((c) => c.id === channelId);
+  /** Texto da busca aberta ao lado; `null` = busca fechada. */
+  const [searchQuery, setSearchQuery] = useState<string | null>(null);
+  const spaceId = snapshot?.space.id;
+  useEffect(() => setSearchQuery(null), [spaceId]);
 
   return (
     <>
@@ -35,12 +41,16 @@ export function ChatPanel({ showMembers, onToggleMembers }: ChatPanelProps) {
         ) : (
           <h2 className="font-semibold text-muted">Nenhum canal selecionado</h2>
         )}
+        {snapshot && <SearchBox key={snapshot.space.id} placeholder={`Buscar em ${snapshot.space.name}`} onSearch={setSearchQuery} />}
         <button
           type="button"
-          onClick={onToggleMembers}
-          aria-pressed={showMembers}
+          onClick={() => {
+            setSearchQuery(null);
+            if (searchQuery === null || !showMembers) onToggleMembers();
+          }}
+          aria-pressed={showMembers && searchQuery === null}
           title={showMembers ? 'Ocultar membros' : 'Mostrar membros'}
-          className={`ml-auto hidden rounded p-1.5 lg:block ${showMembers ? 'text-fg' : 'text-faint hover:text-fg'}`}
+          className={`hidden rounded p-1.5 lg:block ${showMembers && searchQuery === null ? 'text-fg' : 'text-faint hover:text-fg'}`}
         >
           <Users size={20} />
         </button>
@@ -77,7 +87,11 @@ export function ChatPanel({ showMembers, onToggleMembers }: ChatPanelProps) {
           )}
         </section>
 
-        {showMembers && snapshot && <MemberList />}
+        {snapshot && searchQuery !== null ? (
+          <SearchPanel scope={{ spaceId: snapshot.space.id }} query={searchQuery} onClose={() => setSearchQuery(null)} />
+        ) : (
+          showMembers && snapshot && <MemberList />
+        )}
       </div>
     </>
   );

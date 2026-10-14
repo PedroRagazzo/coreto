@@ -20,7 +20,10 @@ import {
   INVALID_SESSION,
   type ChannelCreatedPayload,
   type CreateChannelRequest,
+  type Ack,
   type DirectConversationPayload,
+  type SearchRequest,
+  type SearchResult,
   type SelectableStatus,
   type UpdateChannelRequest,
 } from '@shared/protocol';
@@ -28,7 +31,13 @@ import { createContext, useContext, useEffect, useMemo, useReducer, useRef, type
 import type { Identity } from '../lib/identity';
 import { createSocket, type AppSocket } from '../lib/socket';
 import { uploadImage, type UploadHandle } from '../lib/uploads';
-import { describeMediaError, describeScreenError, VoiceManager, type ScreenShareOptions } from '../lib/voice';
+import {
+  describeCameraError,
+  describeMediaError,
+  describeScreenError,
+  VoiceManager,
+  type ScreenShareOptions,
+} from '../lib/voice';
 
 const TYPING_TTL_MS = 6_000;
 const TYPING_THROTTLE_MS = 3_000;
@@ -45,6 +54,8 @@ export interface MyVoiceState {
   canStream: boolean;
   /** Você está compartilhando a tela. */
   streaming: boolean;
+  /** Sua câmera está ligada. */
+  video: boolean;
   error: string | null;
 }
 
@@ -82,6 +93,16 @@ export interface RealtimeState {
   screens: Record<Id, MediaStream>;
   /** Transmissão aberta no painel central (a sua, para a prévia, ou a de quem você assiste). */
   stage: Id | null;
+  /** Sua câmera, enquanto ligada (para o seu quadro no mosaico). */
+  myCamera: MediaStream | null;
+  /** Câmeras que chegam de outras pessoas da chamada. */
+  cameras: Record<Id, MediaStream>;
+  /** O painel central mostra o mosaico da chamada (em vez do chat). */
+  callView: boolean;
+  /** Conversas cuja lista não chega até a mensagem mais recente (depois de pular para uma antiga). */
+  detached: Record<Id, true>;
+  /** Mensagem para rolar até e destacar (resultado de busca). */
+  focus: { channelId: Id; messageId: Id } | null;
 }
 
 const IDLE_VOICE: MyVoiceState = {
@@ -94,6 +115,7 @@ const IDLE_VOICE: MyVoiceState = {
   canSpeak: true,
   canStream: false,
   streaming: false,
+  video: false,
   error: null,
 };
 
@@ -120,6 +142,11 @@ const initialState: RealtimeState = {
   myScreen: null,
   screens: {},
   stage: null,
+  myCamera: null,
+  cameras: {},
+  callView: false,
+  detached: {},
+  focus: null,
 };
 
 type Action =
@@ -143,7 +170,17 @@ type Action =
   | { type: 'space:select'; spaceId: Id | null }
   | { type: 'space:snapshot'; snapshot: SpaceSnapshot }
   | { type: 'channel:select'; spaceId: Id; channelId: Id }
-  | { type: 'messages:history'; channelId: Id; messages: Message[]; reachedStart: boolean }
+  | { type: 'messages:history'; channelId: Id; messages: Message[]; reachedStart: boolean; latest?: boolean }
+  | { type: 'messages:newer'; channelId: Id; messages: Message[]; reachedEnd: boolean }
+  | {
+      type: 'messages:context';
+      channelId: Id;
+      messages: Message[];
+      reachedStart: boolean;
+      reachedEnd: boolean;
+      focusId: Id;
+    }
+  | { type: 'focus:clear' }
   | { type: 'history:loading'; channelId: Id; loading: boolean }
   | { type: 'message:new'; message: Message }
   | { type: 'message:updated'; message: Message }
@@ -157,7 +194,10 @@ type Action =
   | { type: 'speaking'; userIds: Id[] }
   | { type: 'screen:mine'; stream: MediaStream | null }
   | { type: 'screen:remote'; userId: Id; stream: MediaStream | null }
-  | { type: 'stage'; userId: Id | null };
+  | { type: 'stage'; userId: Id | null }
+  | { type: 'camera:mine'; stream: MediaStream | null }
+  | { type: 'camera:remote'; userId: Id; stream: MediaStream | null }
+  | { type: 'callView'; open: boolean };
 
 function withoutKey<T>(record: Record<Id, T> | undefined, key: Id): Record<Id, T> {
   const { [key]: _removed, ...rest } = record ?? {};
@@ -272,6 +312,7 @@ function reducer(state: RealtimeState, action: Action): RealtimeState {
       return {
         ...state,
         stage: null,
+        callView: false,
         activeSpaceId: null,
         activeDirectId: action.conversationId,
         unread: withoutKey(state.unread, action.conversationId),
@@ -281,6 +322,7 @@ function reducer(state: RealtimeState, action: Action): RealtimeState {
       return {
         ...state,
         stage: null,
+        callView: false,
         activeSpaceId: action.spaceId,
         snapshot: state.snapshot?.space.id === action.spaceId ? state.snapshot : null,
       };
@@ -298,10 +340,22 @@ function reducer(state: RealtimeState, action: Action): RealtimeState {
       return {
         ...state,
         stage: null,
+        callView: false,
         activeChannelBySpace: { ...state.activeChannelBySpace, [action.spaceId]: action.channelId },
       };
 
     case 'messages:history': {
+      // A página mais recente não emenda numa lista que parou no passado: substitui.
+      if (action.latest && state.detached[action.channelId]) {
+        return {
+          ...state,
+          messages: { ...state.messages, [action.channelId]: action.messages },
+          detached: withoutKey(state.detached, action.channelId),
+          historyComplete: action.reachedStart
+            ? { ...state.historyComplete, [action.channelId]: true }
+            : withoutKey(state.historyComplete, action.channelId),
+        };
+      }
       const byId = new Map((state.messages[action.channelId] ?? []).map((m) => [m.id, m]));
       for (const message of action.messages) byId.set(message.id, message);
       const merged = [...byId.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
@@ -315,6 +369,35 @@ function reducer(state: RealtimeState, action: Action): RealtimeState {
             : state.historyComplete,
       };
     }
+
+    case 'messages:newer': {
+      const byId = new Map((state.messages[action.channelId] ?? []).map((m) => [m.id, m]));
+      for (const message of action.messages) byId.set(message.id, message);
+      return {
+        ...state,
+        messages: {
+          ...state.messages,
+          [action.channelId]: [...byId.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
+        },
+        detached: action.reachedEnd ? withoutKey(state.detached, action.channelId) : state.detached,
+      };
+    }
+
+    case 'messages:context':
+      return {
+        ...state,
+        messages: { ...state.messages, [action.channelId]: action.messages },
+        historyComplete: action.reachedStart
+          ? { ...state.historyComplete, [action.channelId]: true }
+          : withoutKey(state.historyComplete, action.channelId),
+        detached: action.reachedEnd
+          ? withoutKey(state.detached, action.channelId)
+          : { ...state.detached, [action.channelId]: true },
+        focus: { channelId: action.channelId, messageId: action.focusId },
+      };
+
+    case 'focus:clear':
+      return { ...state, focus: null };
 
     case 'history:loading':
       return {
@@ -347,6 +430,8 @@ function reducer(state: RealtimeState, action: Action): RealtimeState {
       const { channelId, authorId, id } = action.message;
       const list = state.messages[channelId] ?? [];
       if (list.some((m) => m.id === id)) return state;
+      // Lista parada no passado: a mensagem nova chega quando ela voltar ao presente.
+      if (state.detached[channelId]) return state;
       // Conta como não lida a mensagem direta de outra pessoa numa conversa que não está aberta.
       const isOpen = state.activeSpaceId === null && state.activeDirectId === channelId;
       const countsAsUnread = channelId in state.directs && authorId !== state.me?.id && !isOpen;
@@ -393,7 +478,16 @@ function reducer(state: RealtimeState, action: Action): RealtimeState {
       const myVoice = { ...state.myVoice, ...action.patch };
       // Saiu da chamada: acabam a transmissão, as telas recebidas e o palco.
       if (myVoice.channelId === null && state.myVoice.channelId !== null) {
-        return { ...state, myVoice: { ...myVoice, streaming: false }, myScreen: null, screens: {}, stage: null };
+        return {
+          ...state,
+          myVoice: { ...myVoice, streaming: false, video: false },
+          myScreen: null,
+          screens: {},
+          stage: null,
+          myCamera: null,
+          cameras: {},
+          callView: false,
+        };
       }
       return { ...state, myVoice };
     }
@@ -430,6 +524,20 @@ function reducer(state: RealtimeState, action: Action): RealtimeState {
 
     case 'stage':
       return { ...state, stage: action.userId };
+
+    case 'camera:mine':
+      return { ...state, myCamera: action.stream, myVoice: { ...state.myVoice, video: action.stream !== null } };
+
+    case 'camera:remote':
+      return {
+        ...state,
+        cameras: action.stream
+          ? { ...state.cameras, [action.userId]: action.stream }
+          : withoutKey(state.cameras, action.userId),
+      };
+
+    case 'callView':
+      return { ...state, callView: action.open };
   }
 }
 
@@ -473,6 +581,19 @@ export interface RealtimeActions {
   watchStream(userId: Id): void;
   /** Fecha o palco (e para de receber a tela de quem você assistia). */
   closeStage(): void;
+  /** Liga ou desliga a câmera; falhas aparecem como aviso na barra de voz. */
+  toggleCamera(): void;
+  /** Entra no canal de voz (se ainda não estiver nele) e abre o mosaico da chamada. */
+  openCall(channelId: Id): void;
+  closeCall(): void;
+  /** Abre a conversa da mensagem e rola até ela, carregando o histórico em volta. */
+  jumpToMessage(message: Message): Promise<string | null>;
+  /** Carrega as mensagens seguintes de uma lista parada no passado. */
+  loadNewer(targetId: Id): void;
+  /** Volta para as mensagens mais recentes (descarta a janela do passado). */
+  jumpToPresent(targetId: Id): void;
+  focusDone(): void;
+  search(req: SearchRequest): Promise<Ack<SearchResult>>;
   leaveVoice(): void;
   toggleMute(): void;
   toggleDeafen(): void;
@@ -516,16 +637,17 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
       const res = await socketRef.current?.emitWithAck('channel:history', { channelId });
       if (res?.ok) {
         const reachedStart = res.data.length < HISTORY_PAGE_SIZE;
-        dispatch({ type: 'messages:history', channelId, messages: res.data, reachedStart });
+        dispatch({ type: 'messages:history', channelId, messages: res.data, reachedStart, latest: true });
       }
     };
 
-    const openChannel = (snapshot: SpaceSnapshot | null, channelId: Id) => {
+    const openChannel = (snapshot: SpaceSnapshot | null, channelId: Id, { keepHistory = false } = {}) => {
       const channel = snapshot?.channels.find((c) => c.id === channelId);
       if (!snapshot || channel?.kind !== 'text') return;
       dispatch({ type: 'channel:select', spaceId: snapshot.space.id, channelId });
-      // Sempre recarrega: cobre mensagens perdidas durante uma reconexão.
-      void loadHistory(channelId);
+      // Recarrega a página mais recente (cobre mensagens perdidas numa reconexão), menos ao
+      // pular para uma mensagem antiga: aí a lista já foi montada em volta dela.
+      if (!keepHistory && !stateRef.current.detached[channelId]) void loadHistory(channelId);
     };
 
     const selectChannel = (channelId: Id) => openChannel(stateRef.current.snapshot, channelId);
@@ -573,7 +695,7 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
       void loadHistory(conversationId);
     };
 
-    const selectSpace = async (spaceId: Id | null) => {
+    const selectSpace = async (spaceId: Id | null, focusChannelId?: Id) => {
       dispatch({ type: 'space:select', spaceId });
       const socket = socketRef.current;
       if (spaceId === null) {
@@ -589,6 +711,7 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
       }
       if (stateRef.current.activeSpaceId !== spaceId) return; // o usuário já trocou de espaço
       dispatch({ type: 'space:snapshot', snapshot: res.data });
+      if (focusChannelId) return openChannel(res.data, focusChannelId, { keepHistory: true });
       const remembered = stateRef.current.activeChannelBySpace[spaceId];
       const target =
         res.data.channels.find((c) => c.id === remembered) ?? res.data.channels.find((c) => c.kind === 'text');
@@ -738,7 +861,10 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
         lastTypingRef.current = { channelId: null, at: 0 };
         try {
           const res = await socket.timeout(10_000).emitWithAck('message:send', { channelId, content, attachmentIds });
-          return res.ok ? null : res.error;
+          if (!res.ok) return res.error;
+          // Lista parada no passado: a mensagem enviada só aparece voltando ao presente.
+          if (stateRef.current.detached[channelId]) void loadHistory(channelId);
+          return null;
         } catch {
           return 'O servidor não respondeu. Tente de novo.';
         }
@@ -803,6 +929,106 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
         dispatch({ type: 'stage', userId: null });
       },
 
+      toggleCamera() {
+        void (async () => {
+          const voice = voiceRef.current;
+          const socket = socketRef.current;
+          const { myVoice } = stateRef.current;
+          if (!voice || !socket || !myVoice.channelId) return;
+          if (myVoice.video) {
+            voice.stopCamera();
+            dispatch({ type: 'camera:mine', stream: null });
+            socket.emit('voice:video', { enabled: false }, () => {});
+            return;
+          }
+          let stream: MediaStream;
+          try {
+            stream = await voice.startCamera();
+          } catch (err) {
+            dispatch({ type: 'voice:self', patch: { error: describeCameraError(err) } });
+            return;
+          }
+          const res = await socket.emitWithAck('voice:video', { enabled: true });
+          if (!res.ok) {
+            voice.stopCamera();
+            dispatch({ type: 'voice:self', patch: { error: res.error } });
+            return;
+          }
+          dispatch({ type: 'camera:mine', stream });
+        })();
+      },
+
+      openCall(channelId) {
+        void (async () => {
+          if (await joinVoice(channelId)) {
+            dispatch({ type: 'stage', userId: null });
+            dispatch({ type: 'callView', open: true });
+          }
+        })();
+      },
+
+      closeCall() {
+        dispatch({ type: 'callView', open: false });
+      },
+
+      async jumpToMessage(message) {
+        const socket = socketRef.current;
+        if (!socket) return 'Sem conexão com o servidor.';
+        const res = await socket.emitWithAck('message:context', { messageId: message.id });
+        if (!res.ok) return res.error;
+        const { channelId, messages, reachedStart, reachedEnd } = res.data;
+        dispatch({ type: 'messages:context', channelId, messages, reachedStart, reachedEnd, focusId: message.id });
+
+        const { directs, snapshot, activeSpaceId } = stateRef.current;
+        if (directs[channelId]) {
+          dispatch({ type: 'dm:select', conversationId: channelId });
+          return null;
+        }
+        if (snapshot?.channels.some((c) => c.id === channelId)) {
+          openChannel(snapshot, channelId, { keepHistory: true });
+          return null;
+        }
+        // Canal de outro espaço (a busca é por espaço, mas o espaço pode ter mudado no meio).
+        const spaceId = activeSpaceId;
+        if (spaceId) await selectSpace(spaceId, channelId);
+        return null;
+      },
+
+      loadNewer(channelId) {
+        const { detached, loadingOlder, messages } = stateRef.current;
+        const newest = messages[channelId]?.at(-1);
+        const socket = socketRef.current;
+        if (!socket || !newest || !detached[channelId] || loadingOlder[channelId]) return;
+        dispatch({ type: 'history:loading', channelId, loading: true });
+        void socket
+          .emitWithAck('channel:history', { channelId, after: newest.id, limit: HISTORY_PAGE_SIZE })
+          .then((res) => {
+            if (res.ok) {
+              const reachedEnd = res.data.length < HISTORY_PAGE_SIZE;
+              dispatch({ type: 'messages:newer', channelId, messages: res.data, reachedEnd });
+            }
+          })
+          .finally(() => dispatch({ type: 'history:loading', channelId, loading: false }));
+      },
+
+      jumpToPresent(channelId) {
+        void loadHistory(channelId);
+      },
+
+      focusDone() {
+        dispatch({ type: 'focus:clear' });
+      },
+
+      async search(req) {
+        const socket = socketRef.current;
+        if (!socket) return { ok: false, error: 'Sem conexão com o servidor.' };
+        try {
+          return await socket.timeout(10_000).emitWithAck('message:search', req);
+        } catch {
+          return { ok: false, error: 'O servidor não respondeu. Tente de novo.' };
+        }
+      },
+
       toggleMute() {
         const { myVoice } = stateRef.current;
         if (!myVoice.channelId || !myVoice.canSpeak) return;
@@ -843,6 +1069,7 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
     const voice = new VoiceManager(socket, {
       onSpeaking: (speaking) => dispatch({ type: 'speaking', userIds: [...speaking] }),
       onRemoteScreen: (userId, stream) => dispatch({ type: 'screen:remote', userId, stream }),
+      onRemoteCamera: (userId, stream) => dispatch({ type: 'camera:remote', userId, stream }),
       onScreenEnded: () => actions.stopScreenShare(),
     });
     socketRef.current = socket;

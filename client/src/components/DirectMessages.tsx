@@ -1,9 +1,11 @@
 import type { DirectConversation, User } from '@shared/models';
 import { AtSign, MessageCircle } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { useRealtime, type RealtimeState } from '../state/realtime';
 import { Avatar, STATUS_LABEL } from './Avatar';
 import { MessageInput } from './MessageInput';
 import { MessageList } from './MessageList';
+import { SearchBox, SearchPanel } from './Search';
 import { TypingIndicator } from './TypingIndicator';
 
 function partnerOf(state: RealtimeState, conversation: DirectConversation): User | undefined {
@@ -78,6 +80,8 @@ export function DirectMessagesPanel() {
   const { state } = useRealtime();
   const conversation = state.activeDirectId ? state.directs[state.activeDirectId] : undefined;
   const partner = conversation ? partnerOf(state, conversation) : undefined;
+  const [searchQuery, setSearchQuery] = useState<string | null>(null);
+  useEffect(() => setSearchQuery(null), [conversation?.id]);
 
   if (!conversation || !partner) {
     return (
@@ -97,24 +101,30 @@ export function DirectMessagesPanel() {
         <AtSign size={20} className="shrink-0 text-faint" />
         <h2 className="truncate font-semibold">{partner.displayName}</h2>
         <span className="shrink-0 text-sm text-muted">· {STATUS_LABEL[partner.status]}</span>
+        <SearchBox key={conversation.id} placeholder={`Buscar com ${partner.displayName}`} onSearch={setSearchQuery} />
       </header>
-      <section aria-label={`Conversa com ${partner.displayName}`} className="flex min-h-0 flex-1 flex-col">
-        <MessageList
-          conversationId={conversation.id}
-          messages={state.messages[conversation.id] ?? []}
-          welcome={
-            <>
-              <div className="mb-3">
-                <Avatar name={partner.displayName} color={partner.avatarColor} size="lg" />
-              </div>
-              <h3 className="text-2xl font-bold">{partner.displayName}</h3>
-              <p className="text-muted">Este é o começo da sua conversa direta com {partner.displayName}.</p>
-            </>
-          }
-        />
-        <MessageInput targetId={conversation.id} label={`@${partner.displayName}`} canSend />
-        <TypingIndicator channelId={conversation.id} />
-      </section>
+      <div className="flex min-h-0 flex-1">
+        <section aria-label={`Conversa com ${partner.displayName}`} className="flex min-w-0 flex-1 flex-col">
+          <MessageList
+            conversationId={conversation.id}
+            messages={state.messages[conversation.id] ?? []}
+            welcome={
+              <>
+                <div className="mb-3">
+                  <Avatar name={partner.displayName} color={partner.avatarColor} size="lg" />
+                </div>
+                <h3 className="text-2xl font-bold">{partner.displayName}</h3>
+                <p className="text-muted">Este é o começo da sua conversa direta com {partner.displayName}.</p>
+              </>
+            }
+          />
+          <MessageInput targetId={conversation.id} label={`@${partner.displayName}`} canSend />
+          <TypingIndicator channelId={conversation.id} />
+        </section>
+        {searchQuery !== null && (
+          <SearchPanel scope={{ directId: conversation.id }} query={searchQuery} onClose={() => setSearchQuery(null)} />
+        )}
+      </div>
     </>
   );
 }

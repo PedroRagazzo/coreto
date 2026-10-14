@@ -171,6 +171,8 @@ model Message {
   author    User                @relation(fields: [authorId], references: [id])
   /// Pode ser vazio quando a mensagem tem anexos.
   content     String              @db.VarChar(2000)
+  /// `searchKey(content)` (shared/src/search.ts): sem acentos, minúsculo, sem menções.
+  searchText  String              @default("")
   createdAt   DateTime            @default(now())
   editedAt    DateTime?
   mentions    Mention[]
@@ -178,6 +180,8 @@ model Message {
 
   @@index([channelId, createdAt(sort: Desc)])
   @@index([directId, createdAt(sort: Desc)])
+  /// Busca por trecho (`LIKE '%palavra%'`) com a extensão pg_trgm.
+  @@index([searchText(ops: raw("gin_trgm_ops"))], type: Gin)
 }
 
 /// Menção ainda não vista: `<@id>` numa mensagem de canal. Some quando a pessoa abre o canal.

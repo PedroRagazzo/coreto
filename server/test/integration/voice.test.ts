@@ -80,6 +80,45 @@ describe.skipIf(!hasTestDatabase)('salas de voz', () => {
     await left;
   });
 
+  describe('câmera', () => {
+    it('mostra quem está com a câmera ligada e desliga ao sair', async () => {
+      const ana = await inRoom('Ana', 'Sala de estar');
+      const bruno = await inRoom('Bruno', 'Sala de estar');
+      const on = nextEvent(bruno.client.socket, 'voice:update', (u) =>
+        u.participants.some((p) => p.userId === ana.client.user.id && p.video),
+      );
+      ok(await ana.client.socket.emitWithAck('voice:video', { enabled: true }));
+      await on;
+
+      const off = nextEvent(bruno.client.socket, 'voice:update', (u) =>
+        u.participants.some((p) => p.userId === ana.client.user.id && !p.video),
+      );
+      ok(await ana.client.socket.emitWithAck('voice:video', { enabled: false }));
+      await off;
+    });
+
+    it('recusa ligar a câmera fora de uma sala', async () => {
+      const fora = await server.connect('Fora');
+      expect((await fora.socket.emitWithAck('voice:video', { enabled: true })).ok).toBe(false);
+    });
+
+    it('repassa os ids de câmera e tela, e descarta o anúncio malformado', async () => {
+      const ana = await inRoom('Ana', 'Sala de estar');
+      const bruno = await inRoom('Bruno', 'Sala de estar');
+      const media: SignalPayload = { kind: 'media', camera: 'cam-1', screen: 'tela-1' };
+      const relayed = nextEvent(bruno.client.socket, 'voice:signal');
+      ana.client.socket.emit('voice:signal', { to: bruno.client.user.id, signal: media });
+      expect((await relayed).signal).toEqual(media);
+
+      const nothing = expectNoEvent(bruno.client.socket, 'voice:signal');
+      ana.client.socket.emit('voice:signal', {
+        to: bruno.client.user.id,
+        signal: { kind: 'media', camera: 'x'.repeat(500), screen: '' } as SignalPayload,
+      });
+      await nothing;
+    });
+  });
+
   describe('compartilhamento de tela', () => {
     /** Espera a lista da sala chegar num estado que passe no teste. */
     const roster = (client: TestClient, check: (p: VoiceParticipant[]) => boolean) =>
@@ -144,6 +183,9 @@ describe.skipIf(!hasTestDatabase)('salas de voz', () => {
         ok: false,
         error: 'Você não tem permissão para compartilhar a tela neste canal.',
       });
+      // A mesma permissão vale para a câmera; desligar continua permitido.
+      expect((await again.socket.emitWithAck('voice:video', { enabled: true })).ok).toBe(false);
+      ok(await again.socket.emitWithAck('voice:video', { enabled: false }));
       await server.db.permissionOverwrite.deleteMany({ where: { channelId: sala.id } });
       await server.restart();
     });

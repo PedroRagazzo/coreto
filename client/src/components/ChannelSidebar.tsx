@@ -192,8 +192,14 @@ function VoiceChannelItem({ channel, onEdit }: ChannelItemProps) {
         <button
           type="button"
           disabled={!canConnect}
-          onClick={() => actions.joinVoice(channel.id)}
-          title={canConnect ? `Entrar em ${channel.name}` : 'Você não pode entrar neste canal'}
+          onClick={() => actions.openCall(channel.id)}
+          title={
+            !canConnect
+              ? 'Você não pode entrar neste canal'
+              : isMine
+                ? `Abrir a chamada em ${channel.name}`
+                : `Entrar em ${channel.name}`
+          }
           className={`flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-[15px] disabled:cursor-not-allowed disabled:opacity-60 ${onEdit ? 'pr-7' : ''} ${
             isMine ? 'bg-hover text-fg' : 'text-muted hover:bg-hover/60 hover:text-fg'
           }`}

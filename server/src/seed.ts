@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { DEFAULT_EVERYONE_PERMISSIONS, Permission } from '../../shared/src/permissions.js';
+import { searchKey } from '../../shared/src/search.js';
 import type { Db } from './db/client.js';
 
 /**
@@ -98,7 +99,7 @@ export async function seedIfEmpty(db: Db): Promise<boolean> {
         { channelId: geral, authorId: bot, createdAt: at(1), content: 'Clique em um canal de voz para entrar e clique em "Sair da chamada" para sair.' },
         { channelId: avisos, authorId: bot, createdAt: at(2), content: 'Neste canal, só a moderação pode escrever. É um exemplo de sobrescrita de permissão.' },
         { channelId: conversa, authorId: bot, createdAt: at(3), content: 'Leitura do mês: escolham nos comentários!' },
-      ],
+      ].map((m) => ({ ...m, searchText: searchKey(m.content) })), // texto normalizado da busca
     }),
   ]);
   return true;

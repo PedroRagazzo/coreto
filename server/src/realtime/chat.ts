@@ -1,4 +1,5 @@
 import { mentionedUserIds } from '../../../shared/src/markup.js';
+import { SEARCH_PAGE_SIZE, searchWords } from '../../../shared/src/search.js';
 import type { Channel, Id } from '../../../shared/src/models.js';
 import { hasPermission, Permission } from '../../../shared/src/permissions.js';
 import {
@@ -87,8 +88,9 @@ export function registerChat(io: IO, socket: AppSocket, store: Store, uploads: U
     if (!target) return ack({ ok: false, error: 'Canal indisponível.' });
     const limit = Math.min(Math.max(Number(req.limit) || HISTORY_PAGE_SIZE, 1), MAX_HISTORY_PAGE);
     const before = typeof req.before === 'string' ? req.before : undefined;
+    const after = typeof req.after === 'string' ? req.after : undefined;
     try {
-      ack({ ok: true, data: await store.history(target.id, before, limit) });
+      ack({ ok: true, data: await store.history(target.id, { before, after }, limit) });
     } catch (err) {
       ack(storageError('channel:history', err));
     }
@@ -194,6 +196,56 @@ export function registerChat(io: IO, socket: AppSocket, store: Store, uploads: U
         ? rooms.channel(target.id)
         : rooms.user(otherParticipant(target.conversation, userId));
     socket.to(room).emit('typing', { channelId: target.id, userId });
+  });
+
+  socket.on('message:context', async (req, ack) => {
+    if (!isFunction(ack)) return;
+    try {
+      const found = await locate(req?.messageId);
+      if (!found) return ack({ ok: false, error: 'Mensagem não encontrada.' });
+      const context = await store.context(found.message);
+      ack({ ok: true, data: { channelId: found.message.channelId, ...context } });
+    } catch (err) {
+      ack(storageError('message:context', err));
+    }
+  });
+
+  socket.on('message:search', async (req, ack) => {
+    if (!isFunction(ack)) return;
+    const words = typeof req?.text === 'string' ? searchWords(req.text) : [];
+    const authorId = typeof req?.authorId === 'string' ? req.authorId : undefined;
+    const channelId = typeof req?.channelId === 'string' ? req.channelId : undefined;
+    const has = req?.has === 'image' || req?.has === 'link' ? req.has : undefined;
+    const before = typeof req?.before === 'string' ? req.before : undefined;
+    if (words.length === 0 && !authorId && !channelId && !has) {
+      return ack({ ok: false, error: 'Digite algo ou escolha um filtro para buscar.' });
+    }
+
+    // Só onde a pessoa pode ler: os canais de texto visíveis do espaço, ou uma conversa dela.
+    const scope = (req?.scope ?? {}) as Partial<Record<'spaceId' | 'directId', unknown>>;
+    let where: { channelIds: Id[] } | { directId: Id };
+    if (typeof scope.directId === 'string') {
+      const conversation = store.directFor(userId, scope.directId);
+      if (!conversation) return ack({ ok: false, error: 'Conversa indisponível.' });
+      where = { directId: conversation.id };
+    } else if (typeof scope.spaceId === 'string' && store.member(scope.spaceId, userId)) {
+      const readable = [...store.channels.values()].filter(
+        (c) =>
+          c.spaceId === scope.spaceId &&
+          c.kind === 'text' &&
+          (!channelId || c.id === channelId) &&
+          hasPermission(store.permissionsFor(userId, c), Permission.VIEW_CHANNEL),
+      );
+      where = { channelIds: readable.map((c) => c.id) };
+    } else {
+      return ack({ ok: false, error: 'Espaço indisponível.' });
+    }
+
+    try {
+      ack({ ok: true, data: await store.search({ ...where, words, authorId, has, before }, SEARCH_PAGE_SIZE) });
+    } catch (err) {
+      ack(storageError('message:search', err));
+    }
   });
 
   socket.on('mentions:ack', async (req) => {

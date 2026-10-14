@@ -29,45 +29,87 @@ export function MessageContent({ message }: { message: Message }) {
   );
 }
 
-/** Só o texto formatado, sem imagens (ex.: citação no diálogo de apagar). */
-export function Markup({ content }: { content: string }) {
+/**
+ * Só o texto formatado, sem imagens (ex.: citação no diálogo de apagar).
+ * `highlight`: palavras já normalizadas (searchWords) a destacar no texto.
+ */
+export function Markup({ content, highlight = NO_HIGHLIGHT }: { content: string; highlight?: string[] }) {
   const nodes = useMemo(() => parseMarkup(content), [content]);
-  return <MarkupNodes nodes={nodes} />;
+  return <MarkupNodes nodes={nodes} highlight={highlight} />;
 }
 
-function MarkupNodes({ nodes }: { nodes: MarkupNode[] }) {
+const NO_HIGHLIGHT: string[] = [];
+
+/** Caractere sem acento e minúsculo, para achar "acao" dentro de "Ação" mantendo as posições. */
+const baseChar = (ch: string) => {
+  const base = ch.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
+  return base.length === 1 ? base : ch.toLowerCase();
+};
+
+function highlightText(text: string, words: string[]): ReactNode {
+  if (words.length === 0) return text;
+  const chars = [...text];
+  const folded = chars.map(baseChar);
+  if (folded.some((ch) => ch.length !== 1)) return text; // caractere que vira dois: sem destaque
+  const joined = folded.join('');
+  const marked = new Array<boolean>(chars.length).fill(false);
+  for (const word of words) {
+    for (let at = joined.indexOf(word); at !== -1; at = joined.indexOf(word, at + 1)) {
+      marked.fill(true, at, at + word.length);
+    }
+  }
+  const parts: ReactNode[] = [];
+  let start = 0;
+  for (let i = 1; i <= chars.length; i++) {
+    if (i < chars.length && marked[i] === marked[start]) continue;
+    const piece = chars.slice(start, i).join('');
+    parts.push(
+      marked[start] ? (
+        <mark key={start} className="rounded-sm bg-mention/30 text-fg">
+          {piece}
+        </mark>
+      ) : (
+        piece
+      ),
+    );
+    start = i;
+  }
+  return parts;
+}
+
+function MarkupNodes({ nodes, highlight }: { nodes: MarkupNode[]; highlight: string[] }) {
   return nodes.map((node, i) => {
     // O bloco de código já é um bloco: a quebra de linha colada nele viraria uma linha em branco.
     if (node.type === 'text') {
       let text = node.text;
       if (nodes[i - 1]?.type === 'codeBlock') text = text.replace(/^\n/, '');
       if (nodes[i + 1]?.type === 'codeBlock') text = text.replace(/\n$/, '');
-      return <Fragment key={i}>{text}</Fragment>;
+      return <Fragment key={i}>{highlightText(text, highlight)}</Fragment>;
     }
-    return <Fragment key={i}>{renderNode(node)}</Fragment>;
+    return <Fragment key={i}>{renderNode(node, highlight)}</Fragment>;
   });
 }
 
-function renderNode(node: MarkupNode): ReactNode {
+function renderNode(node: MarkupNode, highlight: string[]): ReactNode {
   switch (node.type) {
     case 'text':
       return node.text;
     case 'bold':
       return (
         <strong className="font-semibold text-fg">
-          <MarkupNodes nodes={node.children} />
+          <MarkupNodes nodes={node.children} highlight={highlight} />
         </strong>
       );
     case 'italic':
       return (
         <em>
-          <MarkupNodes nodes={node.children} />
+          <MarkupNodes nodes={node.children} highlight={highlight} />
         </em>
       );
     case 'strike':
       return (
         <s className="text-muted">
-          <MarkupNodes nodes={node.children} />
+          <MarkupNodes nodes={node.children} highlight={highlight} />
         </s>
       );
     case 'code':

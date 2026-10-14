@@ -2,8 +2,8 @@ import { decodeMentions, encodeMentions, mentionedUserIds } from '@shared/markup
 import type { Id, Message } from '@shared/models';
 import { Permission } from '@shared/permissions';
 import { MAX_MESSAGE_LENGTH } from '@shared/protocol';
-import { Pencil, Trash2 } from 'lucide-react';
-import { useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { ArrowDown, Pencil, Trash2 } from 'lucide-react';
+import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { formatMessageTime, formatShortTime } from '../lib/format';
 import { useRealtime } from '../state/realtime';
 import { can, displayNameOf, mentionCandidates, roleColorOf } from '../state/selectors';
@@ -14,8 +14,10 @@ import { DialogActions, Modal } from './Modal';
 
 /** Mensagens seguidas do mesmo autor dentro desta janela viram um bloco só. */
 const GROUP_WINDOW_MS = 5 * 60_000;
-/** A esta distância do topo, começa a buscar mensagens antigas. */
+/** A esta distância do topo (ou do fim, numa lista parada no passado), busca a próxima página. */
 const LOAD_OLDER_THRESHOLD_PX = 300;
+/** Quanto tempo a mensagem encontrada pela busca fica destacada. */
+const FOCUS_FLASH_MS = 2_000;
 
 interface MessageGroup {
   authorId: Id;
@@ -57,8 +59,11 @@ export function MessageList({ conversationId, welcome, messages }: MessageListPr
   const anchor = useRef<{ firstId: Id; scrollHeight: number; scrollTop: number } | null>(null);
   const [editingId, setEditingId] = useState<Id | null>(null);
   const [deleting, setDeleting] = useState<Message | null>(null);
+  const [flashId, setFlashId] = useState<Id | null>(null);
 
   const complete = Boolean(state.historyComplete[conversationId]);
+  /** A lista parou no passado (pulo pela busca): o fim dela não é a mensagem mais recente. */
+  const detached = Boolean(state.detached[conversationId]);
   const loadingOlder = Boolean(state.loadingOlder[conversationId]);
   const moderates = can(state.snapshot, conversationId, Permission.MANAGE_MESSAGES);
 
@@ -84,85 +89,124 @@ export function MessageList({ conversationId, welcome, messages }: MessageListPr
       // Mensagens antigas entraram em cima: compensa a altura nova.
       el.scrollTop = el.scrollHeight - saved.scrollHeight + saved.scrollTop;
       anchor.current = null;
-    } else if (stickToBottom.current) {
+    } else if (stickToBottom.current && !detached) {
       el.scrollTop = el.scrollHeight;
     }
     // Se o histórico ainda não preenche a tela, não há como rolar: busca a próxima página já.
-    if (!complete && !loadingOlder && el.scrollHeight <= el.clientHeight) loadOlder();
-  }, [messages, conversationId, complete, loadingOlder]);
+    if (!loadingOlder && el.scrollHeight <= el.clientHeight) {
+      if (!complete) loadOlder();
+      else if (detached) actions.loadNewer(conversationId);
+    }
+  }, [messages, conversationId, complete, loadingOlder, detached]);
+
+  // Pulo pela busca: rola até a mensagem e destaca por um instante.
+  const focusId = state.focus?.channelId === conversationId ? state.focus.messageId : null;
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    const target = focusId ? el?.querySelector<HTMLElement>(`[data-message-id="${focusId}"]`) : null;
+    if (!target) return;
+    stickToBottom.current = false;
+    anchor.current = null;
+    target.scrollIntoView({ block: 'center' });
+    setFlashId(focusId);
+    actions.focusDone();
+  }, [focusId, messages, actions]);
+  useEffect(() => {
+    if (!flashId) return;
+    const timer = setTimeout(() => setFlashId(null), FOCUS_FLASH_MS);
+    return () => clearTimeout(timer);
+  }, [flashId]);
 
   const onScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
-    stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    const fromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    stickToBottom.current = fromBottom < 80;
     if (el.scrollTop < LOAD_OLDER_THRESHOLD_PX) loadOlder();
+    if (detached && fromBottom < LOAD_OLDER_THRESHOLD_PX) actions.loadNewer(conversationId);
+  };
+
+  const backToPresent = () => {
+    stickToBottom.current = true;
+    actions.jumpToPresent(conversationId);
   };
 
   return (
-    <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto" role="log" aria-live="polite">
-      <div className="flex min-h-full flex-col justify-end pb-4">
-        {complete ? (
-          <div className="px-4 pt-8 pb-4">{welcome}</div>
-        ) : (
-          <p aria-live="polite" className="px-4 py-4 text-center text-sm text-faint">
-            {loadingOlder ? 'Carregando mensagens antigas…' : ''}
-          </p>
-        )}
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto" role="log" aria-live="polite">
+        <div className="flex min-h-full flex-col justify-end pb-4">
+          {complete ? (
+            <div className="px-4 pt-8 pb-4">{welcome}</div>
+          ) : (
+            <p aria-live="polite" className="px-4 py-4 text-center text-sm text-faint">
+              {loadingOlder ? 'Carregando mensagens antigas…' : ''}
+            </p>
+          )}
 
-        {groupMessages(messages).map((group) => {
-          const author = state.users[group.authorId];
-          const name = displayNameOf(state.snapshot, state.users, group.authorId);
-          const mine = group.authorId === state.me?.id;
-          const [first] = group.items;
-          return (
-            <article key={first.id} className="mt-4">
-              {group.items.map((message, index) => (
-                <MessageRow
-                  key={message.id}
-                  message={message}
-                  mentionsMe={Boolean(state.me && mentionedUserIds(message.content).includes(state.me.id))}
-                  editing={editingId === message.id}
-                  onEdit={mine ? () => setEditingId(message.id) : undefined}
-                  onDelete={mine || moderates ? () => setDeleting(message) : undefined}
-                  onEditDone={() => setEditingId(null)}
-                  leading={
-                    index === 0 ? (
-                      <Avatar name={name} color={author?.avatarColor ?? '#555'} />
-                    ) : (
-                      <time
-                        dateTime={message.createdAt}
-                        className="w-10 shrink-0 pt-1 text-right text-[10px] text-faint opacity-0 group-hover:opacity-100"
-                      >
-                        {formatShortTime(message.createdAt)}
-                      </time>
-                    )
-                  }
-                  header={
-                    index === 0 && (
-                      <p className="flex items-baseline gap-2">
-                        <span
-                          className="font-medium"
-                          style={{ color: roleColorOf(state.snapshot, group.authorId) ?? undefined }}
+          {groupMessages(messages).map((group) => {
+            const author = state.users[group.authorId];
+            const name = displayNameOf(state.snapshot, state.users, group.authorId);
+            const mine = group.authorId === state.me?.id;
+            const [first] = group.items;
+            return (
+              <article key={first.id} className="mt-4">
+                {group.items.map((message, index) => (
+                  <MessageRow
+                    key={message.id}
+                    message={message}
+                    flash={flashId === message.id}
+                    mentionsMe={Boolean(state.me && mentionedUserIds(message.content).includes(state.me.id))}
+                    editing={editingId === message.id}
+                    onEdit={mine ? () => setEditingId(message.id) : undefined}
+                    onDelete={mine || moderates ? () => setDeleting(message) : undefined}
+                    onEditDone={() => setEditingId(null)}
+                    leading={
+                      index === 0 ? (
+                        <Avatar name={name} color={author?.avatarColor ?? '#555'} />
+                      ) : (
+                        <time
+                          dateTime={message.createdAt}
+                          className="w-10 shrink-0 pt-1 text-right text-[10px] text-faint opacity-0 group-hover:opacity-100"
                         >
-                          {name}
-                        </span>
-                        {author?.isBot && (
-                          <span className="rounded bg-accent px-1 text-[10px] font-semibold text-white">ROBÔ</span>
-                        )}
-                        <time dateTime={message.createdAt} className="text-xs text-faint">
-                          {formatMessageTime(message.createdAt)}
+                          {formatShortTime(message.createdAt)}
                         </time>
-                      </p>
-                    )
-                  }
-                />
-              ))}
-            </article>
-          );
-        })}
-      </div>
+                      )
+                    }
+                    header={
+                      index === 0 && (
+                        <p className="flex items-baseline gap-2">
+                          <span
+                            className="font-medium"
+                            style={{ color: roleColorOf(state.snapshot, group.authorId) ?? undefined }}
+                          >
+                            {name}
+                          </span>
+                          {author?.isBot && (
+                            <span className="rounded bg-accent px-1 text-[10px] font-semibold text-white">ROBÔ</span>
+                          )}
+                          <time dateTime={message.createdAt} className="text-xs text-faint">
+                            {formatMessageTime(message.createdAt)}
+                          </time>
+                        </p>
+                      )
+                    }
+                  />
+                ))}
+              </article>
+            );
+          })}
+        </div>
 
-      {deleting && <DeleteMessageDialog message={deleting} onClose={() => setDeleting(null)} />}
+        {deleting && <DeleteMessageDialog message={deleting} onClose={() => setDeleting(null)} />}
+      </div>
+      {detached && (
+        <div className="absolute inset-x-4 bottom-2 flex items-center gap-3 rounded-md bg-accent-strong px-3 py-1.5 text-sm text-white shadow-lg">
+          <span className="flex-1">Você está vendo mensagens antigas.</span>
+          <button type="button" onClick={backToPresent} className="flex items-center gap-1 font-semibold hover:underline">
+            Ir para as mais recentes <ArrowDown size={14} />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -171,6 +215,8 @@ interface MessageRowProps {
   message: Message;
   /** Destaca a linha: a mensagem menciona você. */
   mentionsMe: boolean;
+  /** Acabou de ser aberta pela busca: pisca o fundo. */
+  flash?: boolean;
   leading: ReactNode;
   header: ReactNode;
   editing: boolean;
@@ -181,14 +227,16 @@ interface MessageRowProps {
   onEditDone: () => void;
 }
 
-function MessageRow({ message, mentionsMe, leading, header, editing, onEdit, onDelete, onEditDone }: MessageRowProps) {
-  const background = editing
-    ? 'bg-rail/40'
-    : mentionsMe
-      ? 'border-l-2 border-mention bg-mention/[0.07] pl-[14px] hover:bg-mention/10'
-      : 'hover:bg-rail/30';
+function MessageRow({ message, mentionsMe, flash = false, leading, header, editing, onEdit, onDelete, onEditDone }: MessageRowProps) {
+  const background = flash
+    ? 'bg-accent/20'
+    : editing
+      ? 'bg-rail/40'
+      : mentionsMe
+        ? 'border-l-2 border-mention bg-mention/[0.07] pl-[14px] hover:bg-mention/10'
+        : 'hover:bg-rail/30';
   return (
-    <div className={`group relative flex gap-4 px-4 py-0.5 ${background}`}>
+    <div data-message-id={message.id} className={`group relative flex gap-4 px-4 py-0.5 transition-colors duration-700 ${background}`}>
       {leading}
       <div className="min-w-0 flex-1">
         {header}

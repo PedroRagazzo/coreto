@@ -1,4 +1,4 @@
-import { Eye, Headphones, HeadphoneOff, Mic, MicOff, MonitorUp, MonitorX, PhoneOff, X } from 'lucide-react';
+import { Eye, Headphones, HeadphoneOff, Mic, MicOff, MonitorUp, MonitorX, PhoneOff, Video, VideoOff, X } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { useRealtime } from '../state/realtime';
 import { ScreenShareDialog } from './ScreenShareDialog';
@@ -86,18 +86,36 @@ export function VoiceStatusBar() {
                 <MonitorX size={18} />
               </button>
             </div>
-          ) : (
+          ) : null)}
+
+        {/* Como no Discord: Câmera e Tela lado a lado. */}
+        {voice.channelId && (
+          <div className="mt-2 grid grid-cols-2 gap-2">
             <button
               type="button"
               disabled={!voice.canStream}
-              onClick={() => setChoosingScreen(true)}
-              title={voice.canStream ? undefined : 'Você não tem permissão para compartilhar a tela neste canal'}
-              className="mt-2 flex w-full items-center justify-center gap-2 rounded-md bg-elevated py-1.5 text-sm font-medium text-muted hover:bg-hover hover:text-fg disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={actions.toggleCamera}
+              aria-pressed={voice.video}
+              title={voice.canStream ? undefined : 'Você não tem permissão para usar vídeo neste canal'}
+              className={`flex items-center justify-center gap-1.5 rounded-md py-1.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50 ${
+                voice.video ? 'bg-fg text-rail hover:bg-fg/85' : 'bg-elevated text-muted hover:bg-hover hover:text-fg'
+              }`}
             >
-              <MonitorUp size={18} />
-              Compartilhar tela
+              {voice.video ? <Video size={16} /> : <VideoOff size={16} />}
+              Câmera
             </button>
-          ))}
+            <button
+              type="button"
+              disabled={!voice.canStream || voice.streaming}
+              onClick={() => setChoosingScreen(true)}
+              title={voice.canStream ? undefined : 'Você não tem permissão para usar vídeo neste canal'}
+              className="flex items-center justify-center gap-1.5 rounded-md bg-elevated py-1.5 text-sm font-medium text-muted hover:bg-hover hover:text-fg disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <MonitorUp size={16} />
+              Tela
+            </button>
+          </div>
+        )}
       </div>
       {choosingScreen && <ScreenShareDialog onClose={() => setChoosingScreen(false)} />}
     </>

@@ -9,6 +9,7 @@ import { ChannelSidebar } from '../ChannelSidebar';
 import { ChatPanel } from '../ChatPanel';
 import { ConnectionBanner } from '../ConnectionBanner';
 import { DirectMessagesPanel, DirectMessagesSidebar } from '../DirectMessages';
+import { CallView } from '../CallView';
 import { SpaceRail } from '../SpaceRail';
 import { StreamStage } from '../StreamStage';
 import { UserPanel } from '../UserPanel';
@@ -36,6 +37,8 @@ export function AppShell() {
         <ConnectionBanner />
         {state.stage ? (
           <StreamStage />
+        ) : state.callView && state.myVoice.channelId ? (
+          <CallView />
         ) : inDirectMessages ? (
           <DirectMessagesPanel />
         ) : (

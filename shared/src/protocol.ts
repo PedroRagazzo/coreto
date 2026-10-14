@@ -67,7 +67,12 @@ export interface IceCandidate {
 
 export type SignalPayload =
   | { kind: 'description'; description: SessionDescription }
-  | { kind: 'candidate'; candidate: IceCandidate };
+  | { kind: 'candidate'; candidate: IceCandidate }
+  /**
+   * Ids dos fluxos de câmera e de tela de quem envia, mandados ao abrir a
+   * conexão: é assim que quem recebe distingue um vídeo do outro.
+   */
+  | { kind: 'media'; camera: string; screen: string };
 
 export interface IceServer {
   urls: string | string[];
@@ -81,6 +86,38 @@ export interface VoiceJoinResult {
   iceServers: IceServer[];
   /** `relay` força o áudio a passar pelo TURN (útil para testar o TURN). */
   iceTransportPolicy: 'all' | 'relay';
+}
+
+/** Onde buscar: todos os canais de texto que você vê num espaço, ou uma conversa direta. */
+export type SearchScope = { spaceId: Id } | { directId: Id };
+
+export interface SearchRequest {
+  scope: SearchScope;
+  /** Palavras que precisam aparecer (todas), sem diferenciar acentos nem maiúsculas. */
+  text?: string;
+  authorId?: Id;
+  /** Só com `scope.spaceId`: limita a um canal. */
+  channelId?: Id;
+  has?: 'image' | 'link';
+  /** Próxima página: resultados mais antigos que esta mensagem. */
+  before?: Id;
+}
+
+export interface SearchResult {
+  /** Da mais recente para a mais antiga. */
+  messages: Message[];
+  /** Total de resultados (todas as páginas). */
+  total: number;
+}
+
+/** Mensagens em volta de uma, para pular até ela (resultado de busca). */
+export interface MessageContext {
+  channelId: Id;
+  /** Em ordem cronológica, com a mensagem pedida no meio. */
+  messages: Message[];
+  /** Não há nada antes / depois do que veio. */
+  reachedStart: boolean;
+  reachedEnd: boolean;
 }
 
 export interface DirectConversationPayload {
@@ -123,10 +160,17 @@ export interface ClientToServerEvents {
   /** Apaga o canal e todas as mensagens dele. */
   'channel:delete': (req: { channelId: Id }, ack: (res: Ack<null>) => void) => void;
   'dm:open': (req: { userId: Id }, ack: (res: Ack<DirectConversationPayload>) => void) => void;
+  /**
+   * Página do histórico em ordem cronológica: sem cursor, as mais recentes;
+   * `before`, as anteriores a uma mensagem; `after`, as seguintes.
+   */
   'channel:history': (
-    req: { channelId: Id; before?: Id; limit?: number },
+    req: { channelId: Id; before?: Id; after?: Id; limit?: number },
     ack: (res: Ack<Message[]>) => void,
   ) => void;
+  /** A mensagem com as vizinhas, onde quer que esteja no histórico. */
+  'message:context': (req: { messageId: Id }, ack: (res: Ack<MessageContext>) => void) => void;
+  'message:search': (req: SearchRequest, ack: (res: Ack<SearchResult>) => void) => void;
   /** `attachmentIds`: anexos enviados antes por POST /uploads, na ordem em que aparecem. */
   'message:send': (
     req: { channelId: Id; content: string; attachmentIds?: Id[] },
@@ -143,6 +187,8 @@ export interface ClientToServerEvents {
   'voice:join': (req: { channelId: Id }, ack: (res: Ack<VoiceJoinResult>) => void) => void;
   'voice:leave': () => void;
   'voice:state': (req: { muted: boolean; deafened: boolean }) => void;
+  /** Liga ou desliga a câmera na sala em que está; ligar exige STREAM. */
+  'voice:video': (req: { enabled: boolean }, ack: (res: Ack<null>) => void) => void;
   'voice:signal': (req: { to: Id; signal: SignalPayload }) => void;
   /** Começa a compartilhar a tela na sala em que está; exige STREAM. */
   'stream:start': (ack: (res: Ack<null>) => void) => void;

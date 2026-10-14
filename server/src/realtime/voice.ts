@@ -15,6 +15,8 @@ import { channelWithPermission, isFunction } from './guards.js';
 import { rooms, type AppSocket, type IO } from './types.js';
 
 const MAX_SDP_LENGTH = 100_000;
+const MAX_STREAM_ID_LENGTH = 100;
+const isStreamId = (value: unknown) => typeof value === 'string' && value.length > 0 && value.length <= MAX_STREAM_ID_LENGTH;
 
 function isSignal(value: unknown): value is SignalPayload {
   if (typeof value !== 'object' || value === null) return false;
@@ -25,6 +27,7 @@ function isSignal(value: unknown): value is SignalPayload {
       (d?.type === 'offer' || d?.type === 'answer') && typeof d.sdp === 'string' && d.sdp.length < MAX_SDP_LENGTH
     );
   }
+  if (signal.kind === 'media') return isStreamId(signal.camera) && isStreamId(signal.screen);
   return signal.kind === 'candidate' && typeof signal.candidate === 'object' && signal.candidate !== null;
 }
 
@@ -81,6 +84,7 @@ export function registerVoice(io: IO, socket: AppSocket, store: Store, ice: IceC
       spaceId: channel.spaceId,
       muted: false,
       deafened: false,
+      video: false,
       streaming: false,
       watching: null,
       socketId: socket.id,
@@ -106,6 +110,21 @@ export function registerVoice(io: IO, socket: AppSocket, store: Store, ice: IceC
     const session = store.voice.get(userId);
     return session?.socketId === socket.id ? session : null;
   };
+
+  socket.on('voice:video', (req, ack) => {
+    if (!isFunction(ack)) return;
+    const session = mySession();
+    if (!session) return ack({ ok: false, error: 'Entre em um canal de voz para ligar a câmera.' });
+    const enabled = Boolean(req?.enabled);
+    if (enabled && !channelWithPermission(store, userId, session.channelId, 'voice', Permission.STREAM)) {
+      return ack({ ok: false, error: 'Você não tem permissão para usar vídeo neste canal.' });
+    }
+    if (session.video !== enabled) {
+      session.video = enabled;
+      broadcastRoster(io, store, session.spaceId, session.channelId);
+    }
+    ack({ ok: true, data: null });
+  });
 
   socket.on('stream:start', (ack) => {
     if (!isFunction(ack)) return;
