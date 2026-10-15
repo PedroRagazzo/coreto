@@ -1,0 +1,77 @@
+# Servidor TURN (coturn) para as chamadas do Coreto. No Dokploy: serviço Compose
+# do tipo "Docker Compose" (não Stack) apontando para este arquivo, com a
+# variável TURN_EXTERNAL_IP = IP público da VPS.
+#
+# O segredo do TURN é gerado aqui na primeira vez, num volume com nome fixo
+# (coreto-turn-secret). O app do Coreto monta o mesmo volume e lê o arquivo
+# (TURN_SECRET_FILE=/turn/turn-secret), então ninguém precisa copiar o segredo.
+#
+# Portas na VPS: 3490 (UDP e TCP) e 40000-40199 (UDP, áudio e vídeo retransmitidos).
+# Escolhidas para conviver com outro coturn no mesmo host (3478 e 49152-65535).
+#
+# A configuração vai por arquivo (gerado na subida), não por uma lista longa
+# de flags: o parser de linha de comando do turnserver é frágil com muitas flags.
+
+services:
+  # Gera o segredo uma vez; nas próximas subidas, só confere que ele existe.
+  secret:
+    image: alpine:3.22
+    volumes:
+      - turn-secret:/secret
+    command:
+      - sh
+      - -c
+      - |
+        if [ ! -s /secret/turn-secret ]; then
+          head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' > /secret/turn-secret
+          echo "segredo do TURN gerado"
+        fi
+        chmod 755 /secret && chmod 644 /secret/turn-secret
+
+  coturn:
+    image: coturn/coturn:4.18.0
+    # A rede do host evita mapear as centenas de portas de retransmissão uma a uma.
+    network_mode: host
+    restart: unless-stopped
+    depends_on:
+      secret:
+        condition: service_completed_successfully
+    environment:
+      TURN_EXTERNAL_IP: ${TURN_EXTERNAL_IP:?defina TURN_EXTERNAL_IP com o IP público da VPS}
+    volumes:
+      - turn-secret:/secret:ro
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        cat > /tmp/turnserver.conf <<EOF
+        listening-port=3490
+        external-ip=$$TURN_EXTERNAL_IP
+        min-port=40000
+        max-port=40199
+        fingerprint
+        use-auth-secret
+        static-auth-secret=$$(cat /secret/turn-secret)
+        realm=coreto
+        no-cli
+        no-tls
+        no-dtls
+        no-tcp-relay
+        no-multicast-peers
+        total-quota=100
+        user-quota=12
+        stale-nonce=600
+        log-file=stdout
+        simple-log
+        denied-peer-ip=0.0.0.0-0.255.255.255
+        denied-peer-ip=10.0.0.0-10.255.255.255
+        denied-peer-ip=100.64.0.0-100.127.255.255
+        denied-peer-ip=127.0.0.0-127.255.255.255
+        denied-peer-ip=169.254.0.0-169.254.255.255
+        denied-peer-ip=172.16.0.0-172.31.255.255
+        denied-peer-ip=192.168.0.0-192.168.255.255
+        EOF
+        exec turnserver -c /tmp/turnserver.conf
+
+volumes:
+  turn-secret:
+    name: coreto-turn-secret

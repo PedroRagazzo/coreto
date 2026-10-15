@@ -97,6 +97,20 @@ jobs:
           curl -fs -X POST http://localhost:3000/login -H 'content-type: application/json' \
             -d '{"name":"CI","pin":"1234"}' | grep -q '"ok":true'
 
+      # O mesmo comando que o Dokploy agenda: gera a cópia e confere que ela pode ser restaurada.
+      - name: Backup do banco
+        run: |
+          docker exec coreto npm run backup -w server
+          docker exec coreto sh -c 'pg_restore --list /data/backups/coreto-*.dump | grep -q "TABLE public Message"'
+
+      # O TURN do deploy (deploy/coturn): sobe pelo mesmo compose e responde STUN e TURN com autenticação.
+      - name: TURN (coturn)
+        run: |
+          TURN_EXTERNAL_IP=127.0.0.1 docker compose -f deploy/coturn/docker-compose.yml up -d
+          for i in $(seq 1 15); do node deploy/coturn/check.mjs 127.0.0.1 3490 && exit 0; sleep 2; done
+          docker compose -f deploy/coturn/docker-compose.yml logs
+          exit 1
+
       - name: Logs do container
         if: always()
         run: docker logs coreto

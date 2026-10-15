@@ -10,6 +10,7 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
+    "backup": "sh scripts/backup.sh",
     "test": "prisma generate && vitest run",
     "test:watch": "prisma generate && vitest"
   },

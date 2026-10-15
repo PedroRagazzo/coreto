@@ -8,10 +8,12 @@
 //   ICE_SERVERS          JSON com servidores fixos (padrão: STUN do Google)
 //   TURN_URLS            ex.: "turn:turn.exemplo.com:3478,turns:turn.exemplo.com:5349"
 //   TURN_SECRET          o mesmo `static-auth-secret` do coturn
+//   TURN_SECRET_FILE     ou um arquivo com o segredo (ex.: volume gerado pelo coturn de deploy/coturn)
 //   TURN_TTL_SECONDS     validade das credenciais (padrão: 1 dia)
 //   ICE_TRANSPORT_POLICY "relay" força tudo pelo TURN (para testar o TURN)
 
 import { createHmac } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import type { Id } from '../../shared/src/models.js';
 import type { IceServer } from '../../shared/src/protocol.js';
 
@@ -29,8 +31,12 @@ export function iceConfigFromEnv(env: NodeJS.ProcessEnv = process.env): IceConfi
   if (!Array.isArray(fixed)) throw new Error('ICE_SERVERS precisa ser uma lista JSON.');
 
   const turnUrls = (env.TURN_URLS ?? '').split(',').map((url) => url.trim()).filter(Boolean);
-  const secret = env.TURN_SECRET ?? '';
-  if (turnUrls.length > 0 && !secret) throw new Error('TURN_URLS definido sem TURN_SECRET.');
+  const secret = env.TURN_SECRET
+    ? () => env.TURN_SECRET!
+    : env.TURN_SECRET_FILE
+      ? secretFromFile(env.TURN_SECRET_FILE)
+      : null;
+  if (turnUrls.length > 0 && !secret) throw new Error('TURN_URLS definido sem TURN_SECRET nem TURN_SECRET_FILE.');
   const ttl = Number(env.TURN_TTL_SECONDS ?? DEFAULT_TTL_SECONDS);
   if (!Number.isFinite(ttl) || ttl <= 0) throw new Error('TURN_TTL_SECONDS precisa ser um número positivo.');
 
@@ -42,9 +48,30 @@ export function iceConfigFromEnv(env: NodeJS.ProcessEnv = process.env): IceConfi
   return {
     transportPolicy,
     iceServers(userId, now = Date.now()) {
-      if (turnUrls.length === 0) return fixed;
-      return [...fixed, { urls: turnUrls, ...turnCredentials(secret, userId, Math.floor(now / 1000) + ttl) }];
+      const key = secret?.();
+      // Sem segredo ainda (o coturn não gerou o arquivo): a chamada segue só com STUN.
+      if (turnUrls.length === 0 || !key) return fixed;
+      return [...fixed, { urls: turnUrls, ...turnCredentials(key, userId, Math.floor(now / 1000) + ttl) }];
     },
+  };
+}
+
+/**
+ * Lê o segredo de um arquivo na primeira vez que ele existir e guarda na memória.
+ * Enquanto o arquivo não existir, devolve `null` (e avisa uma vez no log).
+ */
+function secretFromFile(path: string): () => string | null {
+  let cached: string | null = null;
+  let warned = false;
+  return () => {
+    if (cached) return cached;
+    try {
+      cached = readFileSync(path, 'utf8').trim() || null;
+    } catch (err) {
+      if (!warned) console.warn(`[turn] sem segredo em ${path}; chamadas só com STUN por enquanto.`, (err as Error).message);
+      warned = true;
+    }
+    return cached;
   };
 }
 

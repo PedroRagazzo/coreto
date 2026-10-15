@@ -73,6 +73,38 @@ No [Dokploy](https://dokploy.com):
 7. **Deploy automático:** com o Autodeploy ligado, copie a "Webhook URL" da aba Deployments e cadastre-a no
    GitHub (Settings → Webhooks, `application/json`, só o evento push). Cada push na `main` faz um deploy novo.
 
+### TURN no Dokploy
+
+`deploy/coturn/docker-compose.yml` sobe um coturn para as chamadas. No Dokploy, crie um serviço **Compose**
+(tipo "Docker Compose", não Stack) apontando para esse arquivo, com `TURN_EXTERNAL_IP` = IP público da VPS.
+O compose gera o segredo do TURN na primeira vez num volume com nome fixo, `coreto-turn-secret`. No app, monte
+esse volume em `/turn` e defina:
+
+```
+TURN_URLS=turn:<IP>:3490?transport=udp,turn:<IP>:3490?transport=tcp
+TURN_SECRET_FILE=/turn/turn-secret
+```
+
+Assim ninguém precisa copiar o segredo. A VPS precisa aceitar a porta 3490 (UDP e TCP) e a faixa 40000–40199
+(UDP). Para conferir de fora, sem o segredo: `node deploy/coturn/check.mjs <IP> 3490` (STUN por UDP e TCP, e
+TURN exigindo autenticação). O coturn recusa retransmitir para endereços internos (10.x, 172.16–31.x, 192.168.x,
+127.x), para ninguém usar o TURN para alcançar a rede interna da VPS.
+
+### Backup do banco
+
+A imagem traz o `pg_dump` 17. `npm run backup -w server` grava uma cópia compactada em `/data/backups` e guarda as
+14 mais recentes (`BACKUP_KEEP`). No Dokploy:
+
+1. monte um volume (por exemplo, `coreto-backups`) em `/data/backups`;
+2. crie um agendamento na aba **Schedules** do app com o comando `npm run backup -w server`, uma vez por dia.
+
+As cópias ficam na própria VPS: protegem contra erro humano e banco corrompido, não contra perder a VPS. Para
+restaurar, no terminal do app:
+
+```bash
+pg_restore --clean --if-exists --no-owner --dbname="$DATABASE_URL" /data/backups/coreto-AAAAMMDD-HHMMSS.dump
+```
+
 ## App de desktop (Windows)
 
 `desktop/` é um app Electron que abre o servidor de `desktop/coreto.config.json`, como o app do Discord abre o
@@ -123,6 +155,7 @@ coreto/
 │   ├── permissions.ts       Bit flags (ler, escrever, conectar, falar...)
 │   └── protocol.ts          Eventos socket.io tipados + formatos de sinalização WebRTC
 ├── Dockerfile               Imagem de produção: site + API + socket.io num container
+├── deploy/coturn/           TURN para o Dokploy (compose) e verificador sem segredo (check.mjs)
 ├── desktop/                 App de desktop (Electron) e instalador do Windows
 ├── server/
 │   ├── prisma/              Esquema (schema.prisma) e migrations do PostgreSQL

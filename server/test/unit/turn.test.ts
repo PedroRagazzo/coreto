@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describe, expect, it, vi } from 'vitest';
 import { iceConfigFromEnv, turnCredentials } from '../../src/turn.js';
 
 describe('turnCredentials', () => {
@@ -31,6 +34,26 @@ describe('iceConfigFromEnv', () => {
       username: '1700000000:ana',
       credential: 'SrmCfwL1NEeme25PEvh3+kCYiMU=',
     });
+  });
+
+  it('lê o segredo de um arquivo quando ele aparece', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'coreto-turn-'));
+    const file = join(dir, 'segredo');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const config = iceConfigFromEnv({ TURN_URLS: 'turn:x:3478', TURN_SECRET_FILE: file, TURN_TTL_SECONDS: '600' });
+      // Arquivo ainda não existe: só STUN, sem quebrar a chamada.
+      expect(config.iceServers('ana', 1_699_999_400_000)).toHaveLength(1);
+      writeFileSync(file, 'segredo\n');
+      expect(config.iceServers('ana', 1_699_999_400_000)[1]).toMatchObject({
+        username: '1700000000:ana',
+        credential: 'SrmCfwL1NEeme25PEvh3+kCYiMU=',
+      });
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('recusa configurações incompletas', () => {
