@@ -5,6 +5,8 @@
 Plataforma aberta de comunidades com chat em tempo real e salas de voz.
 Front-end em React + TypeScript + Tailwind CSS; tempo real em Node.js + socket.io; voz por WebRTC.
 
+**No ar:** https://coreto.2.28.229.48.nip.io · [baixar o app para Windows](https://github.com/PedroRagazzo/coreto/releases/latest)
+
 > [!WARNING]
 > **Protótipo: não use em produção.** O login é só nome + PIN de 4 dígitos, todo espaço é
 > público, e a voz não foi validada com muitas pessoas ou fora da rede local.
@@ -65,8 +67,8 @@ No [Dokploy](https://dokploy.com):
    type **Dockerfile**.
 3. **Variáveis:** `DATABASE_URL` (a URL interna do banco). Para TURN, veja [TURN](#turn).
 4. **Volume:** monte um volume em `/data/uploads`, senão as imagens somem a cada deploy.
-5. **Domínio:** porta 3000, com HTTPS (Let's Encrypt). Sem domínio próprio, use `coreto.<IP-da-VPS>.sslip.io`.
-   **Microfone, câmera e tela só funcionam em HTTPS.**
+5. **Domínio:** porta 3000, com HTTPS (Let's Encrypt). Sem domínio próprio, use `coreto.<IP-da-VPS>.nip.io`
+   (o Dokploy não ativa HTTPS para sslip.io). **Microfone, câmera e tela só funcionam em HTTPS.**
 6. **Deploy.** O primeiro deploy cria as tabelas e os espaços de demonstração.
 
 ## App de desktop (Windows)
