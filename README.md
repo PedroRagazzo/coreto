@@ -126,6 +126,12 @@ npm run dist                               # gera release/Coreto-Setup-<versão>
 Uma tag `v<versão>` (a mesma de `desktop/package.json`) faz o GitHub Actions gerar o instalador e publicar a
 release com ele. O instalador não é assinado, então o Windows mostra um aviso na primeira vez.
 
+**Bandeja do Windows** (a partir da 0.3.0): como o Discord, fechar a janela deixa o Coreto rodando na bandeja,
+inclusive no meio de uma chamada. Clicar no ícone traz a janela de volta; o botão direito tem "Abrir o Coreto",
+"Procurar atualizações" (ou "Reiniciar e atualizar", quando há versão baixada) e "Sair do Coreto". Na primeira vez
+um aviso explica onde o app ficou. Dá para desligar em Configurações → App de desktop → "Minimizar para a bandeja ao
+fechar". Aberto junto com o Windows, o app começa direto na bandeja.
+
 **Atualização automática** (a partir da 0.2.0): o app instalado consulta o `latest.yml` da última release do GitHub
 ao abrir e a cada 4 horas, com o `electron-updater`. Se houver versão nova, baixa em segundo plano e mostra no topo
 "A versão X está pronta — Reiniciar agora". Se a pessoa não reiniciar, a versão nova é instalada ao fechar o app. O

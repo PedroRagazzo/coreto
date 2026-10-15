@@ -34,6 +34,9 @@ export interface DesktopBridge {
   /** `null` quando não dá para configurar (desenvolvimento). */
   getOpenAtLogin(): Promise<boolean | null>;
   setOpenAtLogin(open: boolean): Promise<boolean | null>;
+  /** Fechar a janela esconde o app na bandeja (padrão) em vez de sair. Ausente no app 0.2.0. */
+  getCloseToTray?(): Promise<boolean | null>;
+  setCloseToTray?(enabled: boolean): Promise<boolean | null>;
 }
 
 export const desktop: DesktopBridge | null =

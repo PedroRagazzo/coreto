@@ -11,8 +11,12 @@
 // baixa em segundo plano e avisa o site, que mostra "Reiniciar e atualizar".
 // Para testar sem publicar: CORETO_UPDATE_TEST=<url de uma pasta com latest.yml>, com um
 // dev-app-update.yml (provider: generic, url: a mesma) na pasta desktop/.
+//
+// Bandeja: como o Discord, fechar a janela esconde o app na bandeja do Windows
+// (uma chamada continua); o ícone traz de volta e o menu tem "Sair do Coreto".
+// Aberto junto com o Windows (--hidden), começa direto na bandeja.
 
-import { app, BrowserWindow, desktopCapturer, ipcMain, Menu, session, shell } from 'electron';
+import { app, BrowserWindow, desktopCapturer, ipcMain, Menu, nativeImage, session, shell, Tray } from 'electron';
 import updater from 'electron-updater';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -32,6 +36,8 @@ function serverUrl() {
 }
 
 const SERVER = serverUrl();
+/** Argumento usado ao abrir junto com o Windows: começa escondido, só na bandeja. */
+const HIDDEN_ARG = '--hidden';
 /** Permissões que o site do Coreto pode pedir; as outras são negadas. */
 const ALLOWED_PERMISSIONS = new Set(['media', 'display-capture', 'notifications', 'fullscreen', 'clipboard-sanitized-write']);
 
@@ -48,6 +54,39 @@ const openOutside = (/** @type {string} */ url) => {
   if (protocol === 'https:' || protocol === 'http:') void shell.openExternal(url);
 };
 
+// ── Preferências do app (as do site ficam no navegador) ──────────────────────
+
+/** @typedef {{ closeToTray: boolean; trayHintShown: boolean }} DesktopPrefs */
+const prefsPath = () => join(app.getPath('userData'), 'desktop.json');
+
+/** @returns {DesktopPrefs} */
+function loadPrefs() {
+  /** @type {Partial<DesktopPrefs>} */
+  let saved = {};
+  try {
+    saved = JSON.parse(readFileSync(prefsPath(), 'utf8'));
+  } catch {
+    // primeira vez: padrões
+  }
+  return {
+    closeToTray: typeof saved.closeToTray === 'boolean' ? saved.closeToTray : true,
+    trayHintShown: saved.trayHintShown === true,
+  };
+}
+
+/** @type {DesktopPrefs} */
+let prefs = { closeToTray: true, trayHintShown: false };
+
+/** @param {Partial<DesktopPrefs>} patch */
+function savePrefs(patch) {
+  prefs = { ...prefs, ...patch };
+  try {
+    writeFileSync(prefsPath(), JSON.stringify(prefs));
+  } catch {
+    // sem onde gravar, vale até fechar o app
+  }
+}
+
 // ── Atualização automática ───────────────────────────────────────────────────
 
 const { autoUpdater } = updater;
@@ -62,7 +101,13 @@ let updateState = { status: app.isPackaged || UPDATE_TEST_FEED ? 'idle' : 'unsup
 function setUpdateState(patch) {
   updateState = { ...updateState, ...patch };
   mainWindow?.webContents.send('desktop:update-state', updateState);
+  refreshTray();
 }
+
+const installUpdate = () => {
+  // Silencioso e reabrindo o app no fim, como o Discord.
+  if (updateState.status === 'ready') autoUpdater.quitAndInstall(true, true);
+};
 
 const checkForUpdates = async () => {
   if (updateState.status === 'unsupported' || updateState.status === 'ready') return;
@@ -114,17 +159,24 @@ function registerBridge() {
     return updateState;
   });
   ipcMain.on('desktop:install-update', (event) => {
-    // Silencioso e reabrindo o app no fim, como o Discord.
-    if (fromCoreto(event) && updateState.status === 'ready') autoUpdater.quitAndInstall(true, true);
+    if (fromCoreto(event)) installUpdate();
   });
   // Iniciar com o Windows só faz sentido no app instalado (em desenvolvimento registraria o electron.exe).
+  // Aberto pelo Windows, o app começa escondido na bandeja.
+  const loginItem = { args: [HIDDEN_ARG] };
   ipcMain.handle('desktop:get-open-at-login', (event) =>
-    fromCoreto(event) && app.isPackaged ? app.getLoginItemSettings().openAtLogin : null,
+    fromCoreto(event) && app.isPackaged ? app.getLoginItemSettings(loginItem).openAtLogin : null,
   );
   ipcMain.handle('desktop:set-open-at-login', (event, open) => {
     if (!fromCoreto(event) || !app.isPackaged) return null;
-    app.setLoginItemSettings({ openAtLogin: Boolean(open) });
-    return app.getLoginItemSettings().openAtLogin;
+    app.setLoginItemSettings({ ...loginItem, openAtLogin: Boolean(open) });
+    return app.getLoginItemSettings(loginItem).openAtLogin;
+  });
+  ipcMain.handle('desktop:get-close-to-tray', (event) => (fromCoreto(event) ? prefs.closeToTray : null));
+  ipcMain.handle('desktop:set-close-to-tray', (event, enabled) => {
+    if (!fromCoreto(event)) return null;
+    savePrefs({ closeToTray: Boolean(enabled) });
+    return prefs.closeToTray;
   });
 }
 
@@ -206,12 +258,63 @@ async function pickSource(parent) {
   });
 }
 
+// ── Bandeja do Windows ───────────────────────────────────────────────────────
+
+/** @type {Tray | null} */
+let tray = null;
+/** O app está saindo de verdade (menu "Sair", atualização, desligamento): a janela pode fechar. */
+let quitting = false;
+
+function showWindow() {
+  if (!mainWindow) return createWindow(true);
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+function refreshTray() {
+  if (!tray) return;
+  const ready = updateState.status === 'ready';
+  tray.setToolTip(ready ? `Coreto — versão ${updateState.version} pronta para instalar` : 'Coreto');
+  /** @type {Electron.MenuItemConstructorOptions} */
+  const updateItem = ready
+    ? { label: `Reiniciar e atualizar (${updateState.version})`, click: installUpdate }
+    : {
+        label: updateState.status === 'checking' ? 'Procurando atualizações…' : 'Procurar atualizações',
+        enabled: !['unsupported', 'checking', 'downloading', 'available'].includes(updateState.status),
+        click: () => void checkForUpdates(),
+      };
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: 'Abrir o Coreto', click: showWindow },
+      { type: 'separator' },
+      updateItem,
+      { type: 'separator' },
+      {
+        label: 'Sair do Coreto',
+        click: () => {
+          quitting = true;
+          app.quit();
+        },
+      },
+    ]),
+  );
+}
+
+function createTray() {
+  // tray.png tem 16 px; o Electron usa o tray@2x.png (32 px) sozinho em telas de alta densidade.
+  tray = new Tray(nativeImage.createFromPath(join(here, 'assets', 'tray.png')));
+  tray.on('click', showWindow);
+  refreshTray();
+}
+
 // ── Janela principal ─────────────────────────────────────────────────────────
 
 /** @type {BrowserWindow | null} */
 let mainWindow = null;
 
-function createWindow() {
+/** @param {boolean} [visible] mostrar assim que carregar (falso ao abrir junto com o Windows) */
+function createWindow(visible = true) {
   const state = loadWindowState();
   const win = new BrowserWindow({
     ...state,
@@ -227,12 +330,33 @@ function createWindow() {
       sandbox: true,
       nodeIntegration: false,
       spellcheck: true,
+      // Escondido na bandeja, o app continua numa chamada: nada de desacelerar os timers.
+      backgroundThrottling: false,
     },
   });
   mainWindow = win;
   if (state.maximized) win.maximize();
-  win.once('ready-to-show', () => win.show());
-  win.on('close', () => saveWindowState(win));
+  win.once('ready-to-show', () => {
+    if (visible) win.show();
+  });
+  win.on('close', (event) => {
+    saveWindowState(win);
+    if (quitting || !prefs.closeToTray || !tray) return;
+    // Fechar só esconde, como o Discord; "Sair do Coreto" no menu da bandeja fecha de vez.
+    event.preventDefault();
+    win.hide();
+    if (!prefs.trayHintShown) {
+      tray.displayBalloon({
+        iconType: 'info',
+        title: 'O Coreto continua aberto',
+        content: 'Ele fica aqui na bandeja. Clique no ícone para voltar ou use o botão direito para sair.',
+      });
+      savePrefs({ trayHintShown: true });
+    }
+  });
+  win.on('closed', () => {
+    if (mainWindow === win) mainWindow = null;
+  });
 
   // Links de fora (e anexos abertos em "nova aba") vão para o navegador padrão.
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -306,21 +430,22 @@ function configureSession() {
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on('second-instance', () => {
-    if (!mainWindow) return;
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.focus();
+  // Abrir de novo (atalho, menu Iniciar) traz a janela de volta, mesmo escondida na bandeja.
+  app.on('second-instance', showWindow);
+  // Sair pelo menu, pela atualização ou pelo desligamento do Windows: a janela pode fechar.
+  app.on('before-quit', () => {
+    quitting = true;
   });
 
   app.whenReady().then(() => {
     Menu.setApplicationMenu(null);
+    prefs = loadPrefs();
     configureSession();
     registerBridge();
-    createWindow();
+    createTray();
+    createWindow(!process.argv.includes(HIDDEN_ARG));
     configureUpdater();
-    app.on('activate', () => {
-      if (BrowserWindow.getAllWindows().length === 0) createWindow();
-    });
+    app.on('activate', showWindow);
   });
 
   app.on('window-all-closed', () => {

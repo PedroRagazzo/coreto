@@ -43,9 +43,11 @@ function describe(state: UpdateState | null): { icon: ReactNode; text: string } 
 export function DesktopSettings() {
   const update = useDesktopUpdate();
   const [openAtLogin, setOpenAtLogin] = useState<boolean | null>(null);
+  const [closeToTray, setCloseToTray] = useState<boolean | null>(null);
 
   useEffect(() => {
     void desktop?.getOpenAtLogin().then(setOpenAtLogin);
+    void desktop?.getCloseToTray?.().then(setCloseToTray);
   }, []);
 
   if (!desktop) return null;
@@ -87,10 +89,27 @@ export function DesktopSettings() {
         )}
       </SettingsGroup>
 
+      {/* O app 0.2.0 ainda não tinha bandeja; o interruptor aparece a partir da versão seguinte. */}
+      {desktop.getCloseToTray && (
+        <SettingsGroup title="Janela">
+          <Toggle
+            label="Minimizar para a bandeja ao fechar"
+            description="Fechar a janela deixa o Coreto rodando na bandeja do Windows, inclusive numa chamada. Para sair de vez, clique com o botão direito no ícone da bandeja."
+            checked={closeToTray ?? true}
+            disabled={closeToTray === null}
+            onChange={(v) => void desktop?.setCloseToTray?.(v).then(setCloseToTray)}
+          />
+        </SettingsGroup>
+      )}
+
       <SettingsGroup title="Inicialização">
         <Toggle
           label="Abrir o Coreto ao ligar o computador"
-          description={openAtLogin === null ? 'Disponível só no app instalado.' : 'O app abre sozinho quando você entra no Windows.'}
+          description={
+            openAtLogin === null
+              ? 'Disponível só no app instalado.'
+              : 'O app abre sozinho, direto na bandeja, quando você entra no Windows.'
+          }
           checked={openAtLogin ?? false}
           disabled={openAtLogin === null}
           onChange={(v) => void desktop?.setOpenAtLogin(v).then(setOpenAtLogin)}
