@@ -70,6 +70,8 @@ No [Dokploy](https://dokploy.com):
 5. **Domínio:** porta 3000, com HTTPS (Let's Encrypt). Sem domínio próprio, use `coreto.<IP-da-VPS>.nip.io`
    (o Dokploy não ativa HTTPS para sslip.io). **Microfone, câmera e tela só funcionam em HTTPS.**
 6. **Deploy.** O primeiro deploy cria as tabelas e os espaços de demonstração.
+7. **Deploy automático:** com o Autodeploy ligado, copie a "Webhook URL" da aba Deployments e cadastre-a no
+   GitHub (Settings → Webhooks, `application/json`, só o evento push). Cada push na `main` faz um deploy novo.
 
 ## App de desktop (Windows)
 
