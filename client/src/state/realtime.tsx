@@ -31,6 +31,7 @@ import { createContext, useContext, useEffect, useMemo, useReducer, useRef, type
 import type { Identity } from '../lib/identity';
 import { createSocket, type AppSocket } from '../lib/socket';
 import { uploadImage, type UploadHandle } from '../lib/uploads';
+import { useSettings } from './settings';
 import {
   describeCameraError,
   describeMediaError,
@@ -1159,6 +1160,15 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
     socketRef.current?.emit('mentions:ack', { channelId: openChannelId });
     dispatch({ type: 'mentions:update', mention: { ...stateRef.current.mentions[openChannelId], count: 0 } });
   }, [openChannelId, openChannelMentions]);
+
+  // Configurações de voz e vídeo valem na hora, inclusive no meio da chamada.
+  const { settings } = useSettings();
+  useEffect(() => {
+    voiceRef.current
+      ?.applyPrefs(settings.voice)
+      .then(({ camera }) => camera && dispatch({ type: 'camera:mine', stream: camera }))
+      .catch((err: unknown) => dispatch({ type: 'voice:self', patch: { error: describeMediaError(err) } }));
+  }, [settings.voice, identity]);
 
   // Sua tela vai só para quem está assistindo, segundo a lista da sala.
   const myRoom = state.myVoice.channelId ? state.voice[state.myVoice.channelId] : undefined;

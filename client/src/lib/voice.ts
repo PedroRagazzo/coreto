@@ -11,6 +11,7 @@
 
 import type { Id } from '@shared/models';
 import type { IceServer, SignalPayload } from '@shared/protocol';
+import { DEFAULT_SETTINGS, microphoneConstraints, type VoicePrefs } from './settings';
 import type { AppSocket } from './socket';
 
 /** Volume (RMS, 0–1) acima do qual conta como fala. */
@@ -79,6 +80,81 @@ class SpeakingDetector {
   }
 }
 
+/**
+ * Microfone → ganho → saída fixa. Trocar de microfone só troca a fonte: a faixa
+ * enviada às conexões continua a mesma, sem renegociar no meio da chamada.
+ */
+class MicPipeline {
+  private readonly context = new AudioContext();
+  private readonly gain = this.context.createGain();
+  private readonly output = this.context.createMediaStreamDestination();
+  private source: MediaStreamAudioSourceNode | null = null;
+  private raw: MediaStream | null = null;
+  /** O que vai para as conexões e para o medidor de fala. */
+  readonly stream = this.output.stream;
+
+  constructor(volume: number) {
+    this.gain.gain.value = volume;
+    this.gain.connect(this.output);
+    void this.context.resume();
+  }
+
+  use(raw: MediaStream): void {
+    this.source?.disconnect();
+    this.raw?.getTracks().forEach((track) => track.stop());
+    this.raw = raw;
+    this.source = this.context.createMediaStreamSource(raw);
+    this.source.connect(this.gain);
+  }
+
+  setVolume(volume: number): void {
+    this.gain.gain.setTargetAtTime(volume, this.context.currentTime, 0.05);
+  }
+
+  close(): void {
+    this.source?.disconnect();
+    this.raw?.getTracks().forEach((track) => track.stop());
+    this.stream.getTracks().forEach((track) => track.stop());
+    void this.context.close();
+  }
+}
+
+/** Abre o microfone escolhido; se ele não existir mais (desconectado), usa o padrão do sistema. */
+export async function openMicrophone(prefs: VoicePrefs): Promise<MediaStream> {
+  try {
+    return await navigator.mediaDevices.getUserMedia({ audio: microphoneConstraints(prefs), video: false });
+  } catch (err) {
+    const missing = err instanceof DOMException && (err.name === 'OverconstrainedError' || err.name === 'NotFoundError');
+    if (!prefs.inputDeviceId || !missing) throw err;
+    return navigator.mediaDevices.getUserMedia({ audio: microphoneConstraints({ ...prefs, inputDeviceId: null }), video: false });
+  }
+}
+
+async function openCamera(deviceId: string | null): Promise<MediaStream> {
+  const constraints = (id: string | null) => ({ ...CAMERA_CONSTRAINTS, ...(id && { deviceId: { exact: id } }) });
+  try {
+    return await navigator.mediaDevices.getUserMedia({ video: constraints(deviceId), audio: false });
+  } catch (err) {
+    const missing = err instanceof DOMException && (err.name === 'OverconstrainedError' || err.name === 'NotFoundError');
+    if (!deviceId || !missing) throw err;
+    return navigator.mediaDevices.getUserMedia({ video: constraints(null), audio: false });
+  }
+}
+
+/** Saída de áudio escolhida (onde o navegador permite) e volume. */
+export function applyOutput(element: HTMLMediaElement, prefs: VoicePrefs, volume = prefs.outputVolume): void {
+  element.volume = volume;
+  if ('setSinkId' in element) {
+    void element.setSinkId(prefs.outputDeviceId ?? '').catch((err: unknown) => console.warn('[voz] setSinkId', err));
+  }
+}
+
+const micChanged = (a: VoicePrefs, b: VoicePrefs) =>
+  a.inputDeviceId !== b.inputDeviceId ||
+  a.echoCancellation !== b.echoCancellation ||
+  a.noiseSuppression !== b.noiseSuppression ||
+  a.autoGainControl !== b.autoGainControl;
+
 /** Qualidade da transmissão de tela, como no seletor do Discord. */
 export interface ScreenShareOptions {
   /** Altura máxima em pixels; `null` = resolução original da tela. */
@@ -136,6 +212,8 @@ type Slot = 'screenVideo' | 'screenAudio' | 'cameraVideo';
 
 export class VoiceManager {
   private localStream: MediaStream | null = null;
+  private mic: MicPipeline | null = null;
+  private prefs: VoicePrefs = DEFAULT_SETTINGS.voice;
   private iceServers: IceServer[] = [];
   private iceTransportPolicy: RTCIceTransportPolicy = 'all';
   private readonly peers = new Map<Id, Peer>();
@@ -165,15 +243,15 @@ export class VoiceManager {
 
   async join(channelId: Id, startMuted: boolean, selfId: Id): Promise<void> {
     this.teardown();
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-      video: false,
-    });
+    const raw = await openMicrophone(this.prefs);
     const res = await this.socket.emitWithAck('voice:join', { channelId });
     if (!res.ok) {
-      stream.getTracks().forEach((track) => track.stop());
+      raw.getTracks().forEach((track) => track.stop());
       throw new Error(res.error);
     }
+    this.mic = new MicPipeline(this.prefs.inputVolume);
+    this.mic.use(raw);
+    const stream = this.mic.stream;
     this.localStream = stream;
     this.cameraCarrier = new MediaStream();
     this.screenCarrier = new MediaStream();
@@ -200,9 +278,35 @@ export class VoiceManager {
     for (const peerId of [...this.peers.keys()]) this.closePeer(peerId);
     if (this.selfId) this.detector.unwatch(this.selfId);
     this.detector.stop();
-    this.localStream?.getTracks().forEach((track) => track.stop());
+    this.mic?.close();
+    this.mic = null;
     this.localStream = null;
     this.selfId = null;
+  }
+
+  /**
+   * Aplica as configurações de voz e vídeo. No meio da chamada: troca o
+   * microfone e o ganho, a saída e o volume das vozes, e a câmera ligada.
+   * Devolve a câmera nova, se ela foi trocada.
+   */
+  async applyPrefs(next: VoicePrefs): Promise<{ camera: MediaStream | null }> {
+    const prev = this.prefs;
+    this.prefs = next;
+    if (this.mic) {
+      if (next.inputVolume !== prev.inputVolume) this.mic.setVolume(next.inputVolume);
+      if (micChanged(prev, next)) this.mic.use(await openMicrophone(next));
+    }
+    if (next.outputDeviceId !== prev.outputDeviceId || next.outputVolume !== prev.outputVolume) {
+      for (const peer of this.peers.values()) if (peer.audio) applyOutput(peer.audio, next);
+    }
+    if (this.camera && next.cameraDeviceId !== prev.cameraDeviceId) {
+      const old = this.camera;
+      this.camera = await openCamera(next.cameraDeviceId);
+      this.applyCamera();
+      old.getTracks().forEach((track) => track.stop());
+      return { camera: this.camera };
+    }
+    return { camera: null };
   }
 
   setMuted(muted: boolean): void {
@@ -316,7 +420,7 @@ export class VoiceManager {
   /** Liga a câmera e manda o vídeo para todos da chamada. */
   async startCamera(): Promise<MediaStream> {
     if (!this.localStream) throw new Error('Entre em um canal de voz para ligar a câmera.');
-    const stream = await navigator.mediaDevices.getUserMedia({ video: CAMERA_CONSTRAINTS, audio: false });
+    const stream = await openCamera(this.prefs.cameraDeviceId);
     this.stopCamera();
     this.camera = stream;
     this.applyCamera();
@@ -386,6 +490,7 @@ export class VoiceManager {
         audio.autoplay = true;
         audio.srcObject = remote;
         audio.muted = this.deafened;
+        applyOutput(audio, this.prefs);
         peer.audio = audio;
         this.detector.watch(peerId, remote);
         audio.play().catch(() => {

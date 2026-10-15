@@ -62,7 +62,8 @@ jobs:
             echo
             echo "Também dá para usar pelo navegador: $url"
           } > notes.md
-          gh release create "$GITHUB_REF_NAME" release/*.exe \
+          # latest.yml e o .blockmap são o que o app instalado consulta para se atualizar sozinho.
+          gh release create "$GITHUB_REF_NAME" release/*.exe release/*.exe.blockmap release/latest.yml \
             --title "Coreto $GITHUB_REF_NAME" \
             --notes-file notes.md \
             --generate-notes

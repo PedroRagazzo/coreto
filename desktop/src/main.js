@@ -5,8 +5,15 @@
 // permissão de microfone e câmera para o servidor certo e links no navegador.
 //
 // Endereço do servidor, por ordem: --url=..., CORETO_URL, coreto.config.json.
+//
+// Atualização: o app instalado procura versões novas nas releases do GitHub
+// (latest.yml publicado pelo workflow de release) ao abrir e a cada 4 horas,
+// baixa em segundo plano e avisa o site, que mostra "Reiniciar e atualizar".
+// Para testar sem publicar: CORETO_UPDATE_TEST=<url de uma pasta com latest.yml>, com um
+// dev-app-update.yml (provider: generic, url: a mesma) na pasta desktop/.
 
 import { app, BrowserWindow, desktopCapturer, ipcMain, Menu, session, shell } from 'electron';
+import updater from 'electron-updater';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -40,6 +47,86 @@ const openOutside = (/** @type {string} */ url) => {
   const protocol = new URL(url).protocol;
   if (protocol === 'https:' || protocol === 'http:') void shell.openExternal(url);
 };
+
+// ── Atualização automática ───────────────────────────────────────────────────
+
+const { autoUpdater } = updater;
+const UPDATE_CHECK_MS = 4 * 60 * 60_000;
+const UPDATE_TEST_FEED = process.env.CORETO_UPDATE_TEST;
+
+/** @typedef {{ status: string; version?: string; percent?: number; error?: string; checkedAt?: string }} UpdateState */
+/** @type {UpdateState} */
+let updateState = { status: app.isPackaged || UPDATE_TEST_FEED ? 'idle' : 'unsupported' };
+
+/** @param {Partial<UpdateState>} patch */
+function setUpdateState(patch) {
+  updateState = { ...updateState, ...patch };
+  mainWindow?.webContents.send('desktop:update-state', updateState);
+}
+
+const checkForUpdates = async () => {
+  if (updateState.status === 'unsupported' || updateState.status === 'ready') return;
+  if (updateState.status === 'downloading' || updateState.status === 'checking') return;
+  await autoUpdater.checkForUpdates().catch(() => {
+    // o evento "error" já registrou o motivo
+  });
+};
+
+function configureUpdater() {
+  if (updateState.status === 'unsupported') return;
+  if (UPDATE_TEST_FEED) {
+    autoUpdater.forceDevUpdateConfig = true;
+    autoUpdater.setFeedURL({ provider: 'generic', url: UPDATE_TEST_FEED });
+  }
+  autoUpdater.autoDownload = true;
+  // Se a pessoa não reiniciar agora, instala ao fechar o app.
+  autoUpdater.autoInstallOnAppQuit = true;
+  const now = () => new Date().toISOString();
+  autoUpdater.on('checking-for-update', () => setUpdateState({ status: 'checking', error: undefined }));
+  autoUpdater.on('update-available', (info) => setUpdateState({ status: 'available', version: info.version, percent: 0 }));
+  autoUpdater.on('download-progress', (progress) => setUpdateState({ status: 'downloading', percent: progress.percent }));
+  autoUpdater.on('update-downloaded', (info) =>
+    setUpdateState({ status: 'ready', version: info.version, percent: 100, checkedAt: now() }),
+  );
+  autoUpdater.on('update-not-available', () => setUpdateState({ status: 'latest', version: undefined, checkedAt: now() }));
+  autoUpdater.on('error', (err) =>
+    setUpdateState({ status: updateState.status === 'ready' ? 'ready' : 'error', error: err.message, checkedAt: now() }),
+  );
+  setTimeout(() => void checkForUpdates(), 5_000);
+  setInterval(() => void checkForUpdates(), UPDATE_CHECK_MS).unref();
+}
+
+// ── Ponte com o site (preload.cjs) ───────────────────────────────────────────
+
+/** O pedido veio da janela principal, com o site do Coreto carregado? */
+const fromCoreto = (/** @type {Electron.IpcMainEvent | Electron.IpcMainInvokeEvent} */ event) =>
+  mainWindow !== null && event.sender === mainWindow.webContents && isOurs(event.senderFrame?.url ?? '');
+
+function registerBridge() {
+  // Versão e sistema não são segredo; responde sempre (o preload espera a resposta).
+  ipcMain.on('desktop:info', (event) => {
+    event.returnValue = { version: app.getVersion(), platform: process.platform };
+  });
+  ipcMain.handle('desktop:update-state', (event) => (fromCoreto(event) ? updateState : null));
+  ipcMain.handle('desktop:check-updates', async (event) => {
+    if (!fromCoreto(event)) return null;
+    await checkForUpdates();
+    return updateState;
+  });
+  ipcMain.on('desktop:install-update', (event) => {
+    // Silencioso e reabrindo o app no fim, como o Discord.
+    if (fromCoreto(event) && updateState.status === 'ready') autoUpdater.quitAndInstall(true, true);
+  });
+  // Iniciar com o Windows só faz sentido no app instalado (em desenvolvimento registraria o electron.exe).
+  ipcMain.handle('desktop:get-open-at-login', (event) =>
+    fromCoreto(event) && app.isPackaged ? app.getLoginItemSettings().openAtLogin : null,
+  );
+  ipcMain.handle('desktop:set-open-at-login', (event, open) => {
+    if (!fromCoreto(event) || !app.isPackaged) return null;
+    app.setLoginItemSettings({ openAtLogin: Boolean(open) });
+    return app.getLoginItemSettings().openAtLogin;
+  });
+}
 
 // ── Posição e tamanho da janela entre aberturas ──────────────────────────────
 
@@ -134,7 +221,13 @@ function createWindow() {
     backgroundColor: '#121417',
     autoHideMenuBar: true,
     show: false,
-    webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, spellcheck: true },
+    webPreferences: {
+      preload: join(here, 'preload.cjs'),
+      contextIsolation: true,
+      sandbox: true,
+      nodeIntegration: false,
+      spellcheck: true,
+    },
   });
   mainWindow = win;
   if (state.maximized) win.maximize();
@@ -222,7 +315,9 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(() => {
     Menu.setApplicationMenu(null);
     configureSession();
+    registerBridge();
     createWindow();
+    configureUpdater();
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });

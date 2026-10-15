@@ -239,7 +239,7 @@ export function MessageInput({ targetId, label, canSend }: MessageInputProps) {
                 void submit();
               }
             }}
-            className="flex-1 resize-none bg-transparent py-0.5 text-[15px] leading-6 placeholder:text-faint focus:outline-none disabled:cursor-not-allowed"
+            className="flex-1 resize-none bg-transparent py-0.5 text-[length:var(--message-font-size)] leading-6 placeholder:text-faint focus:outline-none disabled:cursor-not-allowed"
           />
           <button
             type="submit"

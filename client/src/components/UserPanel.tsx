@@ -1,13 +1,16 @@
 import type { SelectableStatus } from '@shared/protocol';
+import { Settings } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useRealtime } from '../state/realtime';
 import { Avatar, STATUS_DOT, STATUS_LABEL } from './Avatar';
+import { SettingsModal } from './settings/SettingsModal';
 
 const SELECTABLE: SelectableStatus[] = ['online', 'idle', 'dnd'];
 
 export function UserPanel() {
   const { state, actions } = useRealtime();
   const [open, setOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -42,6 +45,16 @@ export function UserPanel() {
           <span className="block truncate text-xs text-muted">{STATUS_LABEL[me.status]}</span>
         </span>
       </button>
+      <button
+        type="button"
+        title="Configurações"
+        aria-label="Configurações"
+        onClick={() => setSettingsOpen(true)}
+        className="rounded-md p-1.5 text-muted hover:bg-hover hover:text-fg"
+      >
+        <Settings size={18} />
+      </button>
+      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
 
       {open && (
         <ul

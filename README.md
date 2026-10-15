@@ -126,6 +126,13 @@ npm run dist                               # gera release/Coreto-Setup-<versão>
 Uma tag `v<versão>` (a mesma de `desktop/package.json`) faz o GitHub Actions gerar o instalador e publicar a
 release com ele. O instalador não é assinado, então o Windows mostra um aviso na primeira vez.
 
+**Atualização automática** (a partir da 0.2.0): o app instalado consulta o `latest.yml` da última release do GitHub
+ao abrir e a cada 4 horas, com o `electron-updater`. Se houver versão nova, baixa em segundo plano e mostra no topo
+"A versão X está pronta — Reiniciar agora". Se a pessoa não reiniciar, a versão nova é instalada ao fechar o app. O
+site em si não depende disso: ele se atualiza a cada deploy. Para testar sem publicar, sirva uma pasta `release/`
+gerada pelo `npm run dist` e rode o app com `CORETO_UPDATE_TEST=<url da pasta>` e um `desktop/dev-app-update.yml`
+(`provider: generic`, `url: <a mesma>`), usando no `package.json` uma versão menor que a da pasta.
+
 ## Testes
 
 ```bash
@@ -197,6 +204,7 @@ coreto/
         ├── CallView.tsx          Mosaico da chamada: câmeras, avatares e cartões de quem está ao vivo
         ├── StreamStage.tsx       Transmissão de tela no painel central (assistir ou prévia)
         ├── Search.tsx            Caixa de busca do cabeçalho e painel de resultados
+        ├── settings/             Configurações: voz e vídeo, aparência e app de desktop
         ├── ScreenShareDialog.tsx Qualidade da transmissão antes do seletor do navegador
         ├── VoiceStatusBar.tsx, UserPanel.tsx, MessageList.tsx, MessageInput.tsx ...
 ```
@@ -274,6 +282,25 @@ Depois disso o navegador guarda um token de sessão que **não expira**, e a pes
   Clique numa imagem para ampliar. Apagar a mensagem apaga o arquivo; imagens enviadas e nunca usadas, e arquivos de
   canais ou espaços excluídos, são limpos ao iniciar e a cada hora. Os arquivos ficam em `server/uploads`
   (`UPLOAD_DIR`). O link de uma imagem é aleatório e não exige login, como num CDN: quem tem o link vê a imagem.
+
+## Configurações
+
+A engrenagem ao lado do seu nome, embaixo à esquerda, abre as Configurações em tela cheia (Esc fecha). Tudo fica
+guardado no aparelho (`localStorage`), porque o microfone do notebook não é o mesmo do celular.
+
+- **Voz e vídeo:**
+  - microfone, saída de áudio (onde o navegador permite escolher) e câmera;
+  - volume do microfone (até 200%) e das chamadas;
+  - cancelamento de eco, supressão de ruído e controle automático de ganho;
+  - teste do microfone com medidor de nível (e opção de se ouvir) e prévia da câmera.
+
+  Tudo vale **no meio da chamada**. O microfone passa por um circuito de áudio próprio (fonte → ganho → saída fixa):
+  trocar de microfone ou de processamento só troca a fonte, sem renegociar com ninguém. Se o dispositivo escolhido
+  for desconectado, o Coreto usa o padrão do sistema.
+- **Aparência:** tamanho do texto das mensagens (12 a 20 px) e modo compacto (uma linha por mensagem, sem avatar).
+- **App de desktop** (só no app): versão, estado da atualização com "Verificar agora" e "Reiniciar e atualizar", e
+  "Abrir o Coreto ao ligar o computador". O site fala com o app por uma ponte mínima (`desktop/src/preload.cjs`), e o
+  app confere em cada pedido se ele veio do servidor do Coreto.
 
 ## Busca
 

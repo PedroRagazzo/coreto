@@ -12,6 +12,7 @@ import { DirectMessagesPanel, DirectMessagesSidebar } from '../DirectMessages';
 import { CallView } from '../CallView';
 import { SpaceRail } from '../SpaceRail';
 import { StreamStage } from '../StreamStage';
+import { UpdateBanner } from '../UpdateBanner';
 import { UserPanel } from '../UserPanel';
 import { VoiceStatusBar } from '../VoiceStatusBar';
 
@@ -34,6 +35,7 @@ export function AppShell() {
 
       {/* Coluna 3: conversa + membros */}
       <main className="flex min-w-0 flex-1 flex-col">
+        <UpdateBanner />
         <ConnectionBanner />
         {state.stage ? (
           <StreamStage />

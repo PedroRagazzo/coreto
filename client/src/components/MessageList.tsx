@@ -6,6 +6,7 @@ import { ArrowDown, Pencil, Trash2 } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { formatMessageTime, formatShortTime } from '../lib/format';
 import { useRealtime } from '../state/realtime';
+import { useSettings } from '../state/settings';
 import { can, displayNameOf, mentionCandidates, roleColorOf } from '../state/selectors';
 import { Avatar } from './Avatar';
 import { Markup, MessageContent } from './MessageContent';
@@ -53,6 +54,7 @@ interface MessageListProps {
 
 export function MessageList({ conversationId, welcome, messages }: MessageListProps) {
   const { state, actions } = useRealtime();
+  const compact = useSettings().settings.appearance.compact;
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
   /** Posição antes de buscar mensagens antigas, para a leitura não pular quando elas entram em cima. */
@@ -149,7 +151,7 @@ export function MessageList({ conversationId, welcome, messages }: MessageListPr
             const mine = group.authorId === state.me?.id;
             const [first] = group.items;
             return (
-              <article key={first.id} className="mt-4">
+              <article key={first.id} className={compact ? 'mt-0.5' : 'mt-4'}>
                 {group.items.map((message, index) => (
                   <MessageRow
                     key={message.id}
@@ -160,8 +162,30 @@ export function MessageList({ conversationId, welcome, messages }: MessageListPr
                     onEdit={mine ? () => setEditingId(message.id) : undefined}
                     onDelete={mine || moderates ? () => setDeleting(message) : undefined}
                     onEditDone={() => setEditingId(null)}
+                    compact={compact}
+                    prefix={
+                      compact && (
+                        <span
+                          className="mr-1.5 font-medium"
+                          style={{ color: roleColorOf(state.snapshot, group.authorId) ?? undefined }}
+                        >
+                          {name}
+                          {author?.isBot && (
+                            <span className="ml-1 rounded bg-accent px-1 align-middle text-[10px] font-semibold text-white">ROBÔ</span>
+                          )}
+                        </span>
+                      )
+                    }
                     leading={
-                      index === 0 ? (
+                      compact ? (
+                        <time
+                          dateTime={message.createdAt}
+                          title={formatMessageTime(message.createdAt)}
+                          className="w-11 shrink-0 pt-[0.3em] text-right text-[11px] text-faint"
+                        >
+                          {formatShortTime(message.createdAt)}
+                        </time>
+                      ) : index === 0 ? (
                         <Avatar name={name} color={author?.avatarColor ?? '#555'} />
                       ) : (
                         <time
@@ -173,6 +197,7 @@ export function MessageList({ conversationId, welcome, messages }: MessageListPr
                       )
                     }
                     header={
+                      !compact &&
                       index === 0 && (
                         <p className="flex items-baseline gap-2">
                           <span
@@ -217,6 +242,10 @@ interface MessageRowProps {
   mentionsMe: boolean;
   /** Acabou de ser aberta pela busca: pisca o fundo. */
   flash?: boolean;
+  /** Modo compacto: menos espaço entre a hora e o texto. */
+  compact?: boolean;
+  /** Antes do texto, na mesma linha (o nome do autor, no modo compacto). */
+  prefix?: ReactNode;
   leading: ReactNode;
   header: ReactNode;
   editing: boolean;
@@ -227,7 +256,19 @@ interface MessageRowProps {
   onEditDone: () => void;
 }
 
-function MessageRow({ message, mentionsMe, flash = false, leading, header, editing, onEdit, onDelete, onEditDone }: MessageRowProps) {
+function MessageRow({
+  message,
+  mentionsMe,
+  flash = false,
+  compact = false,
+  prefix,
+  leading,
+  header,
+  editing,
+  onEdit,
+  onDelete,
+  onEditDone,
+}: MessageRowProps) {
   const background = flash
     ? 'bg-accent/20'
     : editing
@@ -236,11 +277,18 @@ function MessageRow({ message, mentionsMe, flash = false, leading, header, editi
         ? 'border-l-2 border-mention bg-mention/[0.07] pl-[14px] hover:bg-mention/10'
         : 'hover:bg-rail/30';
   return (
-    <div data-message-id={message.id} className={`group relative flex gap-4 px-4 py-0.5 transition-colors duration-700 ${background}`}>
+    <div
+      data-message-id={message.id}
+      className={`group relative flex px-4 py-0.5 transition-colors duration-700 ${compact ? 'gap-2' : 'gap-4'} ${background}`}
+    >
       {leading}
       <div className="min-w-0 flex-1">
         {header}
-        {editing ? <MessageEditor message={message} onDone={onEditDone} /> : <MessageContent message={message} />}
+        {editing ? (
+          <MessageEditor message={message} onDone={onEditDone} />
+        ) : (
+          <MessageContent message={message} prefix={prefix} />
+        )}
       </div>
 
       {!editing && (onEdit || onDelete) && (
@@ -341,7 +389,7 @@ function MessageEditor({ message, onDone }: { message: Message; onDone: () => vo
             void save();
           }
         }}
-        className="w-full resize-none rounded-md bg-elevated px-3 py-2 text-[15px] leading-6 outline-none focus:ring-1 focus:ring-accent/60"
+        className="w-full resize-none rounded-md bg-elevated px-3 py-2 text-[length:var(--message-font-size)] leading-6 outline-none focus:ring-1 focus:ring-accent/60"
       />
       <p className="mt-1 text-xs text-faint">
         Esc para{' '}

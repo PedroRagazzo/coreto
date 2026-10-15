@@ -26,6 +26,11 @@
   --font-sans: "Inter", "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif;
 }
 
+:root {
+  /* Tamanho do texto das mensagens; a tela de Aparência muda isso. */
+  --message-font-size: 15px;
+}
+
 html,
 body,
 #root {

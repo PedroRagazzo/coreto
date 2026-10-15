@@ -10,12 +10,13 @@ import { displayNameOf } from '../state/selectors';
 /** Maior caixa que uma imagem ocupa na conversa; a proporção é mantida. */
 const PREVIEW_MAX = { width: 400, height: 300 };
 
-/** Texto formatado da mensagem, o selo "(editada)" e as imagens. */
-export function MessageContent({ message }: { message: Message }) {
+/** Texto formatado da mensagem, o selo "(editada)" e as imagens. `prefix` vai antes do texto, na mesma linha. */
+export function MessageContent({ message, prefix }: { message: Message; prefix?: ReactNode }) {
   return (
     <>
-      {(message.content || message.editedAt) && (
-        <div className="text-[15px] leading-relaxed break-words whitespace-pre-wrap text-fg/95">
+      {(message.content || message.editedAt || prefix) && (
+        <div className="text-[length:var(--message-font-size)] leading-relaxed break-words whitespace-pre-wrap text-fg/95">
+          {prefix}
           <Markup content={message.content} />
           {message.editedAt && (
             <span className="ml-1 text-[10px] text-faint" title={`Editada em ${formatMessageTime(message.editedAt)}`}>

@@ -1,7 +1,7 @@
 {
   "name": "coreto-desktop",
   "productName": "Coreto",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "App de desktop do Coreto: abre o servidor configurado em coreto.config.json",
   "author": "PedroRagazzo",
   "license": "MIT",
@@ -51,6 +51,13 @@
       "shortcutName": "Coreto",
       "uninstallDisplayName": "Coreto"
     },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "PedroRagazzo",
+        "repo": "coreto"
+      }
+    ],
     "electronFuses": {
       "runAsNode": false,
       "enableCookieEncryption": true,
@@ -62,5 +69,8 @@
   },
   "allowScripts": {
     "electron@44.5.0": true
+  },
+  "dependencies": {
+    "electron-updater": "6.8.9"
   }
 }
