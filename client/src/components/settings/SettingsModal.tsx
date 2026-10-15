@@ -1,6 +1,5 @@
 import { Monitor, Palette, Settings2, X } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { desktop } from '../../lib/desktop';
 import { AppearanceSettings } from './AppearanceSettings';
 import { DesktopSettings } from './DesktopSettings';
 import { VoiceVideoSettings } from './VoiceVideoSettings';
@@ -10,7 +9,7 @@ export type SettingsSection = 'voice' | 'appearance' | 'desktop';
 const SECTIONS: { id: SettingsSection; label: string; icon: ReactNode; group: string }[] = [
   { id: 'voice', label: 'Voz e vídeo', icon: <Settings2 size={16} />, group: 'Configurações do app' },
   { id: 'appearance', label: 'Aparência', icon: <Palette size={16} />, group: 'Configurações do app' },
-  ...(desktop ? [{ id: 'desktop' as const, label: 'App de desktop', icon: <Monitor size={16} />, group: 'Windows' }] : []),
+  { id: 'desktop', label: 'App de desktop', icon: <Monitor size={16} />, group: 'Windows' },
 ];
 
 /**

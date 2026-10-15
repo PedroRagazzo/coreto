@@ -4,6 +4,7 @@ import { Server } from 'socket.io';
 import { isValidPin, loginKey, normalizeDisplayName } from '../../shared/src/names.js';
 import { INVALID_SESSION, type LoginRequest, type LoginResponse } from '../../shared/src/protocol.js';
 import { LoginThrottle } from './auth.js';
+import { LatestInstaller } from './download.js';
 import { registerChat } from './realtime/chat.js';
 import { registerDirect } from './realtime/direct.js';
 import { registerManagement } from './realtime/manage.js';
@@ -45,10 +46,14 @@ export async function startServer(
   const throttle = new LoginThrottle();
   const uploads = new UploadDir(uploadDir);
   await uploads.ensure();
+  const installer = new LatestInstaller();
 
   const httpServer = createServer((req, res) => {
     const path = (req.url ?? '').split('?')[0];
     if (path === '/health') return sendJson(res, 200, { ok: true });
+    if (path === '/download' && (req.method === 'GET' || req.method === 'HEAD')) {
+      return void installer.get().then((url) => res.writeHead(302, { location: url, 'cache-control': 'no-store' }).end());
+    }
     if (path === '/login') {
       if (preflight(req, res, clientOrigins, 'POST', 'content-type')) return;
       return void handleLogin(req, res, store, throttle);

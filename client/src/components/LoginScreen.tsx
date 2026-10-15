@@ -1,6 +1,8 @@
 import { isValidPin, MAX_DISPLAY_NAME, normalizeDisplayName } from '@shared/names';
 import { useState, type FormEvent } from 'react';
+import { desktop } from '../lib/desktop';
 import { login, type Identity } from '../lib/identity';
+import { DownloadApp } from './DownloadApp';
 
 export function LoginScreen({ onLogin }: { onLogin: (identity: Identity) => void }) {
   const [name, setName] = useState('');
@@ -73,6 +75,14 @@ export function LoginScreen({ onLogin }: { onLogin: (identity: Identity) => void
         >
           {busy ? 'Entrando…' : 'Entrar'}
         </button>
+
+        {/* Dentro do app de desktop não faz sentido oferecer o download. */}
+        {!desktop && (
+          <div className="mt-4 border-t border-line pt-4">
+            <DownloadApp variant="subtle" />
+            <p className="mt-2 text-center text-xs text-faint">App de desktop, com bandeja e atualização automática.</p>
+          </div>
+        )}
       </form>
     </div>
   );

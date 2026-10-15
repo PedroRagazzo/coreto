@@ -1,6 +1,7 @@
 import { CheckCircle2, Download, LoaderCircle, RefreshCw, TriangleAlert } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import { desktop, type UpdateState } from '../../lib/desktop';
+import { DownloadApp } from '../DownloadApp';
 import { SettingsGroup, Toggle } from './SettingsModal';
 
 /** Estado da atualização do app de desktop, ao vivo. `null` no navegador. */
@@ -50,7 +51,20 @@ export function DesktopSettings() {
     void desktop?.getCloseToTray?.().then(setCloseToTray);
   }, []);
 
-  if (!desktop) return null;
+  // No navegador esta aba só oferece o instalador.
+  if (!desktop) {
+    return (
+      <SettingsGroup
+        title="Baixar o app"
+        hint="O app de desktop fica na bandeja do Windows, abre junto com o computador e se atualiza sozinho."
+      >
+        <DownloadApp />
+        <p className="mt-2 text-xs text-faint">
+          Se o Windows avisar que o programa pode ser perigoso, clique em “Mais informações” e depois em “Executar assim mesmo”.
+        </p>
+      </SettingsGroup>
+    );
+  }
   const { icon, text } = describe(update);
   const busy = update?.status === 'checking' || update?.status === 'downloading' || update?.status === 'available';
 

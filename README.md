@@ -116,6 +116,11 @@ site. O site roda isolado, sem acesso ao Node. O app só acrescenta três coisas
 
 Se o servidor não responder, aparece uma página para tentar de novo.
 
+**Botão de baixar no site:** a tela de login e Configurações → App de desktop (no navegador) têm o botão
+“Baixar para Windows”. Ele aponta para `/download`, que o servidor redireciona para o instalador da última release
+(consulta a API do GitHub e guarda o link por 10 minutos; se o GitHub falhar, cai na página de releases). Não precisa
+mexer no site a cada versão nova.
+
 ```bash
 cd desktop
 npm install
