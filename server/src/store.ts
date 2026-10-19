@@ -41,7 +41,7 @@ import {
   toUser,
 } from './db/mappers.js';
 import { loginKey, normalizeDisplayName } from '../../shared/src/names.js';
-import { DEFAULT_EVERYONE_PERMISSIONS } from '../../shared/src/permissions.js';
+import { ALL_PERMISSIONS, DEFAULT_EVERYONE_PERMISSIONS } from '../../shared/src/permissions.js';
 import { searchKey } from '../../shared/src/search.js';
 import { hashPin, newSessionToken, verifyPin } from './auth.js';
 import { computeChannelPermissions, computeSpacePermissions } from './permissions.js';
@@ -109,6 +109,9 @@ export class Store {
   private readonly categories = new Map<Id, Category>();
   private readonly roles = new Map<Id, Role>();
   private readonly members = new Map<string, Member>();
+
+  /** Nomes de login (normalizados) com poder total em todos os espaços; vêm de SUPER_ADMIN_NAMES. */
+  private superAdminKeys = new Set<string>();
 
   private constructor(private readonly db: Db) {}
 
@@ -204,10 +207,25 @@ export class Store {
     return this.spacesForUser(a).some((space) => this.members.has(memberKey(space.id, b)));
   }
 
+  /** Define quem é administrador geral, pelo nome da conta (maiúsculas e acentos não importam). */
+  setSuperAdmins(names: Iterable<string>): void {
+    this.superAdminKeys = new Set([...names].map(loginKey));
+  }
+
+  /**
+   * Administrador geral: tem todas as permissões em qualquer espaço, inclusive excluí-lo, mesmo sem
+   * ser o dono. Vale pelo nome da conta, então a conta precisa existir e ter PIN.
+   */
+  isSuperAdmin(userId: Id): boolean {
+    const user = this.users.get(userId);
+    return user !== undefined && this.superAdminKeys.has(loginKey(user.displayName));
+  }
+
   permissionsFor(userId: Id, channel: Channel): number {
     const space = this.spaces.get(channel.spaceId);
     const member = this.member(channel.spaceId, userId);
     if (!space || !member) return 0;
+    if (this.isSuperAdmin(userId)) return ALL_PERMISSIONS;
     return computeChannelPermissions({ space, member, roles: this.rolesOf(space.id), channel });
   }
 
@@ -216,6 +234,7 @@ export class Store {
     const space = this.spaces.get(spaceId);
     const member = this.member(spaceId, userId);
     if (!space || !member) return 0;
+    if (this.isSuperAdmin(userId)) return ALL_PERMISSIONS;
     return computeSpacePermissions({ space, member, roles: this.rolesOf(spaceId) });
   }
 
@@ -380,6 +399,7 @@ export class Store {
       voice: [...this.voice.values()].filter((v) => permissions[v.channelId] !== undefined).map(toParticipant),
       permissions,
       spacePermissions: this.spacePermissionsFor(userId, spaceId),
+      canDelete: space.ownerId === userId || this.isSuperAdmin(userId),
     };
   }
 

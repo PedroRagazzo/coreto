@@ -81,6 +81,11 @@ export class TestServer {
     await rm(this.uploadDir, { recursive: true, force: true });
   }
 
+  /** Torna a conta (pelo nome) administradora geral, como SUPER_ADMIN_NAMES faz no servidor. */
+  makeSuperAdmin(...names: string[]): void {
+    this.store?.setSuperAdmins(names);
+  }
+
   /** POST /login cru, para testar as respostas do servidor. */
   async login(name: string, pin: string): Promise<{ status: number; body: LoginResponse }> {
     const res = await fetch(`${this.url}/login`, {

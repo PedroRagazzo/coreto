@@ -46,6 +46,7 @@ Abra duas janelas (uma anônima) com nomes diferentes para ver mensagens, digita
 | `CLIENT_ORIGIN` | server | `http://localhost:5173,http://127.0.0.1:5173` |
 | `ICE_SERVERS` | server | STUN público do Google (JSON de `RTCIceServer[]`) |
 | `UPLOAD_DIR` | server | `uploads` (pasta das imagens enviadas) |
+| `SUPER_ADMIN_NAMES` | server | vazio. Nomes de contas (separados por vírgula) que são **administradoras gerais**: têm todas as permissões em todos os espaços e podem excluir espaços, canais de texto e de voz mesmo sem ser donas. A conta precisa já existir: quem criar o nome primeiro vira administrador |
 | `CLIENT_DIST` | server | `../client/dist`: se existir, o servidor também entrega o site |
 | `VITE_SERVER_URL` | client | em dev, `http://localhost:3001`; no build, a mesma origem do site |
 

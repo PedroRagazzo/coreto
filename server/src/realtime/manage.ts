@@ -43,11 +43,13 @@ export function registerManagement(io: IO, socket: AppSocket, store: Store): voi
     }
   });
 
-  // Excluir apaga tudo de todo mundo: só o dono pode.
+  // Excluir apaga tudo de todo mundo: só o dono (ou o administrador geral) pode.
   socket.on('space:delete', async (req, ack) => {
     if (!isFunction(ack)) return;
     const space = typeof req?.spaceId === 'string' ? store.spaces.get(req.spaceId) : undefined;
-    if (!space || space.ownerId !== userId) return ack({ ok: false, error: 'Só o dono pode excluir o espaço.' });
+    if (!space || (space.ownerId !== userId && !store.isSuperAdmin(userId))) {
+      return ack({ ok: false, error: 'Só o dono pode excluir o espaço.' });
+    }
 
     // Guarda o que vai sumir da memória antes de apagar.
     const channelIds = [...store.channels.values()].filter((c) => c.spaceId === space.id).map((c) => c.id);

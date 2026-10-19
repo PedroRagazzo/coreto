@@ -139,4 +139,6 @@ export interface SpaceSnapshot {
   permissions: Record<Id, number>;
   /** Permissões do usuário no espaço, antes das sobrescritas de canal (ex.: MANAGE_CHANNELS). */
   spacePermissions: number;
+  /** Pode excluir o espaço: é o dono ou administrador geral. */
+  canDelete: boolean;
 }

@@ -122,6 +122,45 @@ describe.skipIf(!hasTestDatabase)('gestão de espaços e canais', () => {
     expect(await server.db.role.count({ where })).toBe(0);
   });
 
+  it('o administrador geral exclui espaços e canais de outras pessoas; os demais não', async () => {
+    const { ana, bruno, space, snapshot } = await spaceWithMember('Dos outros');
+    const admin = await server.connect('Admin');
+    server.makeSuperAdmin(admin.user.displayName);
+
+    // Ana é dona e Bruno é membro comum: só o administrador geral ganha o botão de excluir sem ser dono.
+    const asAdmin = ok(await admin.socket.emitWithAck('space:join', space.id));
+    expect(asAdmin).toMatchObject({ canDelete: true });
+    expect(ok(await bruno.socket.emitWithAck('space:join', space.id))).toMatchObject({ canDelete: false });
+    expect(ok(await ana.socket.emitWithAck('space:join', space.id))).toMatchObject({ canDelete: true });
+    expect(asAdmin.channels.every((c) => asAdmin.permissions[c.id] === asAdmin.spacePermissions)).toBe(true);
+
+    // Canais de texto e de voz, mesmo sem ser dono do espaço.
+    expect((await bruno.socket.emitWithAck('channel:delete', { channelId: channelNamed(snapshot, 'geral').id })).ok).toBe(false);
+    ok(await admin.socket.emitWithAck('channel:delete', { channelId: channelNamed(snapshot, 'geral').id }));
+    ok(await admin.socket.emitWithAck('channel:delete', { channelId: channelNamed(snapshot, 'Geral').id }));
+
+    // O espaço inteiro.
+    expect((await bruno.socket.emitWithAck('space:delete', { spaceId: space.id })).ok).toBe(false);
+    const deleted = nextEvent(ana.socket, 'space:deleted');
+    ok(await admin.socket.emitWithAck('space:delete', { spaceId: space.id }));
+    expect((await deleted).spaceId).toBe(space.id);
+    expect(await server.db.space.count({ where: { id: space.id } })).toBe(0);
+  });
+
+  it('o nome do administrador geral não vale para outra conta parecida', async () => {
+    const admin = await server.connect('Chefe');
+    const other = await server.connect('Chefe Dois');
+    server.makeSuperAdmin(admin.user.displayName.toUpperCase());
+    const space = ok(await other.socket.emitWithAck('space:create', { name: 'Do outro' }));
+    ok(await admin.socket.emitWithAck('space:join', space.id));
+    ok(await admin.socket.emitWithAck('space:delete', { spaceId: space.id }));
+
+    // Outra conta, mesmo com nome começando igual, continua comum.
+    const space2 = ok(await admin.socket.emitWithAck('space:create', { name: 'Do chefe' }));
+    ok(await other.socket.emitWithAck('space:join', space2.id));
+    expect((await other.socket.emitWithAck('space:delete', { spaceId: space2.id })).ok).toBe(false);
+  });
+
   it('não envia o canal novo a quem não pode vê-lo', async () => {
     // Bruno não pode ver um canal se @everyone perder VIEW_CHANNEL nele. Sem interface
     // para sobrescritas, o teste ajusta pelo banco e reinicia para o servidor recarregar.

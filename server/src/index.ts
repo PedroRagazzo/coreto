@@ -25,6 +25,10 @@ async function main() {
   const db = createDb();
   if (await seedIfEmpty(db)) console.log('Coreto: banco vazio, dados de demonstração criados.');
   const store = await Store.load(db);
+  // Administradores gerais: nomes de contas já existentes, separados por vírgula.
+  const superAdmins = (process.env.SUPER_ADMIN_NAMES ?? '').split(',').map((n) => n.trim()).filter(Boolean);
+  store.setSuperAdmins(superAdmins);
+  if (superAdmins.length) console.log(`Coreto: ${superAdmins.length} administrador(es) geral(is) configurado(s).`);
   const clientDist = existsSync(resolve(CLIENT_DIST, 'index.html')) ? CLIENT_DIST : null;
   const server = await startServer(store, {
     port: PORT,

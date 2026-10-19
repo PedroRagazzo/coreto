@@ -33,7 +33,6 @@ export function ChannelSidebar() {
   const activeChannelId = state.activeChannelBySpace[snapshot.space.id];
   const canManage = hasPermission(snapshot.spacePermissions, Permission.MANAGE_CHANNELS);
   const isAdmin = hasPermission(snapshot.spacePermissions, Permission.ADMINISTRATOR);
-  const isOwner = snapshot.space.ownerId === state.me?.id;
 
   return (
     <>
@@ -122,7 +121,7 @@ export function ChannelSidebar() {
       )}
       {editing && <EditChannelDialog channel={editing} onClose={() => setEditing(null)} />}
       {editingSpace && (
-        <EditSpaceDialog space={snapshot.space} canDelete={isOwner} onClose={() => setEditingSpace(false)} />
+        <EditSpaceDialog space={snapshot.space} canDelete={snapshot.canDelete} onClose={() => setEditingSpace(false)} />
       )}
     </>
   );
