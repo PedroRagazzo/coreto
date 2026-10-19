@@ -19,6 +19,8 @@ import {
   type UserVolume,
   type VoicePrefs,
 } from './settings';
+import { AppAudioFeed } from './app-audio';
+import { desktop } from './desktop';
 import type { AppSocket } from './socket';
 
 /** Volume (RMS, 0–1) acima do qual conta como fala. */
@@ -351,7 +353,7 @@ export class VoiceManager {
   private deafened = false;
   private selfId: Id | null = null;
   private readonly detector: SpeakingDetector;
-  private screen: { stream: MediaStream; options: ScreenShareOptions } | null = null;
+  private screen: { stream: MediaStream; options: ScreenShareOptions; feed: AppAudioFeed | null } | null = null;
   private camera: MediaStream | null = null;
   /** Fluxos fixos onde câmera e tela viajam; os ids são anunciados a cada pessoa. */
   private cameraCarrier = new MediaStream();
@@ -480,14 +482,29 @@ export class VoiceManager {
     };
     let stream: MediaStream;
     let audioFailed = false;
+    // No app de desktop do Windows o som vem do helper (só o do programa escolhido), não do navegador.
+    let feed = options.audio && desktop?.appAudio ? new AppAudioFeed(desktop.appAudio) : null;
     try {
       stream = await navigator.mediaDevices.getDisplayMedia({ video: constraints, audio: options.audio });
     } catch (err) {
+      feed?.close();
+      feed = null;
       // Alguns sistemas não liberam o som (no app de desktop, "Could not start audio source"):
       // em vez de falhar, transmite só a imagem.
       if (!options.audio || !(err instanceof DOMException) || err.name !== 'NotReadableError') throw err;
       stream = await navigator.mediaDevices.getDisplayMedia({ video: constraints, audio: false });
       audioFailed = true;
+    }
+    if (feed) {
+      const session = stream.getAudioTracks().length === 0 ? await desktop?.appAudio?.active() : null;
+      if (session == null) {
+        feed.close();
+        feed = null;
+        audioFailed = true;
+      } else {
+        feed.sessionId = session;
+        stream.addTrack(await feed.track());
+      }
     }
     this.stopScreen();
     const [video] = stream.getVideoTracks();
@@ -497,7 +514,7 @@ export class VoiceManager {
     video.addEventListener('ended', () => {
       if (this.screen?.stream === stream) this.events.onScreenEnded?.();
     });
-    this.screen = { stream, options };
+    this.screen = { stream, options, feed };
     this.applyScreenViewers();
     return { stream, audioFailed };
   }
@@ -505,6 +522,7 @@ export class VoiceManager {
   stopScreen(): void {
     if (!this.screen) return;
     this.screen.stream.getTracks().forEach((track) => track.stop());
+    this.screen.feed?.close();
     this.screen = null;
     this.applyScreenViewers();
   }

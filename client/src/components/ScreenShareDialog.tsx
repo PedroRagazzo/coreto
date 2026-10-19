@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react';
+import { desktop } from '../lib/desktop';
 import type { ScreenShareOptions } from '../lib/voice';
 import { useRealtime } from '../state/realtime';
 import { DialogActions, labelClass, Modal } from './Modal';
@@ -122,7 +123,9 @@ export function ScreenShareDialog({ onClose }: { onClose: () => void }) {
             onChange={(e) => setOptions((o) => ({ ...o, audio: e.target.checked }))}
             className="h-4 w-4 accent-accent"
           />
-          Incluir o som (o navegador oferece para abas e, no Windows, para a tela inteira)
+          {desktop?.appAudio
+            ? 'Incluir o som do programa compartilhado (a chamada do Coreto não vai junto)'
+            : 'Incluir o som (o navegador oferece para abas e, no Windows, para a tela inteira)'}
         </label>
 
         {error && (

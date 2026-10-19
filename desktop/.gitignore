@@ -2,3 +2,5 @@ node_modules
 release
 # Só para testar a atualização sem publicar (ver CORETO_UPDATE_TEST em src/main.js).
 dev-app-update.yml
+# Helper de som por programa, compilado por `npm run audio-helper`.
+native/bin

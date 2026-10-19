@@ -24,10 +24,21 @@ export interface UpdateState {
   checkedAt?: string;
 }
 
+/** Som de um programa só (Windows). PCM de 16 bits, estéreo, 48 kHz, intercalado. */
+export interface AppAudioBridge {
+  /** Recebe o som da captura em andamento; devolve a função que cancela. */
+  subscribe(onData: (id: number, chunk: Uint8Array) => void, onEnd: (id: number) => void): () => void;
+  /** Id da captura que o último pedido de tela iniciou, ou `null` se não houve (a tela veio sem som). */
+  active(): Promise<number | null>;
+  stop(id: number): void;
+}
+
 export interface DesktopBridge {
   /** Versão do app instalado. */
   version: string;
   platform: string;
+  /** Só no app de desktop do Windows com o helper de som por programa (0.5.0 em diante). */
+  appAudio?: AppAudioBridge;
   getUpdateState(): Promise<UpdateState>;
   checkForUpdates(): Promise<UpdateState>;
   /** Fecha o app, instala a versão baixada e abre de novo. */

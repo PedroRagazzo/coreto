@@ -109,13 +109,23 @@ pg_restore --clean --if-exists --no-owner --dbname="$DATABASE_URL" /data/backups
 ## App de desktop (Windows)
 
 `desktop/` é um app Electron que abre o servidor de `desktop/coreto.config.json`, como o app do Discord abre o
-site. O site roda isolado, sem acesso ao Node. O app só acrescenta três coisas:
+site. O site roda isolado, sem acesso ao Node. O app só acrescenta quatro coisas:
 
 - um seletor de telas e janelas para compartilhar (o Electron não tem um próprio);
+- o som do programa compartilhado, como no Discord (veja abaixo);
 - permissão de microfone, câmera e tela só para o servidor configurado;
 - links de fora abrindo no navegador padrão.
 
 Se o servidor não responder, aparece uma página para tentar de novo.
+
+**Som da janela e da tela (a partir da 0.5.0):** o Chromium só captura o som do sistema inteiro, e isso inclui a própria chamada (quem
+assiste ouviria a conversa de volta). O app leva `desktop/native/coreto-audio.cpp`, um helper de ~200 linhas que usa a
+captura de áudio por processo do Windows 10 (a mesma que o Discord usa): ao compartilhar uma **janela** só sai o som do
+programa dela; ao compartilhar a **tela inteira** sai tudo menos o próprio Coreto. O helper escreve PCM de 16 bits,
+estéreo, 48 kHz; o processo principal repassa à página, que o toca numa faixa de áudio
+(`client/src/lib/app-audio.ts` e `client/public/app-audio.worklet.js`) e a junta ao vídeo. Sem o helper (ou fora do
+Windows) volta ao som do sistema inteiro na tela inteira. `npm run audio-helper` compila o helper (precisa do Visual
+Studio com as ferramentas de C++; o `npm run dist` já faz isso, e o `windows-latest` do GitHub Actions já tem).
 
 **Botão de baixar no site:** a tela de login e Configurações → App de desktop (no navegador) têm o botão
 “Baixar para Windows”. Ele aponta para `/download`, que o servidor redireciona para o instalador da última release

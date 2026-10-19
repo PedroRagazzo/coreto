@@ -18,7 +18,8 @@
 
 import { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, Menu, nativeImage, session, shell, Tray } from 'electron';
 import updater from 'electron-updater';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -180,7 +181,7 @@ function registerBridge() {
   );
   // Versão e sistema não são segredo; responde sempre (o preload espera a resposta).
   ipcMain.on('desktop:info', (event) => {
-    event.returnValue = { version: app.getVersion(), platform: process.platform };
+    event.returnValue = { version: app.getVersion(), platform: process.platform, appAudio: appAudioAvailable() };
   });
   ipcMain.handle('desktop:update-state', (event) => (fromCoreto(event) ? updateState : null));
   ipcMain.handle('desktop:check-updates', async (event) => {
@@ -202,12 +203,80 @@ function registerBridge() {
     app.setLoginItemSettings({ ...loginItem, openAtLogin: Boolean(open) });
     return app.getLoginItemSettings(loginItem).openAtLogin;
   });
+  // Qual captura de som está valendo (para o site saber se deve esperar o som do helper); parar uma captura.
+  ipcMain.handle('desktop:app-audio-active', (event) => (fromCoreto(event) && appAudio ? appAudio.id : null));
+  ipcMain.on('desktop:app-audio-stop', (event, id) => {
+    if (fromCoreto(event) && typeof id === 'number') stopAppAudio(id);
+  });
   ipcMain.handle('desktop:get-close-to-tray', (event) => (fromCoreto(event) ? prefs.closeToTray : null));
   ipcMain.handle('desktop:set-close-to-tray', (event, enabled) => {
     if (!fromCoreto(event)) return null;
     savePrefs({ closeToTray: Boolean(enabled) });
     return prefs.closeToTray;
   });
+}
+
+// ── Som da janela ou da tela compartilhada (Windows) ─────────────────────────
+//
+// O Chromium só captura o som do sistema inteiro, e isso inclui a própria chamada do Coreto (quem
+// assiste ouviria a conversa de volta). O Discord captura o som só do programa escolhido; aqui
+// quem faz isso é native/coreto-audio.exe (WASAPI por processo). Ele escreve PCM de 16 bits,
+// estéreo, 48 kHz, que o site converte em uma faixa de áudio (client/src/lib/app-audio.ts).
+
+const AUDIO_HELPER = app.isPackaged
+  ? join(process.resourcesPath, 'coreto-audio.exe')
+  : join(here, '..', 'native', 'bin', 'coreto-audio.exe');
+const appAudioAvailable = () => process.platform === 'win32' && existsSync(AUDIO_HELPER);
+/** Um byte de PCM = 1/192000 s; chunks de ~10 ms. */
+const FRAME_BYTES = 4;
+
+/** @type {{ id: number; child: import('node:child_process').ChildProcess } | null} */
+let appAudio = null;
+let appAudioCounter = 0;
+
+/** @param {number} id */
+function stopAppAudio(id = appAudio?.id ?? 0) {
+  if (!appAudio || appAudio.id !== id) return;
+  const { child } = appAudio;
+  appAudio = null;
+  // Fechar a entrada é o aviso combinado para o helper parar; o kill é só garantia.
+  child.stdin?.destroy();
+  setTimeout(() => child.kill(), 1000).unref();
+}
+
+/**
+ * Começa a mandar o som da fonte escolhida para a janela do Coreto.
+ * @param {string} sourceId id do desktopCapturer: "screen:..." ou "window:<HWND>:0"
+ * @returns {boolean} se o helper subiu
+ */
+function startAppAudio(sourceId) {
+  if (!mainWindow || !appAudioAvailable()) return false;
+  stopAppAudio();
+  const hwnd = /^window:(\d+):/.exec(sourceId)?.[1];
+  // Janela: só o som do programa dela. Tela inteira: tudo, menos o próprio Coreto (a chamada).
+  const args = hwnd ? ['window', hwnd] : sourceId.startsWith('screen:') ? ['exclude', String(process.pid)] : null;
+  if (!args) return false;
+
+  const id = ++appAudioCounter;
+  const child = spawn(AUDIO_HELPER, args, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+  appAudio = { id, child };
+  const target = mainWindow.webContents;
+  /** @type {Buffer} */
+  let rest = Buffer.alloc(0);
+  child.stdout?.on('data', (/** @type {Buffer} */ chunk) => {
+    const data = rest.length ? Buffer.concat([rest, chunk]) : chunk;
+    const whole = data.length - (data.length % FRAME_BYTES);
+    rest = data.subarray(whole);
+    if (whole > 0 && !target.isDestroyed()) target.send('desktop:app-audio', id, new Uint8Array(data.subarray(0, whole)));
+  });
+  child.stderr?.on('data', (/** @type {Buffer} */ line) => console.warn(`coreto-audio: ${line.toString().trim()}`));
+  const ended = () => {
+    if (appAudio?.id === id) appAudio = null;
+    if (!target.isDestroyed()) target.send('desktop:app-audio-end', id);
+  };
+  child.on('error', ended);
+  child.on('exit', ended);
+  return true;
 }
 
 // ── Posição e tamanho da janela entre aberturas ──────────────────────────────
@@ -450,8 +519,14 @@ function configureSession() {
     if (!id) return deny();
     const [source] = (await desktopCapturer.getSources({ types: ['screen', 'window'] })).filter((s) => s.id === id);
     if (!source) return deny();
-    // Som do sistema ("loopback") só existe no Windows e só para a tela inteira.
-    const loopback = request.audioRequested && process.platform === 'win32' && id.startsWith('screen:');
+    if (!request.audioRequested) {
+      stopAppAudio();
+      return callback({ video: source });
+    }
+    // Com som: o helper pega só o da janela (ou o da tela sem a chamada) e o site o junta ao vídeo.
+    if (startAppAudio(id)) return callback({ video: source });
+    // Sem o helper: o som do sistema inteiro ("loopback"), só no Windows e só para a tela inteira.
+    const loopback = process.platform === 'win32' && id.startsWith('screen:');
     callback(loopback ? { video: source, audio: 'loopback' } : { video: source });
   });
 }
@@ -466,7 +541,10 @@ if (!app.requestSingleInstanceLock()) {
   app.on('before-quit', () => {
     quitting = true;
   });
-  app.on('will-quit', () => globalShortcut.unregisterAll());
+  app.on('will-quit', () => {
+    globalShortcut.unregisterAll();
+    stopAppAudio();
+  });
 
   app.whenReady().then(() => {
     Menu.setApplicationMenu(null);
