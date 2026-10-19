@@ -215,7 +215,7 @@ coreto/
         ├── CallView.tsx          Mosaico da chamada: câmeras, avatares e cartões de quem está ao vivo
         ├── StreamStage.tsx       Transmissão de tela no painel central (assistir ou prévia)
         ├── Search.tsx            Caixa de busca do cabeçalho e painel de resultados
-        ├── settings/             Configurações: voz e vídeo, aparência e app de desktop
+        ├── settings/             Configurações: voz e vídeo, sons, atalhos, aparência e app de desktop
         ├── ScreenShareDialog.tsx Qualidade da transmissão antes do seletor do navegador
         ├── VoiceStatusBar.tsx, UserPanel.tsx, MessageList.tsx, MessageInput.tsx ...
 ```
@@ -303,11 +303,29 @@ guardado no aparelho (`localStorage`), porque o microfone do notebook não é o 
   - microfone, saída de áudio (onde o navegador permite escolher) e câmera;
   - volume do microfone (até 200%) e das chamadas;
   - cancelamento de eco, supressão de ruído e controle automático de ganho;
-  - teste do microfone com medidor de nível (e opção de se ouvir) e prévia da câmera.
+  - **sensibilidade de entrada**, como no Discord: com a detecção automática ligada o microfone fica sempre aberto;
+    desligada, só passa o que ultrapassa o nível escolhido (−100 a 0 dB), com a voz fechando devagar para não cortar o
+    fim das frases. O teste do microfone mostra o nível em dB com a marca da sensibilidade (a barra fica cinza quando a
+    porta está fechada) e permite se ouvir;
+  - prévia da câmera.
 
-  Tudo vale **no meio da chamada**. O microfone passa por um circuito de áudio próprio (fonte → ganho → saída fixa):
-  trocar de microfone ou de processamento só troca a fonte, sem renegociar com ninguém. Se o dispositivo escolhido
-  for desconectado, o Coreto usa o padrão do sistema.
+  Tudo vale **no meio da chamada**. O microfone passa por um circuito de áudio próprio (fonte → ganho → porta de ruído →
+  saída fixa): trocar de microfone ou de processamento só troca a fonte, sem renegociar com ninguém. A porta de ruído
+  roda numa thread de áudio (`client/public/mic-gate.worklet.js`), então não perde o ritmo com a janela em segundo
+  plano. Se o dispositivo escolhido for desconectado, o Coreto usa o padrão do sistema.
+- **Volume por pessoa:** botão direito em alguém da sua chamada (na barra lateral ou no mosaico) abre o volume só seu,
+  de 0 a 200%, e "Silenciar para mim". Fica guardado por pessoa neste aparelho. A voz recebida passa por um ganho próprio
+  antes de tocar, o que permite passar de 100%.
+- **Sons:** avisos sintetizados na hora (sem arquivos) quando você entra ou sai da chamada, alguém entra ou sai, alguém
+  começa ou para de assistir à transmissão que você faz ou assiste, e quando você muta ou ensurdece. Dá para desligar,
+  ajustar o volume e ouvir cada um. Ensurdecido, você não ouve ninguém entrar ou sair. A regra de qual som tocar fica em
+  `shared/src/call-sounds.ts`, com testes.
+- **Atalhos:** teclas para ativar/desativar o microfone e o som. Clique em Gravar e aperte a tecla ou as teclas juntas
+  (até 4), como `V` ou `Shift + V`. Na janela valem para qualquer combinação, mas só durante uma chamada, e uma tecla
+  sem Ctrl/Alt/Win não dispara enquanto você digita num campo de texto. **No app de desktop** (a partir da 0.4.0),
+  combinações com um modificador e uma tecla comum, como `Ctrl + Shift + M`, valem também com o Coreto em segundo plano
+  (`globalShortcut` do Electron); a tela avisa quando outro programa já usa a combinação. Uma tecla sozinha não pode ser
+  global: pararia de funcionar em todos os outros programas.
 - **Aparência:** tamanho do texto das mensagens (12 a 20 px) e modo compacto (uma linha por mensagem, sem avatar).
 - **App de desktop** (só no app): versão, estado da atualização com "Verificar agora" e "Reiniciar e atualizar", e
   "Abrir o Coreto ao ligar o computador". O site fala com o app por uma ponte mínima (`desktop/src/preload.cjs`), e o

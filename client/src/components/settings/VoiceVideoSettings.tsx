@@ -1,7 +1,7 @@
 import { Mic, Video } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { VoicePrefs } from '../../lib/settings';
-import { applyOutput, openMicrophone } from '../../lib/voice';
+import { SENSITIVITY_RANGE, type VoicePrefs } from '../../lib/settings';
+import { applyOutput, MicPipeline, openMicrophone, type MicLevel } from '../../lib/voice';
 import { useSettings } from '../../state/settings';
 import { SettingsGroup, Toggle } from './SettingsModal';
 
@@ -88,8 +88,11 @@ export function VoiceVideoSettings() {
         </div>
       </SettingsGroup>
 
-      <SettingsGroup title="Testar microfone" hint="Fale algo: a barra mostra o que os outros recebem, já com o volume escolhido.">
-        <MicTest prefs={prefs} />
+      <SettingsGroup
+        title="Sensibilidade de entrada"
+        hint="Clique em Testar e fale: a barra mostra o que o microfone capta. Com a detecção automática desligada, só passa o que ultrapassa a marca."
+      >
+        <MicTest prefs={prefs} onChange={setVoice} />
       </SettingsGroup>
 
       <SettingsGroup title="Processamento de voz" hint="Valem na hora, inclusive no meio de uma chamada.">
@@ -165,7 +168,7 @@ function DeviceSelect({
   );
 }
 
-function Slider({ label, value, max, onChange }: { label: string; value: number; max: number; onChange: (v: number) => void }) {
+export function Slider({ label, value, max, onChange }: { label: string; value: number; max: number; onChange: (v: number) => void }) {
   return (
     <label className="block">
       <span className="mb-1.5 flex justify-between text-xs font-bold tracking-wide text-muted uppercase">
@@ -185,74 +188,70 @@ function Slider({ label, value, max, onChange }: { label: string; value: number;
   );
 }
 
-/** Abre o microfone com as configurações atuais e mostra o nível (e toca de volta, se pedido). */
-function MicTest({ prefs }: { prefs: VoicePrefs }) {
+/** Posição de um nível em dB na barra, de 0 a 1. */
+const dbPosition = (db: number) =>
+  Math.min(1, Math.max(0, (db - SENSITIVITY_RANGE.min) / (SENSITIVITY_RANGE.max - SENSITIVITY_RANGE.min)));
+
+/**
+ * Abre o microfone com as configurações atuais (volume e sensibilidade incluídos) e mostra o
+ * nível em dB, com a marca da sensibilidade. Opcionalmente toca de volta o que passou pela porta.
+ */
+function MicTest({ prefs, onChange }: { prefs: VoicePrefs; onChange: (patch: Partial<VoicePrefs>) => void }) {
   const [running, setRunning] = useState(false);
   const [listen, setListen] = useState(false);
-  const [level, setLevel] = useState(0);
+  const [level, setLevel] = useState<MicLevel | null>(null);
   const [error, setError] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
-  const gainRef = useRef<GainNode | null>(null);
+  const pipelineRef = useRef<MicPipeline | null>(null);
+  const prefsRef = useRef(prefs);
+  prefsRef.current = prefs;
 
   useEffect(() => {
     if (!running) return;
     let stopped = false;
-    let frame = 0;
-    let context: AudioContext | null = null;
-    let raw: MediaStream | null = null;
+    let pipeline: MicPipeline | null = null;
     (async () => {
+      let raw: MediaStream | null = null;
       try {
-        raw = await openMicrophone(prefs);
-        if (stopped) return raw.getTracks().forEach((t) => t.stop());
-        context = new AudioContext();
-        const source = context.createMediaStreamSource(raw);
-        const gain = context.createGain();
-        gain.gain.value = prefs.inputVolume;
-        gainRef.current = gain;
-        const analyser = context.createAnalyser();
-        analyser.fftSize = 1024;
-        const output = context.createMediaStreamDestination();
-        source.connect(gain).connect(analyser);
-        gain.connect(output);
-        if (audioRef.current) {
-          audioRef.current.srcObject = output.stream;
-          applyOutput(audioRef.current, prefs, 1);
+        raw = await openMicrophone(prefsRef.current);
+        pipeline = await MicPipeline.create(prefsRef.current, setLevel);
+        if (stopped) {
+          raw.getTracks().forEach((t) => t.stop());
+          return pipeline.close();
         }
-        const samples = new Float32Array(analyser.fftSize);
-        const tick = () => {
-          analyser.getFloatTimeDomainData(samples);
-          let sum = 0;
-          for (const s of samples) sum += s * s;
-          // RMS em escala de "volume percebido": 0 a 1.
-          setLevel(Math.min(1, Math.sqrt(sum / samples.length) * 4));
-          frame = requestAnimationFrame(tick);
-        };
-        tick();
+        pipeline.use(raw);
+        pipelineRef.current = pipeline;
+        if (audioRef.current) {
+          audioRef.current.srcObject = pipeline.stream;
+          applyOutput(audioRef.current, prefsRef.current, 1);
+        }
       } catch {
+        raw?.getTracks().forEach((t) => t.stop());
+        pipeline?.close();
         setError('Não deu para abrir o microfone. Confira a permissão e o dispositivo escolhido.');
         setRunning(false);
       }
     })();
     return () => {
       stopped = true;
-      cancelAnimationFrame(frame);
-      raw?.getTracks().forEach((t) => t.stop());
-      void context?.close();
-      gainRef.current = null;
-      setLevel(0);
+      pipeline?.close();
+      pipelineRef.current = null;
+      setLevel(null);
     };
-    // Reabre ao trocar o microfone ou o processamento; o volume muda sem reabrir (abaixo).
+    // Reabre ao trocar o microfone ou o processamento; volume e sensibilidade mudam sem reabrir (abaixo).
   }, [running, prefs.inputDeviceId, prefs.echoCancellation, prefs.noiseSuppression, prefs.autoGainControl, prefs.outputDeviceId]);
 
-  useEffect(() => {
-    if (gainRef.current) gainRef.current.gain.value = prefs.inputVolume;
-  }, [prefs.inputVolume]);
+  useEffect(() => pipelineRef.current?.setVolume(prefs.inputVolume), [prefs.inputVolume]);
+  useEffect(() => pipelineRef.current?.setSensitivity(prefs), [prefs.autoSensitivity, prefs.inputSensitivity]);
 
   useEffect(() => {
     if (!audioRef.current) return;
     audioRef.current.muted = !listen;
     if (listen && running) void audioRef.current.play().catch(() => {});
   }, [listen, running]);
+
+  const db = level?.db ?? -Infinity;
+  const gated = !prefs.autoSensitivity && level !== null && !level.open;
 
   return (
     <div>
@@ -273,17 +272,53 @@ function MicTest({ prefs }: { prefs: VoicePrefs }) {
         <div
           role="meter"
           aria-label="Nível do microfone"
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuenow={Math.round(level * 100)}
-          className="h-3 flex-1 overflow-hidden rounded-full bg-rail"
+          aria-valuemin={SENSITIVITY_RANGE.min}
+          aria-valuemax={SENSITIVITY_RANGE.max}
+          aria-valuenow={Number.isFinite(db) ? Math.round(db) : SENSITIVITY_RANGE.min}
+          className="relative h-3 flex-1 overflow-hidden rounded-full bg-rail"
         >
           <div
-            className={`h-full rounded-full transition-[width] duration-75 ${level > 0.85 ? 'bg-dnd' : 'bg-online'}`}
-            style={{ width: `${level * 100}%` }}
+            className={`h-full rounded-full transition-[width] duration-75 ${gated ? 'bg-faint' : 'bg-online'}`}
+            style={{ width: `${dbPosition(db) * 100}%` }}
           />
+          {!prefs.autoSensitivity && (
+            <div
+              aria-hidden
+              className="absolute top-0 h-full w-0.5 bg-fg"
+              style={{ left: `${dbPosition(prefs.inputSensitivity) * 100}%` }}
+            />
+          )}
         </div>
       </div>
+
+      <div className="mt-4">
+        <Toggle
+          label="Detectar a sensibilidade automaticamente"
+          description="O microfone fica sempre aberto. Desligue para escolher o nível mínimo, como no Discord."
+          checked={prefs.autoSensitivity}
+          onChange={(v) => onChange({ autoSensitivity: v })}
+        />
+        <label className={`mt-2 block ${prefs.autoSensitivity ? 'opacity-50' : ''}`}>
+          <span className="mb-1.5 flex justify-between text-xs font-bold tracking-wide text-muted uppercase">
+            Sensibilidade
+            <span className="font-normal normal-case">{prefs.inputSensitivity} dB</span>
+          </span>
+          <input
+            type="range"
+            min={SENSITIVITY_RANGE.min}
+            max={SENSITIVITY_RANGE.max}
+            step={1}
+            value={prefs.inputSensitivity}
+            disabled={prefs.autoSensitivity}
+            onChange={(e) => onChange({ inputSensitivity: Number(e.target.value) })}
+            className="w-full accent-accent"
+          />
+          <span className="mt-1 block text-xs text-faint">
+            Mais à direita, só voz alta abre o microfone. A voz costuma ficar entre −40 e −20 dB.
+          </span>
+        </label>
+      </div>
+
       <label className="mt-3 flex items-center gap-2 text-sm text-muted">
         <input type="checkbox" checked={listen} onChange={(e) => setListen(e.target.checked)} className="h-4 w-4 accent-accent" />
         Ouvir meu microfone (use fone para não dar microfonia)

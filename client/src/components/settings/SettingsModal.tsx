@@ -1,13 +1,17 @@
-import { Monitor, Palette, Settings2, X } from 'lucide-react';
+import { Keyboard, Monitor, Palette, Settings2, Volume2, X } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { AppearanceSettings } from './AppearanceSettings';
 import { DesktopSettings } from './DesktopSettings';
+import { ShortcutSettings } from './ShortcutSettings';
+import { SoundSettings } from './SoundSettings';
 import { VoiceVideoSettings } from './VoiceVideoSettings';
 
-export type SettingsSection = 'voice' | 'appearance' | 'desktop';
+export type SettingsSection = 'voice' | 'sounds' | 'keybinds' | 'appearance' | 'desktop';
 
 const SECTIONS: { id: SettingsSection; label: string; icon: ReactNode; group: string }[] = [
   { id: 'voice', label: 'Voz e vídeo', icon: <Settings2 size={16} />, group: 'Configurações do app' },
+  { id: 'sounds', label: 'Sons', icon: <Volume2 size={16} />, group: 'Configurações do app' },
+  { id: 'keybinds', label: 'Atalhos', icon: <Keyboard size={16} />, group: 'Configurações do app' },
   { id: 'appearance', label: 'Aparência', icon: <Palette size={16} />, group: 'Configurações do app' },
   { id: 'desktop', label: 'App de desktop', icon: <Monitor size={16} />, group: 'Windows' },
 ];
@@ -64,6 +68,8 @@ export function SettingsModal({ initial = 'voice', onClose }: { initial?: Settin
           <div className="max-w-2xl px-10 py-12">
             <h2 className="mb-6 text-xl font-bold">{current.label}</h2>
             {current.id === 'voice' && <VoiceVideoSettings />}
+            {current.id === 'sounds' && <SoundSettings />}
+            {current.id === 'keybinds' && <ShortcutSettings />}
             {current.id === 'appearance' && <AppearanceSettings />}
             {current.id === 'desktop' && <DesktopSettings />}
           </div>

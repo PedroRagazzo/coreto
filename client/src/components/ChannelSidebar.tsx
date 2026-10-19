@@ -9,6 +9,7 @@ import { LiveBadge } from './StreamStage';
 import { CreateChannelDialog } from './CreateChannelDialog';
 import { EditChannelDialog } from './EditChannelDialog';
 import { EditSpaceDialog } from './EditSpaceDialog';
+import { useUserVolumeMenu } from './UserVolumeMenu';
 
 export function ChannelSidebar() {
   const { state } = useRealtime();
@@ -185,6 +186,7 @@ function VoiceChannelItem({ channel, onEdit }: ChannelItemProps) {
   const participants = state.voice[channel.id] ?? [];
   const canConnect = can(state.snapshot, channel.id, Permission.CONNECT);
   const isMine = state.myVoice.channelId === channel.id;
+  const volumeMenu = useUserVolumeMenu();
 
   return (
     <li>
@@ -237,7 +239,11 @@ function VoiceChannelItem({ channel, onEdit }: ChannelItemProps) {
             );
             const rowClass = 'flex w-full items-center gap-2 rounded px-1.5 py-1 text-sm text-muted';
             return (
-              <li key={p.userId}>
+              <li
+                key={p.userId}
+                // Botão direito em alguém da sua chamada: volume só seu.
+                onContextMenu={isMine && p.userId !== state.me?.id ? (e) => volumeMenu.open(e, p.userId, name) : undefined}
+              >
                 {p.streaming ? (
                   // Como no Discord: clicar em quem está ao vivo abre a transmissão.
                   <button
@@ -257,6 +263,7 @@ function VoiceChannelItem({ channel, onEdit }: ChannelItemProps) {
           })}
         </ul>
       )}
+      {volumeMenu.menu}
     </li>
   );
 }

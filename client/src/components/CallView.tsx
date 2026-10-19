@@ -6,6 +6,7 @@ import { displayNameOf } from '../state/selectors';
 import { Avatar } from './Avatar';
 import { ScreenShareDialog } from './ScreenShareDialog';
 import { LiveBadge } from './StreamStage';
+import { useUserVolumeMenu } from './UserVolumeMenu';
 
 /**
  * Mosaico da chamada, como a visão de canal de voz do Discord: um quadro por
@@ -105,9 +106,12 @@ function ParticipantTile({ participant, isMe }: { participant: VoiceParticipant;
   const stream = participant.video ? (isMe ? state.myCamera : (state.cameras[userId] ?? null)) : null;
   const ref = useVideo(stream);
   const speaking = Boolean(state.speaking[userId]) && !participant.muted;
+  const volumeMenu = useUserVolumeMenu();
 
   return (
     <li
+      // Botão direito em alguém: volume só seu.
+      onContextMenu={isMe ? undefined : (e) => volumeMenu.open(e, userId, name)}
       className={`relative flex aspect-video items-center justify-center overflow-hidden rounded-lg bg-panel ring-2 transition-shadow ${
         speaking ? 'ring-online' : 'ring-transparent'
       }`}
@@ -134,6 +138,7 @@ function ParticipantTile({ participant, isMe }: { participant: VoiceParticipant;
         <span className="truncate">{isMe ? `${name} (você)` : name}</span>
         {speaking && <span className="sr-only">(falando)</span>}
       </span>
+      {volumeMenu.menu}
     </li>
   );
 }

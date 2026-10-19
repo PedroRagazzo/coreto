@@ -11,7 +11,13 @@
 
 import type { Id } from '@shared/models';
 import type { IceServer, SignalPayload } from '@shared/protocol';
-import { DEFAULT_SETTINGS, microphoneConstraints, type VoicePrefs } from './settings';
+import {
+  DEFAULT_SETTINGS,
+  DEFAULT_USER_VOLUME,
+  microphoneConstraints,
+  type UserVolume,
+  type VoicePrefs,
+} from './settings';
 import type { AppSocket } from './socket';
 
 /** Volume (RMS, 0–1) acima do qual conta como fala. */
@@ -80,23 +86,61 @@ class SpeakingDetector {
   }
 }
 
+/** Decibéis (0 = volume máximo) para amplitude linear, e de volta. */
+export const dbToLinear = (db: number) => 10 ** (db / 20);
+export const linearToDb = (linear: number) => (linear > 0 ? 20 * Math.log10(linear) : -Infinity);
+
+/** O que o microfone está captando agora, para o medidor da sensibilidade. */
+export interface MicLevel {
+  /** Nível em dB, antes da porta (o que decide se ela abre). */
+  db: number;
+  /** A porta está aberta: sua voz está sendo enviada. */
+  open: boolean;
+}
+
+const GATE_WORKLET_URL = `${import.meta.env.BASE_URL}mic-gate.worklet.js`;
+
 /**
- * Microfone → ganho → saída fixa. Trocar de microfone só troca a fonte: a faixa
- * enviada às conexões continua a mesma, sem renegociar no meio da chamada.
+ * Microfone → ganho → porta de ruído → saída fixa. Trocar de microfone só troca a
+ * fonte: a faixa enviada às conexões continua a mesma, sem renegociar no meio da chamada.
+ * A porta (sensibilidade de entrada) roda na thread de áudio, então continua firme
+ * com a janela em segundo plano.
  */
-class MicPipeline {
+export class MicPipeline {
   private readonly context = new AudioContext();
   private readonly gain = this.context.createGain();
   private readonly output = this.context.createMediaStreamDestination();
+  private gate: AudioWorkletNode | null = null;
   private source: MediaStreamAudioSourceNode | null = null;
   private raw: MediaStream | null = null;
   /** O que vai para as conexões e para o medidor de fala. */
   readonly stream = this.output.stream;
 
-  constructor(volume: number) {
-    this.gain.gain.value = volume;
-    this.gain.connect(this.output);
+  private constructor(prefs: VoicePrefs) {
+    this.gain.gain.value = prefs.inputVolume;
     void this.context.resume();
+  }
+
+  /** Prepara a cadeia de áudio; sem suporte a worklet (ou se ele falhar), o microfone fica sempre aberto. */
+  static async create(prefs: VoicePrefs, onLevel?: (level: MicLevel) => void): Promise<MicPipeline> {
+    const pipeline = new MicPipeline(prefs);
+    try {
+      await pipeline.context.audioWorklet.addModule(GATE_WORKLET_URL);
+      const gate = new AudioWorkletNode(pipeline.context, 'mic-gate', {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        outputChannelCount: [1],
+      });
+      gate.port.onmessage = (event: MessageEvent<{ level: number; open: boolean }>) =>
+        onLevel?.({ db: linearToDb(event.data.level), open: event.data.open });
+      pipeline.gain.connect(gate).connect(pipeline.output);
+      pipeline.gate = gate;
+      pipeline.setSensitivity(prefs);
+    } catch (err) {
+      console.warn('[voz] sem porta de ruído; microfone sempre aberto', err);
+      pipeline.gain.connect(pipeline.output);
+    }
+    return pipeline;
   }
 
   use(raw: MediaStream): void {
@@ -111,11 +155,59 @@ class MicPipeline {
     this.gain.gain.setTargetAtTime(volume, this.context.currentTime, 0.05);
   }
 
+  /** Automático = sempre aberto; manual = só passa o que está acima do limite. */
+  setSensitivity({ autoSensitivity, inputSensitivity }: Pick<VoicePrefs, 'autoSensitivity' | 'inputSensitivity'>): void {
+    this.gate?.port.postMessage({ enabled: !autoSensitivity, threshold: dbToLinear(inputSensitivity) });
+  }
+
   close(): void {
     this.source?.disconnect();
     this.raw?.getTracks().forEach((track) => track.stop());
     this.stream.getTracks().forEach((track) => track.stop());
     void this.context.close();
+  }
+}
+
+/**
+ * A voz de alguém: o fluxo recebido passa por um ganho (o volume dessa pessoa, só
+ * seu, de 0 a 200%) antes de tocar. Quem toca é `output`, que continua valendo para
+ * a saída de áudio escolhida, o volume geral e o "ensurdecer".
+ */
+class RemoteVoice {
+  readonly output = new Audio();
+  /** O Chrome só entrega o áudio remoto ao Web Audio se o fluxo também estiver ligado a um elemento. */
+  private readonly keepAlive = new Audio();
+  private readonly source: MediaStreamAudioSourceNode;
+  private readonly gain: GainNode;
+  private readonly destination: MediaStreamAudioDestinationNode;
+
+  constructor(
+    private readonly context: AudioContext,
+    remote: MediaStream,
+    userVolume: UserVolume,
+  ) {
+    this.keepAlive.muted = true;
+    this.keepAlive.autoplay = true;
+    this.keepAlive.srcObject = remote;
+    void this.keepAlive.play().catch(() => {});
+    this.source = context.createMediaStreamSource(remote);
+    this.gain = context.createGain();
+    this.gain.gain.value = userVolume.muted ? 0 : userVolume.volume;
+    this.destination = context.createMediaStreamDestination();
+    this.source.connect(this.gain).connect(this.destination);
+    this.output.autoplay = true;
+    this.output.srcObject = this.destination.stream;
+  }
+
+  setUserVolume({ volume, muted }: UserVolume): void {
+    this.gain.gain.setTargetAtTime(muted ? 0 : volume, this.context.currentTime, 0.03);
+  }
+
+  close(): void {
+    this.source.disconnect();
+    this.gain.disconnect();
+    this.output.srcObject = null;
+    this.keepAlive.srcObject = null;
   }
 }
 
@@ -195,7 +287,7 @@ interface Peer {
   polite: boolean;
   makingOffer: boolean;
   ignoreOffer: boolean;
-  audio: HTMLAudioElement | null;
+  voice: RemoteVoice | null;
   /** Seu microfone (e câmera/tela, se houver) já está nesta conexão. */
   sending: boolean;
   /** Ids dos fluxos de câmera e tela do outro lado (sinal `media`). */
@@ -213,6 +305,8 @@ type Slot = 'screenVideo' | 'screenAudio' | 'cameraVideo';
 export class VoiceManager {
   private localStream: MediaStream | null = null;
   private mic: MicPipeline | null = null;
+  /** Onde as vozes recebidas passam pelo volume de cada pessoa; existe só durante a chamada. */
+  private playback: AudioContext | null = null;
   private prefs: VoicePrefs = DEFAULT_SETTINGS.voice;
   private iceServers: IceServer[] = [];
   private iceTransportPolicy: RTCIceTransportPolicy = 'all';
@@ -244,14 +338,21 @@ export class VoiceManager {
   async join(channelId: Id, startMuted: boolean, selfId: Id): Promise<void> {
     this.teardown();
     const raw = await openMicrophone(this.prefs);
+    // Tudo que leva tempo fica antes de entrar na sala: depois do aviso ao servidor, quem
+    // chega já pode ligar para nós, e sinais recebidos antes de estarmos prontos se perderiam.
+    const mic = await MicPipeline.create(this.prefs);
+    mic.use(raw);
+    const playback = new AudioContext();
+    void playback.resume();
     const res = await this.socket.emitWithAck('voice:join', { channelId });
     if (!res.ok) {
-      raw.getTracks().forEach((track) => track.stop());
+      mic.close();
+      void playback.close();
       throw new Error(res.error);
     }
-    this.mic = new MicPipeline(this.prefs.inputVolume);
-    this.mic.use(raw);
-    const stream = this.mic.stream;
+    this.mic = mic;
+    this.playback = playback;
+    const stream = mic.stream;
     this.localStream = stream;
     this.cameraCarrier = new MediaStream();
     this.screenCarrier = new MediaStream();
@@ -280,6 +381,8 @@ export class VoiceManager {
     this.detector.stop();
     this.mic?.close();
     this.mic = null;
+    void this.playback?.close();
+    this.playback = null;
     this.localStream = null;
     this.selfId = null;
   }
@@ -294,10 +397,16 @@ export class VoiceManager {
     this.prefs = next;
     if (this.mic) {
       if (next.inputVolume !== prev.inputVolume) this.mic.setVolume(next.inputVolume);
+      if (next.autoSensitivity !== prev.autoSensitivity || next.inputSensitivity !== prev.inputSensitivity) {
+        this.mic.setSensitivity(next);
+      }
       if (micChanged(prev, next)) this.mic.use(await openMicrophone(next));
     }
     if (next.outputDeviceId !== prev.outputDeviceId || next.outputVolume !== prev.outputVolume) {
-      for (const peer of this.peers.values()) if (peer.audio) applyOutput(peer.audio, next);
+      for (const peer of this.peers.values()) if (peer.voice) applyOutput(peer.voice.output, next);
+    }
+    if (next.userVolumes !== prev.userVolumes) {
+      for (const [peerId, peer] of this.peers) peer.voice?.setUserVolume(next.userVolumes[peerId] ?? DEFAULT_USER_VOLUME);
     }
     if (this.camera && next.cameraDeviceId !== prev.cameraDeviceId) {
       const old = this.camera;
@@ -317,7 +426,7 @@ export class VoiceManager {
 
   setDeafened(deafened: boolean): void {
     this.deafened = deafened;
-    for (const peer of this.peers.values()) if (peer.audio) peer.audio.muted = deafened;
+    for (const peer of this.peers.values()) if (peer.voice) peer.voice.output.muted = deafened;
   }
 
   // ── Compartilhamento de tela ───────────────────────────────────────────────
@@ -451,7 +560,7 @@ export class VoiceManager {
       polite: (this.selfId ?? '') < peerId,
       makingOffer: false,
       ignoreOffer: false,
-      audio: null,
+      voice: null,
       sending: false,
       remoteMedia: null,
       remoteVideo: new Map(),
@@ -485,15 +594,14 @@ export class VoiceManager {
         return;
       }
       // Áudio que não é da tela é o microfone (o som da tela toca pelo <video> de quem assiste).
-      if (remote.id !== peer.remoteMedia?.screen) {
-        const audio = peer.audio ?? new Audio();
-        audio.autoplay = true;
-        audio.srcObject = remote;
-        audio.muted = this.deafened;
-        applyOutput(audio, this.prefs);
-        peer.audio = audio;
+      if (remote.id !== peer.remoteMedia?.screen && this.playback) {
+        peer.voice?.close();
+        const voice = new RemoteVoice(this.playback, remote, this.prefs.userVolumes[peerId] ?? DEFAULT_USER_VOLUME);
+        voice.output.muted = this.deafened;
+        applyOutput(voice.output, this.prefs);
+        peer.voice = voice;
         this.detector.watch(peerId, remote);
-        audio.play().catch(() => {
+        voice.output.play().catch(() => {
           // O navegador pode bloquear autoplay; o clique em "entrar" normalmente libera.
         });
       }
@@ -572,7 +680,7 @@ export class VoiceManager {
     const peer = this.peers.get(peerId);
     if (!peer) return;
     peer.pc.close();
-    if (peer.audio) peer.audio.srcObject = null;
+    peer.voice?.close();
     this.detector.unwatch(peerId);
     this.peers.delete(peerId);
     this.events.onRemoteScreen?.(peerId, null);

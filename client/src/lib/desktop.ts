@@ -1,5 +1,7 @@
 // Ponte com o app de desktop (desktop/src/preload.cjs). No navegador, `desktop` é `null`.
 
+import type { KeybindAction } from './keybinds';
+
 export type UpdateStatus =
   | 'idle'
   | 'checking'
@@ -37,6 +39,14 @@ export interface DesktopBridge {
   /** Fechar a janela esconde o app na bandeja (padrão) em vez de sair. Ausente no app 0.2.0. */
   getCloseToTray?(): Promise<boolean | null>;
   setCloseToTray?(enabled: boolean): Promise<boolean | null>;
+  /**
+   * Atalhos que valem no sistema inteiro, com o Coreto em segundo plano (formato de acelerador do
+   * Electron, como "Ctrl+Shift+M"). Substitui os anteriores e resolve com os que conseguiu registrar
+   * (falha se outro programa já usa a combinação). Ausente antes da versão 0.4.0.
+   */
+  setGlobalShortcuts?(accelerators: Record<KeybindAction, string | null>): Promise<Record<KeybindAction, boolean> | null>;
+  /** Um atalho global foi apertado. */
+  onShortcut?(listener: (action: KeybindAction) => void): () => void;
 }
 
 export const desktop: DesktopBridge | null =

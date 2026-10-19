@@ -1,5 +1,6 @@
 // Ponte entre o site do Coreto e o app de desktop: só o necessário para a tela
-// "App de desktop" das configurações (versão, atualização, bandeja e abrir com o Windows).
+// "App de desktop" das configurações (versão, atualização, bandeja e abrir com o Windows)
+// e os atalhos de mutar que valem com o Coreto em segundo plano.
 // O site continua sem acesso ao Node; o processo principal confere a origem.
 const { contextBridge, ipcRenderer } = require('electron');
 
@@ -20,4 +21,10 @@ contextBridge.exposeInMainWorld('coretoDesktop', {
   setOpenAtLogin: (/** @type {boolean} */ open) => ipcRenderer.invoke('desktop:set-open-at-login', Boolean(open)),
   getCloseToTray: () => ipcRenderer.invoke('desktop:get-close-to-tray'),
   setCloseToTray: (/** @type {boolean} */ enabled) => ipcRenderer.invoke('desktop:set-close-to-tray', Boolean(enabled)),
+  setGlobalShortcuts: (/** @type {unknown} */ accelerators) => ipcRenderer.invoke('desktop:set-global-shortcuts', accelerators),
+  onShortcut: (/** @type {(action: unknown) => void} */ listener) => {
+    const handler = (/** @type {unknown} */ _event, /** @type {unknown} */ action) => listener(action);
+    ipcRenderer.on('desktop:shortcut', handler);
+    return () => ipcRenderer.removeListener('desktop:shortcut', handler);
+  },
 });

@@ -1,0 +1,112 @@
+import { describe, expect, it } from 'vitest';
+import {
+  formatKeybind,
+  hasCommandModifier,
+  isUsableKeybind,
+  keyOf,
+  KeyTracker,
+  orderKeys,
+  sameKeys,
+  toGlobalAccelerator,
+} from '../../../shared/src/keybinds.js';
+
+const press = (tracker: KeyTracker, ...codes: string[]) => codes.forEach((code) => tracker.press({ code }));
+
+describe('teclas', () => {
+  it('não distingue o lado dos modificadores', () => {
+    expect(keyOf({ code: 'ShiftLeft' })).toBe('Shift');
+    expect(keyOf({ code: 'ShiftRight' })).toBe('Shift');
+    expect(keyOf({ code: 'ControlRight' })).toBe('Ctrl');
+    expect(keyOf({ code: 'AltLeft' })).toBe('Alt');
+    expect(keyOf({ code: 'MetaLeft' })).toBe('Meta');
+    expect(keyOf({ code: 'KeyV' })).toBe('KeyV');
+  });
+
+  it('põe os modificadores primeiro, sempre na mesma ordem', () => {
+    expect(orderKeys(['KeyV', 'Shift', 'Ctrl'])).toEqual(['Ctrl', 'Shift', 'KeyV']);
+    expect(orderKeys(['Meta', 'KeyB', 'KeyA', 'Alt'])).toEqual(['Alt', 'Meta', 'KeyA', 'KeyB']);
+  });
+
+  it('compara combinações sem ligar para a ordem', () => {
+    expect(sameKeys(['Shift', 'KeyV'], ['KeyV', 'Shift'])).toBe(true);
+    expect(sameKeys(['KeyV'], ['Shift', 'KeyV'])).toBe(false);
+    expect(sameKeys(['KeyV'], ['KeyB'])).toBe(false);
+  });
+
+  it('mostra a combinação de forma legível', () => {
+    expect(formatKeybind(['KeyV'])).toBe('V');
+    expect(formatKeybind(['KeyV', 'Shift'])).toBe('Shift + V');
+    expect(formatKeybind(['Digit1', 'Ctrl', 'Alt'])).toBe('Ctrl + Alt + 1');
+    expect(formatKeybind(['Meta', 'F9'])).toBe('Win + F9');
+    expect(formatKeybind(['Space'])).toBe('Espaço');
+    expect(formatKeybind(['Numpad5'])).toBe('Num 5');
+  });
+
+  it('só aceita combinação com uma tecla que não seja modificador', () => {
+    expect(isUsableKeybind(['KeyV'])).toBe(true);
+    expect(isUsableKeybind(['Shift', 'KeyV'])).toBe(true);
+    expect(isUsableKeybind(['Shift'])).toBe(false);
+    expect(isUsableKeybind(['Ctrl', 'Alt'])).toBe(false);
+  });
+
+  it('só deixa disparar digitando quando há Ctrl, Alt ou Win', () => {
+    expect(hasCommandModifier(['KeyV'])).toBe(false);
+    expect(hasCommandModifier(['Shift', 'KeyV'])).toBe(false);
+    expect(hasCommandModifier(['Ctrl', 'KeyM'])).toBe(true);
+    expect(hasCommandModifier(['Alt', 'Shift', 'KeyM'])).toBe(true);
+  });
+});
+
+describe('KeyTracker', () => {
+  it('sabe o que está segurado e o que foi solto', () => {
+    const tracker = new KeyTracker();
+    press(tracker, 'ShiftLeft', 'KeyV');
+    expect(tracker.keys()).toEqual(['Shift', 'KeyV']);
+    expect(tracker.release({ code: 'KeyV' })).toEqual(['Shift']);
+    expect(tracker.release({ code: 'ShiftLeft' })).toEqual([]);
+  });
+
+  it('Shift + V não dispara o atalho "V" sozinho, e "V" sozinho não dispara Shift + V', () => {
+    const plain = ['KeyV'];
+    const shifted = ['Shift', 'KeyV'];
+    const tracker = new KeyTracker();
+
+    press(tracker, 'ShiftLeft', 'KeyV');
+    expect(sameKeys(tracker.keys(), shifted)).toBe(true);
+    expect(sameKeys(tracker.keys(), plain)).toBe(false);
+
+    tracker.clear();
+    press(tracker, 'KeyV');
+    expect(sameKeys(tracker.keys(), plain)).toBe(true);
+    expect(sameKeys(tracker.keys(), shifted)).toBe(false);
+  });
+
+  it('esquece tudo quando a janela perde o foco', () => {
+    const tracker = new KeyTracker();
+    press(tracker, 'ControlLeft', 'KeyM');
+    tracker.clear();
+    expect(tracker.keys()).toEqual([]);
+  });
+});
+
+describe('toGlobalAccelerator', () => {
+  it('converte modificador + tecla para o formato do Electron', () => {
+    expect(toGlobalAccelerator(['Ctrl', 'Shift', 'KeyM'])).toBe('Ctrl+Shift+M');
+    expect(toGlobalAccelerator(['Alt', 'Digit5'])).toBe('Alt+5');
+    expect(toGlobalAccelerator(['Ctrl', 'Alt', 'Shift', 'F9'])).toBe('Ctrl+Alt+Shift+F9');
+    expect(toGlobalAccelerator(['Meta', 'ArrowUp'])).toBe('Super+Up');
+    expect(toGlobalAccelerator(['Ctrl', 'Numpad3'])).toBe('Ctrl+num3');
+    expect(toGlobalAccelerator(['Ctrl', 'Backquote'])).toBe('Ctrl+`');
+  });
+
+  it('recusa o que não pode valer no sistema todo', () => {
+    // Uma tecla sozinha (ou só com Shift) pararia de funcionar em todos os outros programas.
+    expect(toGlobalAccelerator(['KeyV'])).toBeNull();
+    expect(toGlobalAccelerator(['F9'])).toBeNull();
+    // Duas teclas comuns: o Electron só aceita uma.
+    expect(toGlobalAccelerator(['Ctrl', 'KeyA', 'KeyB'])).toBeNull();
+    expect(toGlobalAccelerator(['Ctrl'])).toBeNull();
+    expect(toGlobalAccelerator(['Ctrl', 'MediaPlayPause'])).toBeNull();
+    expect(toGlobalAccelerator(null)).toBeNull();
+  });
+});

@@ -16,7 +16,7 @@
 // (uma chamada continua); o ícone traz de volta e o menu tem "Sair do Coreto".
 // Aberto junto com o Windows (--hidden), começa direto na bandeja.
 
-import { app, BrowserWindow, desktopCapturer, ipcMain, Menu, nativeImage, session, shell, Tray } from 'electron';
+import { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, Menu, nativeImage, session, shell, Tray } from 'electron';
 import updater from 'electron-updater';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -147,7 +147,37 @@ function configureUpdater() {
 const fromCoreto = (/** @type {Electron.IpcMainEvent | Electron.IpcMainInvokeEvent} */ event) =>
   mainWindow !== null && event.sender === mainWindow.webContents && isOurs(event.senderFrame?.url ?? '');
 
+// ── Atalhos que valem com o app em segundo plano ─────────────────────────────
+
+const SHORTCUT_ACTIONS = ['mute', 'deafen'];
+
+/**
+ * O site pede os atalhos de mutar (já com modificador, como "Ctrl+Shift+M"); cada pedido
+ * substitui os anteriores. Responde quais conseguiu registrar: falha quando outro
+ * programa já usa a combinação.
+ * @param {unknown} accelerators
+ */
+function setGlobalShortcuts(accelerators) {
+  globalShortcut.unregisterAll();
+  /** @type {Record<string, boolean>} */
+  const result = { mute: false, deafen: false };
+  if (!accelerators || typeof accelerators !== 'object') return result;
+  for (const action of SHORTCUT_ACTIONS) {
+    const accelerator = /** @type {Record<string, unknown>} */ (accelerators)[action];
+    if (typeof accelerator !== 'string' || accelerator.length > 40) continue;
+    try {
+      result[action] = globalShortcut.register(accelerator, () => mainWindow?.webContents.send('desktop:shortcut', action));
+    } catch {
+      // combinação que o Electron não reconhece: fica sem atalho global
+    }
+  }
+  return result;
+}
+
 function registerBridge() {
+  ipcMain.handle('desktop:set-global-shortcuts', (event, accelerators) =>
+    fromCoreto(event) ? setGlobalShortcuts(accelerators) : null,
+  );
   // Versão e sistema não são segredo; responde sempre (o preload espera a resposta).
   ipcMain.on('desktop:info', (event) => {
     event.returnValue = { version: app.getVersion(), platform: process.platform };
@@ -436,6 +466,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on('before-quit', () => {
     quitting = true;
   });
+  app.on('will-quit', () => globalShortcut.unregisterAll());
 
   app.whenReady().then(() => {
     Menu.setApplicationMenu(null);

@@ -15,6 +15,7 @@ import { StreamStage } from '../StreamStage';
 import { UpdateBanner } from '../UpdateBanner';
 import { UserPanel } from '../UserPanel';
 import { VoiceStatusBar } from '../VoiceStatusBar';
+import { CallSounds, Shortcuts } from '../VoiceEffects';
 
 export function AppShell() {
   const { state } = useRealtime();
@@ -23,6 +24,8 @@ export function AppShell() {
 
   return (
     <div className="flex h-dvh overflow-hidden bg-panel text-fg">
+      <CallSounds />
+      <Shortcuts />
       {/* Coluna 1: espaços */}
       <SpaceRail />
 
