@@ -11,6 +11,7 @@
 
 import type { Id } from '@shared/models';
 import type { IceServer, SignalPayload } from '@shared/protocol';
+import { resolutionScale, viewerBitrate } from '@shared/stream-quality';
 import {
   DEFAULT_SETTINGS,
   DEFAULT_USER_VOLUME,
@@ -254,13 +255,16 @@ export interface ScreenShareOptions {
   frameRate: 15 | 30 | 60;
   /** Pede também o som (o Chrome oferece para abas e para a tela inteira no Windows). */
   audio: boolean;
+  /**
+   * O que sacrificar quando a internet ou o computador não dão conta: `sharp` mantém a
+   * imagem nítida e deixa os quadros caírem (texto, código); `smooth` mantém a fluidez e
+   * deixa a imagem perder resolução (jogos, vídeos).
+   */
+  priority: 'sharp' | 'smooth';
+  /** Velocidade de envio (upload) da sua internet em Mbps, dividida entre quem assiste. */
+  uploadMbps: 5 | 10 | 20 | 50;
 }
 
-/** Teto de bits por segundo do vídeo, por altura × quadros. */
-function maxBitrate({ height, frameRate }: ScreenShareOptions): number {
-  const base = height === 720 ? 2_500_000 : height === 1080 ? 4_500_000 : 6_000_000;
-  return frameRate === 60 ? base * 1.5 : frameRate === 15 ? base * 0.6 : base;
-}
 
 /** Câmera leve para caber na malha: cada pessoa envia uma cópia para cada outra. */
 const CAMERA_CONSTRAINTS: MediaTrackConstraints = {
@@ -269,6 +273,39 @@ const CAMERA_CONSTRAINTS: MediaTrackConstraints = {
   frameRate: { ideal: 24, max: 30 },
 };
 const CAMERA_MAX_BITRATE = 600_000;
+
+/** Como uma transmissão de tela está indo, no último segundo. */
+export interface StreamStats {
+  role: 'sending' | 'receiving';
+  width: number;
+  height: number;
+  fps: number;
+  /** Quilobits por segundo (somando os espectadores, quando você transmite). */
+  kbps: number;
+  lossPercent: number;
+  rttMs: number | null;
+  codec: string | null;
+  /** Só ao transmitir: o que está limitando a qualidade (`cpu` = seu computador, `bandwidth` = sua internet). */
+  limit: 'none' | 'bandwidth' | 'cpu' | 'other' | null;
+  /** Só ao transmitir: para quantas pessoas o vídeo está indo. */
+  viewers: number;
+}
+
+function codecName(report: RTCStatsReport, codecId: unknown): string | null {
+  const codec = typeof codecId === 'string' ? (report.get(codecId) as { mimeType?: string } | undefined) : undefined;
+  return codec?.mimeType?.replace(/^video\//, '') ?? null;
+}
+
+/** Ida e volta (ms) do par de rede em uso. */
+function currentRoundTrip(report: RTCStatsReport): number | null {
+  let rtt: number | null = null;
+  report.forEach((stat) => {
+    if (stat.type === 'candidate-pair' && stat.nominated && stat.state === 'succeeded' && Number.isFinite(stat.currentRoundTripTime)) {
+      rtt = stat.currentRoundTripTime * 1000;
+    }
+  });
+  return rtt;
+}
 
 export interface VoiceEvents {
   /** Quem está falando agora (incluindo você), a cada mudança. */
@@ -454,8 +491,8 @@ export class VoiceManager {
     }
     this.stopScreen();
     const [video] = stream.getVideoTracks();
-    // Texto e código pedem nitidez; jogos e vídeos, fluidez.
-    video.contentHint = options.frameRate >= 30 ? 'motion' : 'detail';
+    // Dica para o codificador: "text" mantém a resolução e cai nos quadros; "motion" faz o contrário.
+    video.contentHint = options.priority === 'sharp' ? 'text' : 'motion';
     // O usuário pode parar pelo aviso do próprio navegador.
     video.addEventListener('ended', () => {
       if (this.screen?.stream === stream) this.events.onScreenEnded?.();
@@ -487,7 +524,18 @@ export class VoiceManager {
     const video = this.screen?.stream.getVideoTracks()[0] ?? null;
     const audio = this.screen?.stream.getAudioTracks()[0] ?? null;
     const options = this.screen?.options;
-    const encodings = options ? [{ maxBitrate: maxBitrate(options), maxFramerate: options.frameRate }] : [];
+    const viewers = [...this.peers.keys()].filter((id) => this.screenViewers.has(id)).length;
+    const bitrate = options ? viewerBitrate(options, viewers) : 0;
+    const encodings: RTCRtpEncodingParameters[] =
+      options && video
+        ? [
+            {
+              maxBitrate: bitrate,
+              maxFramerate: options.frameRate,
+              scaleResolutionDownBy: resolutionScale(video.getSettings().height ?? 0, bitrate, options.frameRate),
+            },
+          ]
+        : [];
     for (const [peerId, peer] of this.peers) {
       const watching = this.screen !== null && this.screenViewers.has(peerId);
       this.sendTrack(peer, 'screenVideo', watching ? video : null, this.screenCarrier, encodings);
@@ -521,7 +569,105 @@ export class VoiceManager {
     if (!params.encodings?.length) return;
     params.encodings[0].maxBitrate = encoding.maxBitrate;
     params.encodings[0].maxFramerate = encoding.maxFramerate;
+    if (encoding.scaleResolutionDownBy !== undefined) params.encodings[0].scaleResolutionDownBy = encoding.scaleResolutionDownBy;
     await sender.setParameters(params).catch((err: unknown) => console.warn('[voz] setParameters', err));
+  }
+
+  // ── Estatísticas da transmissão ────────────────────────────────────────────
+
+  /** Última leitura de bytes e quadros, para calcular por segundo. */
+  private readonly statSamples = new Map<string, { at: number; bytes: number; frames: number }>();
+
+  /**
+   * Como a transmissão de `userId` está indo, lida das estatísticas do WebRTC: a sua (o que sai,
+   * somado entre os espectadores) ou a de quem você assiste (o que chega). `null` se não há nada.
+   * Os valores por segundo vêm da diferença para a leitura anterior, então chame a cada segundo.
+   */
+  async screenStats(userId: Id): Promise<StreamStats | null> {
+    return userId === this.selfId ? this.sendingStats() : this.receivingStats(userId);
+  }
+
+  private rate(key: string, bytes: number, frames: number): { kbps: number; fps: number } {
+    const at = performance.now();
+    const before = this.statSamples.get(key);
+    this.statSamples.set(key, { at, bytes, frames });
+    if (!before || at <= before.at) return { kbps: 0, fps: 0 };
+    const seconds = (at - before.at) / 1000;
+    return { kbps: Math.max(0, ((bytes - before.bytes) * 8) / 1000 / seconds), fps: Math.max(0, (frames - before.frames) / seconds) };
+  }
+
+  private async receivingStats(userId: Id): Promise<StreamStats | null> {
+    const peer = this.peers.get(userId);
+    const screenId = peer?.remoteMedia?.screen;
+    const track = screenId ? peer?.remoteVideo.get(screenId)?.getVideoTracks()[0] : undefined;
+    const receiver = track && peer?.pc.getReceivers().find((r) => r.track === track);
+    if (!peer || !receiver) return null;
+
+    const [report, all] = await Promise.all([receiver.getStats(), peer.pc.getStats()]);
+    let inbound: Record<string, unknown> | undefined;
+    report.forEach((stat) => {
+      if (stat.type === 'inbound-rtp' && stat.kind === 'video') inbound = stat;
+    });
+    if (!inbound) return null;
+    const received = Number(inbound['packetsReceived'] ?? 0);
+    const lost = Number(inbound['packetsLost'] ?? 0);
+    const { kbps, fps } = this.rate(`in:${userId}`, Number(inbound['bytesReceived'] ?? 0), Number(inbound['framesDecoded'] ?? 0));
+    return {
+      role: 'receiving',
+      width: Number(inbound['frameWidth'] ?? 0),
+      height: Number(inbound['frameHeight'] ?? 0),
+      fps,
+      kbps,
+      lossPercent: received + lost > 0 ? (lost / (received + lost)) * 100 : 0,
+      rttMs: currentRoundTrip(all),
+      codec: codecName(report, inbound['codecId']),
+      limit: null,
+      viewers: 0,
+    };
+  }
+
+  private async sendingStats(): Promise<StreamStats | null> {
+    if (!this.screen) return null;
+    let width = 0;
+    let height = 0;
+    let fps = 0;
+    let kbps = 0;
+    let loss = 0;
+    let rtt: number | null = null;
+    let codec: string | null = null;
+    let worst = 0; // índice em `limits`: o pior limite entre os espectadores
+    let viewers = 0;
+    const limits = ['none', 'other', 'bandwidth', 'cpu'] as const;
+
+    for (const [peerId, peer] of this.peers) {
+      const sender = peer.screenVideo?.sender;
+      if (!sender || !this.screenViewers.has(peerId) || !sender.track) continue;
+      const report = await sender.getStats();
+      let outbound: Record<string, unknown> | undefined;
+      let remote: Record<string, unknown> | undefined;
+      report.forEach((stat) => {
+        if (stat.type === 'outbound-rtp' && stat.kind === 'video') outbound = stat;
+        if (stat.type === 'remote-inbound-rtp' && stat.kind === 'video') remote = stat;
+      });
+      if (!outbound) continue;
+      viewers++;
+      const rate = this.rate(`out:${peerId}`, Number(outbound['bytesSent'] ?? 0), Number(outbound['framesEncoded'] ?? 0));
+      kbps += rate.kbps;
+      fps = Math.max(fps, rate.fps);
+      width = Math.max(width, Number(outbound['frameWidth'] ?? 0));
+      height = Math.max(height, Number(outbound['frameHeight'] ?? 0));
+      codec ??= codecName(report, outbound['codecId']);
+      const reason = String(outbound['qualityLimitationReason'] ?? 'none');
+      worst = Math.max(worst, reason === 'none' ? 0 : reason === 'cpu' ? 3 : reason === 'bandwidth' ? 2 : 1);
+      if (remote) {
+        const sent = Number(outbound['packetsSent'] ?? 0);
+        const lost = Number(remote['packetsLost'] ?? 0);
+        if (sent > 0) loss = Math.max(loss, (Math.max(0, lost) / sent) * 100);
+        const round = Number(remote['roundTripTime'] ?? NaN);
+        if (Number.isFinite(round)) rtt = Math.max(rtt ?? 0, round * 1000);
+      }
+    }
+    return { role: 'sending', width, height, fps, kbps, lossPercent: loss, rttMs: rtt, codec, limit: limits[worst], viewers };
   }
 
   // ── Câmera ─────────────────────────────────────────────────────────────────

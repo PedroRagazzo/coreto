@@ -427,6 +427,20 @@ primeira vez); depois, parar e voltar a assistir só troca a faixa (`replaceTrac
 pode renegociar, `client/src/lib/voice.ts` usa o padrão "perfect negotiation" do WebRTC para resolver ofertas
 simultâneas. A permissão `STREAM` controla quem pode transmitir; o `@everyone` a tem por padrão.
 
+**Qualidade com vários espectadores.** Na malha P2P cada espectador recebe uma cópia do vídeo, e o computador de quem
+transmite codifica uma vez por espectador. Para a imagem não ficar borrada quando a internet aperta:
+
+- **Prioridade** (Nitidez ou Fluidez): Nitidez usa `contentHint = 'text'`, que mantém a resolução e deixa os quadros
+  caírem; Fluidez usa `'motion'`, que faz o contrário. O padrão é Nitidez, porque a maior parte das telas é texto.
+- **Upload da sua internet** (5, 10, 20 ou 50 Mbps): 70% dele é dividido entre quem assiste, e o limite de cada
+  espectador cai com o número de pessoas. Se o bitrate não dá para a resolução, a imagem é reduzida
+  (`scaleResolutionDownBy`) em vez de ficar cheia de blocos. As contas ficam em `shared/src/stream-quality.ts`, com testes.
+- **Estatísticas** (botão com o ícone de atividade no cabeçalho da transmissão): resolução, quadros por segundo, bitrate,
+  codec, perda de pacotes e latência, lidos de `getStats()`. Para quem transmite mostra também o que está limitando a
+  qualidade (seu computador ou sua internet).
+
+Para transmitir bem para muita gente de uma vez, o caminho é um servidor de mídia (SFU): quem transmite envia uma cópia só.
+
 ### TURN
 
 Na mesma rede, ou com NATs simples, o STUN basta. Atrás de NAT simétrico, 4G ou firewall corporativo, o áudio só passa

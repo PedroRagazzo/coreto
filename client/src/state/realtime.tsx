@@ -38,6 +38,7 @@ import {
   describeScreenError,
   VoiceManager,
   type ScreenShareOptions,
+  type StreamStats,
 } from '../lib/voice';
 
 const TYPING_TTL_MS = 6_000;
@@ -575,6 +576,8 @@ export interface RealtimeActions {
   /** Abre o seletor de tela e começa a transmitir. Resolve com erro ou `null` (também se a pessoa cancelar). */
   startScreenShare(options: ScreenShareOptions): Promise<string | null>;
   stopScreenShare(): void;
+  /** Como a transmissão (sua ou a que você assiste) está indo agora; `null` se não há dados. */
+  screenStats(userId: Id): Promise<StreamStats | null>;
   /**
    * Assiste à transmissão de alguém, entrando no canal de voz dela se preciso.
    * Para você, abre a prévia. Falhas aparecem como aviso na barra de voz.
@@ -890,6 +893,10 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
       leaveVoice() {
         voiceRef.current?.leave();
         dispatch({ type: 'voice:self', patch: IDLE_VOICE });
+      },
+
+      screenStats(userId) {
+        return voiceRef.current?.screenStats(userId) ?? Promise.resolve(null);
       },
 
       async startScreenShare(options) {

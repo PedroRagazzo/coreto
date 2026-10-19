@@ -1,6 +1,7 @@
 import type { Id, VoiceParticipant } from '@shared/models';
-import { Eye, Maximize, Minimize, Monitor, MonitorOff, Volume2, VolumeX, X } from 'lucide-react';
+import { Activity, Eye, Maximize, Minimize, Monitor, MonitorOff, Volume2, VolumeX, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import type { StreamStats } from '../lib/voice';
 import { useRealtime } from '../state/realtime';
 import { displayNameOf } from '../state/selectors';
 
@@ -40,6 +41,8 @@ export function StreamStage() {
   const [volume, setVolume] = useState(1);
   const [size, setSize] = useState<{ width: number; height: number } | null>(null);
   const [hasAudio, setHasAudio] = useState(false);
+  const [showStats, setShowStats] = useState(false);
+  const stats = useStreamStats(userId, showStats && live, actions.screenStats);
 
   // O som da tela pode chegar depois do vídeo, no mesmo fluxo.
   useEffect(() => {
@@ -99,12 +102,24 @@ export function StreamStage() {
             {size.width}×{size.height}
           </span>
         )}
+        {live && (
+          <button
+            type="button"
+            onClick={() => setShowStats((v) => !v)}
+            aria-pressed={showStats}
+            title="Estatísticas da transmissão"
+            aria-label="Estatísticas da transmissão"
+            className={`ml-auto rounded p-1.5 hover:bg-hover ${showStats ? 'text-accent' : 'text-muted hover:text-fg'}`}
+          >
+            <Activity size={18} />
+          </button>
+        )}
         <button
           type="button"
           onClick={actions.closeStage}
           title={isMe ? 'Fechar prévia (a transmissão continua)' : 'Parar de assistir'}
           aria-label={isMe ? 'Fechar prévia' : 'Parar de assistir'}
-          className="ml-auto rounded p-1.5 text-muted hover:bg-hover hover:text-fg"
+          className={`rounded p-1.5 text-muted hover:bg-hover hover:text-fg ${live ? '' : 'ml-auto'}`}
         >
           <X size={18} />
         </button>
@@ -140,6 +155,8 @@ export function StreamStage() {
             Conectando à transmissão…
           </p>
         )}
+
+        {showStats && live && <StatsPanel stats={stats} />}
 
         {live && stream && (
           <div className="absolute inset-x-0 bottom-0 flex items-center gap-3 bg-gradient-to-t from-black/80 to-transparent px-4 pt-10 pb-3 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
@@ -187,5 +204,68 @@ export function StreamStage() {
         )}
       </div>
     </>
+  );
+}
+
+/** Lê as estatísticas da transmissão a cada segundo enquanto `enabled`. */
+function useStreamStats(userId: Id, enabled: boolean, read: (userId: Id) => Promise<StreamStats | null>): StreamStats | null {
+  const [stats, setStats] = useState<StreamStats | null>(null);
+  const readRef = useRef(read);
+  readRef.current = read;
+  useEffect(() => {
+    if (!enabled) return setStats(null);
+    let stopped = false;
+    const tick = () => void readRef.current(userId).then((s) => !stopped && setStats(s));
+    tick();
+    const timer = setInterval(tick, 1_000);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+    };
+  }, [userId, enabled]);
+  return stats;
+}
+
+const mbps = (kbps: number) => `${(kbps / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1, minimumFractionDigits: 1 })} Mb/s`;
+
+/** O que fazer, em palavras, a partir dos números. */
+function advice(stats: StreamStats): string | null {
+  if (stats.role === 'sending') {
+    if (stats.limit === 'cpu') return 'Seu computador está no limite: escolha uma resolução menor ou menos quadros por segundo.';
+    if (stats.limit === 'bandwidth') return 'A sua internet de envio está no limite: a imagem é reduzida para caber. Menos gente assistindo melhora.';
+    if (stats.lossPercent > 3) return 'Há perda de pacotes no caminho até quem assiste.';
+    return null;
+  }
+  if (stats.lossPercent > 3) return 'Perda alta de pacotes: a internet de quem transmite ou a sua está instável.';
+  return null;
+}
+
+function StatsPanel({ stats }: { stats: StreamStats | null }) {
+  const tip = stats ? advice(stats) : null;
+  return (
+    <div
+      role="status"
+      aria-label="Estatísticas da transmissão"
+      className="pointer-events-none absolute top-3 left-3 max-w-sm rounded-md bg-black/75 px-3 py-2 text-xs leading-5 text-white"
+    >
+      {!stats || (stats.role === 'sending' && stats.viewers === 0) ? (
+        <p>{stats?.role === 'sending' ? 'Ninguém assistindo ainda.' : 'Medindo…'}</p>
+      ) : (
+        <>
+          <p className="font-semibold">
+            {stats.role === 'sending' ? `Enviando para ${stats.viewers} ${stats.viewers === 1 ? 'pessoa' : 'pessoas'}` : 'Recebendo'}
+          </p>
+          <p>
+            {stats.width && stats.height ? `${stats.width}×${stats.height}` : '—'} · {Math.round(stats.fps)} fps · {mbps(stats.kbps)}
+            {stats.role === 'sending' && stats.viewers > 1 ? ' no total' : ''}
+          </p>
+          <p>
+            {stats.codec ? `${stats.codec} · ` : ''}perda {stats.lossPercent.toFixed(1)}%
+            {stats.rttMs !== null ? ` · ${Math.round(stats.rttMs)} ms` : ''}
+          </p>
+          {tip && <p className="mt-1 text-idle">{tip}</p>}
+        </>
+      )}
+    </div>
   );
 }

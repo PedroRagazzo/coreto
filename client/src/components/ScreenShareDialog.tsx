@@ -4,7 +4,7 @@ import { useRealtime } from '../state/realtime';
 import { DialogActions, labelClass, Modal } from './Modal';
 
 const STORAGE_KEY = 'coreto.screenShare';
-const DEFAULTS: ScreenShareOptions = { height: 720, frameRate: 30, audio: true };
+const DEFAULTS: ScreenShareOptions = { height: 720, frameRate: 30, audio: true, priority: 'sharp', uploadMbps: 10 };
 
 const RESOLUTIONS: { value: ScreenShareOptions['height']; label: string }[] = [
   { value: 720, label: '720p' },
@@ -12,6 +12,11 @@ const RESOLUTIONS: { value: ScreenShareOptions['height']; label: string }[] = [
   { value: null, label: 'Original' },
 ];
 const FRAME_RATES: ScreenShareOptions['frameRate'][] = [15, 30, 60];
+const PRIORITIES: { value: ScreenShareOptions['priority']; label: string }[] = [
+  { value: 'sharp', label: 'Nitidez' },
+  { value: 'smooth', label: 'Fluidez' },
+];
+const UPLOADS: ScreenShareOptions['uploadMbps'][] = [5, 10, 20, 50];
 
 /** A última escolha fica no navegador, como conveniência. */
 function loadOptions(): ScreenShareOptions {
@@ -21,6 +26,8 @@ function loadOptions(): ScreenShareOptions {
       height: RESOLUTIONS.some((r) => r.value === saved?.height) ? saved!.height! : DEFAULTS.height,
       frameRate: FRAME_RATES.includes(saved?.frameRate as never) ? saved!.frameRate! : DEFAULTS.frameRate,
       audio: typeof saved?.audio === 'boolean' ? saved.audio : DEFAULTS.audio,
+      priority: PRIORITIES.some((p) => p.value === saved?.priority) ? saved!.priority! : DEFAULTS.priority,
+      uploadMbps: UPLOADS.includes(saved?.uploadMbps as never) ? saved!.uploadMbps! : DEFAULTS.uploadMbps,
     };
   } catch {
     return DEFAULTS;
@@ -79,6 +86,32 @@ export function ScreenShareDialog({ onClose }: { onClose: () => void }) {
           />
           <p className="mt-1.5 text-xs text-faint">
             60 fps para jogos e vídeos; 15 fps deixa texto e código mais nítidos com menos internet.
+          </p>
+        </fieldset>
+
+        <fieldset className="mt-4">
+          <legend className={labelClass}>Prioridade</legend>
+          <Segmented
+            name="prioridade"
+            options={PRIORITIES.map((p) => ({ key: p.value, label: p.label, selected: options.priority === p.value }))}
+            onSelect={(key) => setOptions((o) => ({ ...o, priority: key as ScreenShareOptions['priority'] }))}
+          />
+          <p className="mt-1.5 text-xs text-faint">
+            Nitidez mantém o texto legível e deixa cair quadros se a internet apertar. Fluidez mantém o movimento e deixa a imagem
+            perder resolução (jogos e vídeos).
+          </p>
+        </fieldset>
+
+        <fieldset className="mt-4">
+          <legend className={labelClass}>Upload da sua internet</legend>
+          <Segmented
+            name="upload"
+            options={UPLOADS.map((mbps) => ({ key: String(mbps), label: `${mbps} Mbps`, selected: options.uploadMbps === mbps }))}
+            onSelect={(key) => setOptions((o) => ({ ...o, uploadMbps: Number(key) as ScreenShareOptions['uploadMbps'] }))}
+          />
+          <p className="mt-1.5 text-xs text-faint">
+            Cada pessoa que assiste recebe uma cópia do vídeo, então este limite é dividido entre elas: quanto mais gente, menor a
+            resolução, mas a imagem continua nítida. Se não souber, deixe em 10 Mbps.
           </p>
         </fieldset>
 
