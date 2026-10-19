@@ -1,9 +1,10 @@
 import type { Id, VoiceParticipant } from '@shared/models';
-import { Activity, Eye, Maximize, Minimize, Monitor, MonitorOff, Volume2, VolumeX, X } from 'lucide-react';
+import { Activity, Eye, Maximize, Minimize, Monitor, MonitorOff, Settings2, Volume2, VolumeX, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { StreamStats } from '../lib/voice';
 import { useRealtime } from '../state/realtime';
 import { displayNameOf } from '../state/selectors';
+import { StreamSettingsDialog } from './StreamSettingsDialog';
 
 /** Selo vermelho "AO VIVO" de quem está transmitindo. */
 export function LiveBadge() {
@@ -42,6 +43,7 @@ export function StreamStage() {
   const [size, setSize] = useState<{ width: number; height: number } | null>(null);
   const [hasAudio, setHasAudio] = useState(false);
   const [showStats, setShowStats] = useState(false);
+  const [configuring, setConfiguring] = useState(false);
   const stats = useStreamStats(userId, showStats && live, actions.screenStats);
 
   // O som da tela pode chegar depois do vídeo, no mesmo fluxo.
@@ -102,6 +104,17 @@ export function StreamStage() {
             {size.width}×{size.height}
           </span>
         )}
+        {live && isMe && (
+          <button
+            type="button"
+            onClick={() => setConfiguring(true)}
+            title="Configurações da transmissão"
+            aria-label="Configurações da transmissão"
+            className="ml-auto rounded p-1.5 text-muted hover:bg-hover hover:text-fg"
+          >
+            <Settings2 size={18} />
+          </button>
+        )}
         {live && (
           <button
             type="button"
@@ -109,7 +122,7 @@ export function StreamStage() {
             aria-pressed={showStats}
             title="Estatísticas da transmissão"
             aria-label="Estatísticas da transmissão"
-            className={`ml-auto rounded p-1.5 hover:bg-hover ${showStats ? 'text-accent' : 'text-muted hover:text-fg'}`}
+            className={`${isMe ? '' : 'ml-auto'} rounded p-1.5 hover:bg-hover ${showStats ? 'text-accent' : 'text-muted hover:text-fg'}`}
           >
             <Activity size={18} />
           </button>
@@ -203,6 +216,7 @@ export function StreamStage() {
           </div>
         )}
       </div>
+      {configuring && live && <StreamSettingsDialog onClose={() => setConfiguring(false)} />}
     </>
   );
 }

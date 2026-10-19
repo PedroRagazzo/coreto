@@ -576,6 +576,10 @@ export interface RealtimeActions {
   /** Abre o seletor de tela e começa a transmitir. Resolve com erro ou `null` (também se a pessoa cancelar). */
   startScreenShare(options: ScreenShareOptions): Promise<string | null>;
   stopScreenShare(): void;
+  /** As opções da transmissão em andamento, ou `null` se você não está transmitindo. */
+  screenOptions(): ScreenShareOptions | null;
+  /** Muda a qualidade com a transmissão no ar; devolve as opções valendo, ou `null` se ela acabou. */
+  updateScreenOptions(patch: Partial<Pick<ScreenShareOptions, 'height' | 'frameRate' | 'priority' | 'uploadMbps'>>): Promise<ScreenShareOptions | null>;
   /** Como a transmissão (sua ou a que você assiste) está indo agora; `null` se não há dados. */
   screenStats(userId: Id): Promise<StreamStats | null>;
   /** Miniatura da tela de quem está ao vivo (JPEG em data URL); `null` se ainda não há. */
@@ -931,6 +935,14 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
         }
         dispatch({ type: 'stage', userId: stateRef.current.me?.id ?? null });
         return null;
+      },
+
+      screenOptions() {
+        return voiceRef.current?.screenOptions() ?? null;
+      },
+
+      updateScreenOptions(patch) {
+        return voiceRef.current?.updateScreen(patch) ?? Promise.resolve(null);
       },
 
       stopScreenShare() {

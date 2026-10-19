@@ -440,6 +440,13 @@ quantas pessoas estão assistindo (e quem, ao passar o mouse), volume do som da 
 prévia sem som e o contador "N assistindo" na barra de voz. Parar pelo botão do Coreto, pelo aviso do navegador ou
 saindo da chamada mostra "A transmissão terminou" para quem assistia.
 
+**Mudar a qualidade durante a transmissão:** quem transmite abre as **Configurações da transmissão** (engrenagem no
+palco da própria tela, na faixa da chamada ou no rodapé da visão da chamada) e troca resolução, quadros, prioridade e
+upload sem parar nem escolher a tela de novo. A captura passa a entregar a nova altura e os novos quadros
+(`applyConstraints`), a dica de prioridade vai para o codificador e o bitrate de cada espectador é recalculado
+(`setParameters`), sem renegociar: quem assiste só vê a imagem mudar. As mudanças entram numa fila, uma de cada vez. O
+som só se escolhe ao começar.
+
 O vídeo só vai para quem escolheu assistir, o que economiza a banda de quem transmite. O servidor só guarda
 `streaming` e `watching` de cada participante (`stream:start`, `stream:stop`, `stream:watch`, `stream:unwatch`) e quem
 transmite lê essa lista. Cada pessoa que assiste ganha um transceptor de vídeo na conexão direta (uma renegociação na

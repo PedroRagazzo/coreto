@@ -1,13 +1,15 @@
-import { Eye, Headphones, HeadphoneOff, Mic, MicOff, MonitorUp, MonitorX, PhoneOff, Video, VideoOff, X } from 'lucide-react';
+import { Eye, Headphones, HeadphoneOff, Mic, MicOff, MonitorUp, MonitorX, PhoneOff, Settings2, Video, VideoOff, X } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { useRealtime } from '../state/realtime';
 import { ScreenShareDialog } from './ScreenShareDialog';
+import { StreamSettingsDialog } from './StreamSettingsDialog';
 import { LiveBadge } from './StreamStage';
 
 /** Faixa acima do painel do usuário enquanto há uma chamada de voz ativa. */
 export function VoiceStatusBar() {
   const { state, actions } = useRealtime();
   const [choosingScreen, setChoosingScreen] = useState(false);
+  const [configuring, setConfiguring] = useState(false);
   const voice = state.myVoice;
   const me = state.me?.id;
   const viewers = voice.channelId ? (state.voice[voice.channelId] ?? []).filter((p) => p.watching === me).length : 0;
@@ -78,6 +80,15 @@ export function VoiceStatusBar() {
               </button>
               <button
                 type="button"
+                onClick={() => setConfiguring(true)}
+                title="Configurações da transmissão"
+                aria-label="Configurações da transmissão"
+                className="rounded-md p-1.5 text-muted hover:bg-hover hover:text-fg"
+              >
+                <Settings2 size={18} />
+              </button>
+              <button
+                type="button"
                 onClick={actions.stopScreenShare}
                 title="Parar de transmitir"
                 aria-label="Parar de transmitir"
@@ -118,6 +129,7 @@ export function VoiceStatusBar() {
         )}
       </div>
       {choosingScreen && <ScreenShareDialog onClose={() => setChoosingScreen(false)} />}
+      {configuring && voice.streaming && <StreamSettingsDialog onClose={() => setConfiguring(false)} />}
     </>
   );
 }

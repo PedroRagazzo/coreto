@@ -1,10 +1,11 @@
 import type { Id, VoiceParticipant } from '@shared/models';
-import { HeadphoneOff, Mic, MicOff, MonitorUp, PhoneOff, Video, VideoOff, Volume2, X } from 'lucide-react';
+import { HeadphoneOff, Mic, MicOff, MonitorUp, PhoneOff, Settings2, Video, VideoOff, Volume2, X } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useRealtime } from '../state/realtime';
 import { displayNameOf } from '../state/selectors';
 import { Avatar } from './Avatar';
 import { ScreenShareDialog } from './ScreenShareDialog';
+import { StreamSettingsDialog } from './StreamSettingsDialog';
 import { LiveBadge } from './StreamStage';
 import { useUserVolumeMenu } from './UserVolumeMenu';
 
@@ -16,6 +17,7 @@ import { useUserVolumeMenu } from './UserVolumeMenu';
 export function CallView() {
   const { state, actions } = useRealtime();
   const [choosingScreen, setChoosingScreen] = useState(false);
+  const [configuring, setConfiguring] = useState(false);
   const voice = state.myVoice;
   const room = voice.channelId ? (state.voice[voice.channelId] ?? []) : [];
   const me = state.me?.id;
@@ -70,6 +72,11 @@ export function CallView() {
         >
           <MonitorUp size={20} />
         </CallButton>
+        {voice.streaming && (
+          <CallButton label="Configurações da transmissão" onClick={() => setConfiguring(true)}>
+            <Settings2 size={20} />
+          </CallButton>
+        )}
         <CallButton
           label={voice.muted ? 'Ativar microfone' : 'Desativar microfone'}
           danger={voice.muted}
@@ -83,6 +90,7 @@ export function CallView() {
         </CallButton>
       </footer>
       {choosingScreen && <ScreenShareDialog onClose={() => setChoosingScreen(false)} />}
+      {configuring && voice.streaming && <StreamSettingsDialog onClose={() => setConfiguring(false)} />}
     </>
   );
 }
