@@ -9,6 +9,7 @@ const person = (userId: string, patch: Partial<VoiceParticipant> = {}): VoicePar
   deafened: false,
   video: false,
   streaming: false,
+  streamTitle: null,
   watching: null,
   ...patch,
 });

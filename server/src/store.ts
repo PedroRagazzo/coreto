@@ -52,6 +52,10 @@ const AVATAR_COLORS = ['#2bb39a', '#5b8def', '#b07de0', '#e5a54b', '#e06c75', '#
 export interface VoiceSession extends VoiceParticipant {
   spaceId: Id;
   socketId: string;
+  /** Miniatura mais recente da tela (JPEG em data URL), só na memória; vai sob demanda, nunca na lista da sala. */
+  streamPreview: string | null;
+  /** Quando a miniatura chegou (ms), para limitar o ritmo. */
+  streamPreviewAt: number;
 }
 
 export const toParticipant = ({
@@ -61,8 +65,18 @@ export const toParticipant = ({
   deafened,
   video,
   streaming,
+  streamTitle,
   watching,
-}: VoiceSession): VoiceParticipant => ({ userId, channelId, muted, deafened, video, streaming, watching });
+}: VoiceSession): VoiceParticipant => ({
+  userId,
+  channelId,
+  muted,
+  deafened,
+  video,
+  streaming,
+  streamTitle,
+  watching,
+});
 
 /** Um anexo do pedido não existe, é de outra pessoa ou já está em outra mensagem. */
 export class AttachmentUnavailableError extends Error {

@@ -34,6 +34,7 @@ contextBridge.exposeInMainWorld('coretoDesktop', {
   version: info.version,
   platform: info.platform,
   appAudio,
+  getCaptureName: () => ipcRenderer.invoke('desktop:capture-name'),
   getUpdateState: () => ipcRenderer.invoke('desktop:update-state'),
   checkForUpdates: () => ipcRenderer.invoke('desktop:check-updates'),
   installUpdate: () => ipcRenderer.send('desktop:install-update'),

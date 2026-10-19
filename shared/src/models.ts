@@ -121,6 +121,8 @@ export interface VoiceParticipant {
   video: boolean;
   /** Está compartilhando a tela ("ao vivo"). */
   streaming: boolean;
+  /** O que está sendo compartilhado ("Tela 1", o nome da janela); `null` fora da transmissão. */
+  streamTitle: string | null;
   /** De quem está assistindo a transmissão, na mesma sala. */
   watching: Id | null;
 }

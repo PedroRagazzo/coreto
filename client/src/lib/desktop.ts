@@ -39,6 +39,8 @@ export interface DesktopBridge {
   platform: string;
   /** Só no app de desktop do Windows com o helper de som por programa (0.5.0 em diante). */
   appAudio?: AppAudioBridge;
+  /** Nome da tela ou janela escolhida no seletor, para mostrar o que está sendo compartilhado. Ausente antes da 0.5.1. */
+  getCaptureName?(): Promise<string | null>;
   getUpdateState(): Promise<UpdateState>;
   checkForUpdates(): Promise<UpdateState>;
   /** Fecha o app, instala a versão baixada e abre de novo. */

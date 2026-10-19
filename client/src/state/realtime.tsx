@@ -578,6 +578,8 @@ export interface RealtimeActions {
   stopScreenShare(): void;
   /** Como a transmissão (sua ou a que você assiste) está indo agora; `null` se não há dados. */
   screenStats(userId: Id): Promise<StreamStats | null>;
+  /** Miniatura da tela de quem está ao vivo (JPEG em data URL); `null` se ainda não há. */
+  streamPreview(userId: Id): Promise<string | null>;
   /**
    * Assiste à transmissão de alguém, entrando no canal de voz dela se preciso.
    * Para você, abre a prévia. Falhas aparecem como aviso na barra de voz.
@@ -899,6 +901,11 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
         return voiceRef.current?.screenStats(userId) ?? Promise.resolve(null);
       },
 
+      async streamPreview(userId) {
+        const res = await socketRef.current?.emitWithAck('stream:preview:get', { userId });
+        return res?.ok ? res.data.image : null;
+      },
+
       async startScreenShare(options) {
         const voice = voiceRef.current;
         const socket = socketRef.current;
@@ -907,12 +914,13 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
         }
         let stream: MediaStream;
         let audioFailed: boolean;
+        let title: string;
         try {
-          ({ stream, audioFailed } = await voice.startScreen(options));
+          ({ stream, audioFailed, title } = await voice.startScreen(options));
         } catch (err) {
           return describeScreenError(err);
         }
-        const res = await socket.emitWithAck('stream:start');
+        const res = await socket.emitWithAck('stream:start', { title });
         if (!res.ok) {
           voice.stopScreen();
           return res.error;

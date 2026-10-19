@@ -20,12 +20,13 @@ const TYPES: Record<string, string> = {
 };
 
 /**
- * Política de conteúdo do site: só scripts próprios; imagens e mídia também de
+ * Política de conteúdo do site: só scripts próprios (e WebAssembly); imagens e mídia também de
  * `blob:` (prévias de anexos e vídeo da chamada); WebSocket para o socket.io.
  */
 const CONTENT_SECURITY_POLICY = [
   "default-src 'self'",
-  "script-src 'self'",
+  // 'wasm-unsafe-eval': só WebAssembly (o RNNoise do cancelamento de ruído); não libera eval() de texto.
+  "script-src 'self' 'wasm-unsafe-eval'",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
   "media-src 'self' blob:",

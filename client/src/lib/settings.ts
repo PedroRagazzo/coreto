@@ -29,6 +29,8 @@ export interface VoicePrefs {
   outputVolume: number;
   echoCancellation: boolean;
   noiseSuppression: boolean;
+  /** Cancelamento de ruído com IA (RNNoise), mais forte que o do navegador; quando ligado, substitui `noiseSuppression`. */
+  aiNoiseSuppression: boolean;
   autoGainControl: boolean;
   /** Ligado: o microfone fica sempre aberto. Desligado: só passa o que está acima de `inputSensitivity`. */
   autoSensitivity: boolean;
@@ -79,6 +81,7 @@ export const DEFAULT_SETTINGS: Settings = {
     outputVolume: 1,
     echoCancellation: true,
     noiseSuppression: true,
+    aiNoiseSuppression: true,
     autoGainControl: true,
     autoSensitivity: true,
     inputSensitivity: -50,
@@ -145,6 +148,7 @@ export function loadSettings(): Settings {
       outputVolume: clamp(v.outputVolume, 0, 1, d.voice.outputVolume),
       echoCancellation: bool(v.echoCancellation, d.voice.echoCancellation),
       noiseSuppression: bool(v.noiseSuppression, d.voice.noiseSuppression),
+      aiNoiseSuppression: bool(v.aiNoiseSuppression, d.voice.aiNoiseSuppression),
       autoGainControl: bool(v.autoGainControl, d.voice.autoGainControl),
       autoSensitivity: bool(v.autoSensitivity, d.voice.autoSensitivity),
       inputSensitivity: Math.round(
@@ -176,7 +180,8 @@ export function microphoneConstraints(prefs: VoicePrefs): MediaTrackConstraints 
   return {
     ...(prefs.inputDeviceId && { deviceId: { exact: prefs.inputDeviceId } }),
     echoCancellation: prefs.echoCancellation,
-    noiseSuppression: prefs.noiseSuppression,
+    // Com a IA ligada, só ela limpa o ruído: dois supressores em sequência estragam a voz.
+    noiseSuppression: prefs.noiseSuppression && !prefs.aiNoiseSuppression,
     autoGainControl: prefs.autoGainControl,
   };
 }

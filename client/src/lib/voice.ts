@@ -20,8 +20,10 @@ import {
   type VoicePrefs,
 } from './settings';
 import { AppAudioFeed } from './app-audio';
+import noiseSuppressorUrl from './noise-suppressor.worklet.js?worker&url';
 import { desktop } from './desktop';
 import type { AppSocket } from './socket';
+import { PreviewCapture } from './stream-preview';
 
 /** Volume (RMS, 0–1) acima do qual conta como fala. */
 const SPEAKING_THRESHOLD = 0.02;
@@ -104,16 +106,19 @@ export interface MicLevel {
 const GATE_WORKLET_URL = `${import.meta.env.BASE_URL}mic-gate.worklet.js`;
 
 /**
- * Microfone → ganho → porta de ruído → saída fixa. Trocar de microfone só troca a
+ * Microfone → ganho → (cancelamento de ruído com IA) → porta de ruído → saída fixa. Trocar de microfone só troca a
  * fonte: a faixa enviada às conexões continua a mesma, sem renegociar no meio da chamada.
  * A porta (sensibilidade de entrada) roda na thread de áudio, então continua firme
  * com a janela em segundo plano.
  */
 export class MicPipeline {
-  private readonly context = new AudioContext();
+  /** O RNNoise só trabalha a 48 kHz; o Chrome converte de/para a placa de som. */
+  private readonly context = new AudioContext({ sampleRate: 48000 });
   private readonly gain = this.context.createGain();
   private readonly output = this.context.createMediaStreamDestination();
   private gate: AudioWorkletNode | null = null;
+  private suppressor: AudioWorkletNode | null = null;
+  private aiEnabled = false;
   private source: MediaStreamAudioSourceNode | null = null;
   private raw: MediaStream | null = null;
   /** O que vai para as conexões e para o medidor de fala. */
@@ -136,14 +141,44 @@ export class MicPipeline {
       });
       gate.port.onmessage = (event: MessageEvent<{ level: number; open: boolean }>) =>
         onLevel?.({ db: linearToDb(event.data.level), open: event.data.open });
-      pipeline.gain.connect(gate).connect(pipeline.output);
+      gate.connect(pipeline.output);
       pipeline.gate = gate;
       pipeline.setSensitivity(prefs);
     } catch (err) {
       console.warn('[voz] sem porta de ruído; microfone sempre aberto', err);
-      pipeline.gain.connect(pipeline.output);
     }
+    await pipeline.setAiNoiseSuppression(prefs.aiNoiseSuppression);
     return pipeline;
+  }
+
+  /** Para onde o ganho manda o som: a porta de ruído, ou direto à saída se ela não carregou. */
+  private get tail(): AudioNode {
+    return this.gate ?? this.output;
+  }
+
+  /** Liga ou desliga o cancelamento de ruído com IA; se não carregar, o microfone segue sem ele. */
+  async setAiNoiseSuppression(enabled: boolean): Promise<void> {
+    if (enabled && !this.suppressor) {
+      try {
+        await this.context.audioWorklet.addModule(noiseSuppressorUrl);
+        this.suppressor = new AudioWorkletNode(this.context, 'noise-suppressor', {
+          numberOfInputs: 1,
+          numberOfOutputs: 1,
+          outputChannelCount: [1],
+        });
+      } catch (err) {
+        console.warn('[voz] sem cancelamento de ruído com IA', err);
+        enabled = false;
+      }
+    }
+    this.aiEnabled = enabled;
+    this.gain.disconnect();
+    this.suppressor?.disconnect();
+    if (enabled && this.suppressor) {
+      this.gain.connect(this.suppressor).connect(this.tail);
+    } else {
+      this.gain.connect(this.tail);
+    }
   }
 
   use(raw: MediaStream): void {
@@ -165,6 +200,7 @@ export class MicPipeline {
 
   close(): void {
     this.source?.disconnect();
+    this.suppressor?.port.postMessage('close');
     this.raw?.getTracks().forEach((track) => track.stop());
     this.stream.getTracks().forEach((track) => track.stop());
     void this.context.close();
@@ -248,6 +284,7 @@ const micChanged = (a: VoicePrefs, b: VoicePrefs) =>
   a.inputDeviceId !== b.inputDeviceId ||
   a.echoCancellation !== b.echoCancellation ||
   a.noiseSuppression !== b.noiseSuppression ||
+  a.aiNoiseSuppression !== b.aiNoiseSuppression ||
   a.autoGainControl !== b.autoGainControl;
 
 /** Qualidade da transmissão de tela, como no seletor do Discord. */
@@ -341,6 +378,17 @@ interface Peer {
 
 type Slot = 'screenVideo' | 'screenAudio' | 'cameraVideo';
 
+/**
+ * O nome do que está sendo compartilhado, para a lista da sala: no app de desktop vem do seletor
+ * ("Tela 1", o título da janela); no navegador, do rótulo da faixa, quando ele diz alguma coisa.
+ */
+async function captureTitle(video: MediaStreamTrack): Promise<string> {
+  const fromApp = await desktop?.getCaptureName?.().catch(() => null);
+  if (fromApp) return fromApp;
+  const label = video.label.trim();
+  return label && !/^(screen|window|web-contents-media-stream|browser):/i.test(label) ? label : 'Tela compartilhada';
+}
+
 export class VoiceManager {
   private localStream: MediaStream | null = null;
   private mic: MicPipeline | null = null;
@@ -353,7 +401,7 @@ export class VoiceManager {
   private deafened = false;
   private selfId: Id | null = null;
   private readonly detector: SpeakingDetector;
-  private screen: { stream: MediaStream; options: ScreenShareOptions; feed: AppAudioFeed | null } | null = null;
+  private screen: { stream: MediaStream; options: ScreenShareOptions; feed: AppAudioFeed | null; preview: PreviewCapture } | null = null;
   private camera: MediaStream | null = null;
   /** Fluxos fixos onde câmera e tela viajam; os ids são anunciados a cada pessoa. */
   private cameraCarrier = new MediaStream();
@@ -436,6 +484,7 @@ export class VoiceManager {
     this.prefs = next;
     if (this.mic) {
       if (next.inputVolume !== prev.inputVolume) this.mic.setVolume(next.inputVolume);
+      if (next.aiNoiseSuppression !== prev.aiNoiseSuppression) await this.mic.setAiNoiseSuppression(next.aiNoiseSuppression);
       if (next.autoSensitivity !== prev.autoSensitivity || next.inputSensitivity !== prev.inputSensitivity) {
         this.mic.setSensitivity(next);
       }
@@ -474,7 +523,7 @@ export class VoiceManager {
    * Abre o seletor de tela do navegador. Chame direto do clique (o navegador
    * exige um gesto). Ninguém recebe nada até `setScreenViewers` dizer quem assiste.
    */
-  async startScreen(options: ScreenShareOptions): Promise<{ stream: MediaStream; audioFailed: boolean }> {
+  async startScreen(options: ScreenShareOptions): Promise<{ stream: MediaStream; audioFailed: boolean; title: string }> {
     if (!this.localStream) throw new Error('Entre em um canal de voz para compartilhar a tela.');
     const constraints: MediaTrackConstraints = {
       frameRate: { ideal: options.frameRate, max: options.frameRate },
@@ -514,15 +563,17 @@ export class VoiceManager {
     video.addEventListener('ended', () => {
       if (this.screen?.stream === stream) this.events.onScreenEnded?.();
     });
-    this.screen = { stream, options, feed };
+    const preview = new PreviewCapture(stream, (image) => this.socket.emit('stream:preview', { image }));
+    this.screen = { stream, options, feed, preview };
     this.applyScreenViewers();
-    return { stream, audioFailed };
+    return { stream, audioFailed, title: await captureTitle(video) };
   }
 
   stopScreen(): void {
     if (!this.screen) return;
     this.screen.stream.getTracks().forEach((track) => track.stop());
     this.screen.feed?.close();
+    this.screen.preview.stop();
     this.screen = null;
     this.applyScreenViewers();
   }

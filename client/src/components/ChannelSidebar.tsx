@@ -9,6 +9,7 @@ import { LiveBadge } from './StreamStage';
 import { CreateChannelDialog } from './CreateChannelDialog';
 import { EditChannelDialog } from './EditChannelDialog';
 import { EditSpaceDialog } from './EditSpaceDialog';
+import { StreamPreviewCard } from './StreamPreviewCard';
 import { useUserVolumeMenu } from './UserVolumeMenu';
 
 export function ChannelSidebar() {
@@ -224,9 +225,12 @@ function VoiceChannelItem({ channel, onEdit }: ChannelItemProps) {
             const row = (
               <>
                 <Avatar name={name} color={user?.avatarColor ?? '#555'} size="xs" speaking={speaking} />
-                <span className={`flex-1 truncate text-left ${speaking ? 'text-fg' : ''}`}>
-                  {name}
-                  {speaking && <span className="sr-only"> (falando)</span>}
+                <span className={`min-w-0 flex-1 text-left ${speaking ? 'text-fg' : ''}`}>
+                  <span className="block truncate">
+                    {name}
+                    {speaking && <span className="sr-only"> (falando)</span>}
+                  </span>
+                  {p.streaming && p.streamTitle && <span className="block truncate text-xs text-faint">{p.streamTitle}</span>}
                 </span>
                 {p.streaming && <LiveBadge />}
                 {p.deafened ? (
@@ -244,16 +248,18 @@ function VoiceChannelItem({ channel, onEdit }: ChannelItemProps) {
                 onContextMenu={isMine && p.userId !== state.me?.id ? (e) => volumeMenu.open(e, p.userId, name) : undefined}
               >
                 {p.streaming ? (
-                  // Como no Discord: clicar em quem está ao vivo abre a transmissão.
-                  <button
-                    type="button"
-                    onClick={() => actions.watchStream(p.userId)}
-                    title={p.userId === state.me?.id ? 'Ver a prévia da sua tela' : `Assistir à tela de ${name}`}
-                    aria-pressed={state.stage === p.userId}
-                    className={`${rowClass} hover:bg-hover/60 hover:text-fg ${state.stage === p.userId ? 'bg-hover/60 text-fg' : ''}`}
+                  // Como no Discord: clicar em quem está ao vivo abre a transmissão; passar o mouse mostra a prévia.
+                  <LiveRow
+                    userId={p.userId}
+                    name={name}
+                    title={p.streamTitle}
+                    watchers={participants.filter((other) => other.watching === p.userId).length}
+                    staged={state.stage === p.userId}
+                    mine={p.userId === state.me?.id}
+                    className={rowClass}
                   >
                     {row}
-                  </button>
+                  </LiveRow>
                 ) : (
                   <div className={rowClass}>{row}</div>
                 )}
@@ -264,6 +270,49 @@ function VoiceChannelItem({ channel, onEdit }: ChannelItemProps) {
       )}
       {volumeMenu.menu}
     </li>
+  );
+}
+
+/** Linha de quem está ao vivo: abre a transmissão ao clicar e mostra a prévia ao passar o mouse ou focar. */
+function LiveRow({
+  userId,
+  name,
+  title,
+  watchers,
+  staged,
+  mine,
+  className,
+  children,
+}: {
+  userId: Id;
+  name: string;
+  title: string | null;
+  watchers: number;
+  staged: boolean;
+  mine: boolean;
+  className: string;
+  children: ReactNode;
+}) {
+  const { actions } = useRealtime();
+  const [anchor, setAnchor] = useState<DOMRect | null>(null);
+  const show = (element: HTMLElement) => setAnchor(element.getBoundingClientRect());
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => actions.watchStream(userId)}
+        onMouseEnter={(e) => show(e.currentTarget)}
+        onMouseLeave={() => setAnchor(null)}
+        onFocus={(e) => show(e.currentTarget)}
+        onBlur={() => setAnchor(null)}
+        aria-label={mine ? 'Ver a prévia da sua tela' : `Assistir à tela de ${name}`}
+        aria-pressed={staged}
+        className={`${className} hover:bg-hover/60 hover:text-fg ${staged ? 'bg-hover/60 text-fg' : ''}`}
+      >
+        {children}
+      </button>
+      {anchor && <StreamPreviewCard anchor={anchor} userId={userId} name={name} title={title} watchers={watchers} />}
+    </>
   );
 }
 

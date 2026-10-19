@@ -103,9 +103,20 @@ export function VoiceVideoSettings() {
           onChange={(v) => setVoice({ echoCancellation: v })}
         />
         <Toggle
+          label="Cancelamento de ruído com IA"
+          description="Tira teclado, ventilador, cliques e barulho de fundo, deixando só a voz (como o Krisp do Discord). Usa um pouco mais do processador; quando ligado, substitui a supressão de ruído abaixo."
+          checked={prefs.aiNoiseSuppression}
+          onChange={(v) => setVoice({ aiNoiseSuppression: v })}
+        />
+        <Toggle
           label="Supressão de ruído"
-          description="Reduz ventilador, teclado e barulho de fundo."
-          checked={prefs.noiseSuppression}
+          description={
+            prefs.aiNoiseSuppression
+              ? 'Desativada enquanto o cancelamento com IA está ligado.'
+              : 'Reduz ventilador, teclado e barulho de fundo (filtro do navegador).'
+          }
+          checked={prefs.noiseSuppression && !prefs.aiNoiseSuppression}
+          disabled={prefs.aiNoiseSuppression}
           onChange={(v) => setVoice({ noiseSuppression: v })}
         />
         <Toggle
@@ -239,7 +250,7 @@ function MicTest({ prefs, onChange }: { prefs: VoicePrefs; onChange: (patch: Par
       setLevel(null);
     };
     // Reabre ao trocar o microfone ou o processamento; volume e sensibilidade mudam sem reabrir (abaixo).
-  }, [running, prefs.inputDeviceId, prefs.echoCancellation, prefs.noiseSuppression, prefs.autoGainControl, prefs.outputDeviceId]);
+  }, [running, prefs.inputDeviceId, prefs.echoCancellation, prefs.noiseSuppression, prefs.aiNoiseSuppression, prefs.autoGainControl, prefs.outputDeviceId]);
 
   useEffect(() => pipelineRef.current?.setVolume(prefs.inputVolume), [prefs.inputVolume]);
   useEffect(() => pipelineRef.current?.setSensitivity(prefs), [prefs.autoSensitivity, prefs.inputSensitivity]);

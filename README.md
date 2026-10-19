@@ -313,7 +313,12 @@ guardado no aparelho (`localStorage`), porque o microfone do notebook não é o 
 - **Voz e vídeo:**
   - microfone, saída de áudio (onde o navegador permite escolher) e câmera;
   - volume do microfone (até 200%) e das chamadas;
-  - cancelamento de eco, supressão de ruído e controle automático de ganho;
+  - cancelamento de eco, controle automático de ganho e **cancelamento de ruído com IA** (ligado por padrão): o
+    [RNNoise](https://github.com/xiph/rnnoise), pelo pacote `@jitsi/rnnoise-wasm`, roda num AudioWorklet
+    (`client/src/lib/noise-suppressor.worklet.js`) e tira teclado, ventilador e barulho de fundo, deixando a voz
+    (atraso de ~10 ms). Com ele ligado, a supressão de ruído do navegador fica desligada, porque dois filtros em
+    sequência estragam a voz. O WebAssembly pede `'wasm-unsafe-eval'` no `script-src` do servidor (só WebAssembly, não
+    libera `eval` de texto);
   - **sensibilidade de entrada**, como no Discord: com a detecção automática ligada o microfone fica sempre aberto;
     desligada, só passa o que ultrapassa o nível escolhido (−100 a 0 dB), com a voz fechando devagar para não cortar o
     fim das frases. O teste do microfone mostra o nível em dB com a marca da sensibilidade (a barra fica cinza quando a
@@ -424,7 +429,12 @@ permissão `STREAM` da tela, como a permissão "Vídeo" do Discord.
 
 Funciona como o "Go Live" do Discord. Dentro de uma sala de voz, **Compartilhar tela** abre a escolha de qualidade
 (720p, 1080p ou original; 15, 30 ou 60 fps; com ou sem som). Depois disso, o próprio navegador pergunta qual tela,
-janela ou aba compartilhar. Quem transmite ganha o selo **AO VIVO** na lista da sala; os outros clicam no nome para
+janela ou aba compartilhar. Quem transmite ganha o selo **AO VIVO** na lista da sala, com o nome do que está sendo compartilhado ("Tela 1", o
+título da janela; no app de desktop a partir da 0.5.1) embaixo do nome. Passar o mouse (ou focar) sobre a pessoa abre
+uma **prévia**: uma miniatura da tela, o que é, e quantos assistem, sem precisar assistir. A miniatura (JPEG de até
+320×180) é tirada por quem transmite a cada ~8 s e enviada ao servidor (`stream:preview`), que guarda só a mais
+recente, na memória, e a entrega sob demanda (`stream:preview:get`) a quem pode entrar no canal; ela nunca vai na lista
+da sala. Os outros clicam no nome para
 assistir, o que também os coloca na chamada se ainda não estiverem nela. A transmissão abre no painel central com
 quantas pessoas estão assistindo (e quem, ao passar o mouse), volume do som da tela e tela cheia. Quem transmite vê uma
 prévia sem som e o contador "N assistindo" na barra de voz. Parar pelo botão do Coreto, pelo aviso do navegador ou

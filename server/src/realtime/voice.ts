@@ -18,6 +18,23 @@ const MAX_SDP_LENGTH = 100_000;
 const MAX_STREAM_ID_LENGTH = 100;
 const isStreamId = (value: unknown) => typeof value === 'string' && value.length > 0 && value.length <= MAX_STREAM_ID_LENGTH;
 
+const MAX_STREAM_TITLE_LENGTH = 100;
+/** Miniaturas de 320×180 em JPEG ficam em ~10 a 30 KB; 120 KB é folga, e o ritmo é limitado. */
+const MAX_PREVIEW_LENGTH = 120_000;
+const MIN_PREVIEW_INTERVAL_MS = 2000;
+const PREVIEW_PATTERN = /^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/;
+
+const isPreviewImage = (value: unknown): value is string =>
+  typeof value === 'string' && value.length <= MAX_PREVIEW_LENGTH && PREVIEW_PATTERN.test(value);
+
+/** O nome do que é compartilhado, sem espaços sobrando; vazio ou inválido vira `null`. */
+function cleanStreamTitle(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  // eslint-disable-next-line no-control-regex
+  const title = value.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, MAX_STREAM_TITLE_LENGTH);
+  return title || null;
+}
+
 function isSignal(value: unknown): value is SignalPayload {
   if (typeof value !== 'object' || value === null) return false;
   const signal = value as Partial<Record<string, unknown>>;
@@ -86,8 +103,11 @@ export function registerVoice(io: IO, socket: AppSocket, store: Store, ice: IceC
       deafened: false,
       video: false,
       streaming: false,
+      streamTitle: null,
       watching: null,
       socketId: socket.id,
+      streamPreview: null,
+      streamPreviewAt: 0,
     });
     void socket.join(rooms.voice(channel.id));
     broadcastRoster(io, store, channel.spaceId, channel.id);
@@ -126,14 +146,19 @@ export function registerVoice(io: IO, socket: AppSocket, store: Store, ice: IceC
     ack({ ok: true, data: null });
   });
 
-  socket.on('stream:start', (ack) => {
+  // Versões antigas do site mandavam só o `ack`; aceitamos as duas formas.
+  socket.on('stream:start', (req, maybeAck) => {
+    const legacy = typeof req === 'function';
+    const ack = (legacy ? req : maybeAck) as typeof maybeAck;
     if (!isFunction(ack)) return;
     const session = mySession();
     if (!session) return ack({ ok: false, error: 'Entre em um canal de voz para compartilhar a tela.' });
     const channel = channelWithPermission(store, userId, session.channelId, 'voice', Permission.STREAM);
     if (!channel) return ack({ ok: false, error: 'Você não tem permissão para compartilhar a tela neste canal.' });
-    if (!session.streaming) {
+    const title = cleanStreamTitle(legacy ? null : req?.title);
+    if (!session.streaming || session.streamTitle !== title) {
       session.streaming = true;
+      session.streamTitle = title;
       broadcastRoster(io, store, session.spaceId, session.channelId);
     }
     ack({ ok: true, data: null });
@@ -143,8 +168,29 @@ export function registerVoice(io: IO, socket: AppSocket, store: Store, ice: IceC
     const session = mySession();
     if (!session?.streaming) return;
     session.streaming = false;
+    session.streamTitle = null;
+    session.streamPreview = null;
     stopWatchersOf(store, session);
     broadcastRoster(io, store, session.spaceId, session.channelId);
+  });
+
+  socket.on('stream:preview', (req) => {
+    const session = mySession();
+    if (!session?.streaming || !isPreviewImage(req?.image)) return;
+    const now = Date.now();
+    if (now - session.streamPreviewAt < MIN_PREVIEW_INTERVAL_MS) return;
+    session.streamPreview = req.image;
+    session.streamPreviewAt = now;
+  });
+
+  socket.on('stream:preview:get', (req, ack) => {
+    if (!isFunction(ack)) return;
+    const streamer = typeof req?.userId === 'string' ? store.voice.get(req.userId) : undefined;
+    // Quem pode entrar no canal vê a prévia (a lista da sala já mostra quem está ao vivo), mesmo sem estar na chamada.
+    if (!streamer?.streaming || !channelWithPermission(store, userId, streamer.channelId, 'voice', Permission.CONNECT)) {
+      return ack({ ok: false, error: 'Essa transmissão não está disponível.' });
+    }
+    ack({ ok: true, data: { image: streamer.streamPreview } });
   });
 
   socket.on('stream:watch', (req, ack) => {

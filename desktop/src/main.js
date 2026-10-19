@@ -208,6 +208,7 @@ function registerBridge() {
   ipcMain.on('desktop:app-audio-stop', (event, id) => {
     if (fromCoreto(event) && typeof id === 'number') stopAppAudio(id);
   });
+  ipcMain.handle('desktop:capture-name', (event) => (fromCoreto(event) && captureName ? captureName : null));
   ipcMain.handle('desktop:get-close-to-tray', (event) => (fromCoreto(event) ? prefs.closeToTray : null));
   ipcMain.handle('desktop:set-close-to-tray', (event, enabled) => {
     if (!fromCoreto(event)) return null;
@@ -233,6 +234,8 @@ const FRAME_BYTES = 4;
 /** @type {{ id: number; child: import('node:child_process').ChildProcess } | null} */
 let appAudio = null;
 let appAudioCounter = 0;
+/** Nome da tela ou janela escolhida por último no seletor, para a lista da sala mostrar o que está sendo compartilhado. */
+let captureName = '';
 
 /** @param {number} id */
 function stopAppAudio(id = appAudio?.id ?? 0) {
@@ -519,6 +522,7 @@ function configureSession() {
     if (!id) return deny();
     const [source] = (await desktopCapturer.getSources({ types: ['screen', 'window'] })).filter((s) => s.id === id);
     if (!source) return deny();
+    captureName = source.name;
     if (!request.audioRequested) {
       stopAppAudio();
       return callback({ video: source });

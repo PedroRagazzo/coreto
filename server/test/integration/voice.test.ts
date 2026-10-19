@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { VoiceParticipant } from '../../../shared/src/models.js';
 import { Permission } from '../../../shared/src/permissions.js';
 import type { SignalPayload } from '../../../shared/src/protocol.js';
@@ -130,8 +130,9 @@ describe.skipIf(!hasTestDatabase)('salas de voz', () => {
       const bruno = await inRoom('Bruno', 'Sala de estar');
 
       const live = roster(bruno.client, (list) => find(list, ana.client)?.streaming === true);
-      ok(await ana.client.socket.emitWithAck('stream:start'));
-      await live;
+      ok(await ana.client.socket.emitWithAck('stream:start', { title: '  Fortnite   ' }));
+      // O nome do que é compartilhado chega limpo para quem está na sala.
+      expect(find(await live, ana.client)?.streamTitle).toBe('Fortnite');
 
       const watching = roster(ana.client, (list) => find(list, bruno.client)?.watching === ana.client.user.id);
       ok(await bruno.client.socket.emitWithAck('stream:watch', { userId: ana.client.user.id }));
@@ -142,10 +143,68 @@ describe.skipIf(!hasTestDatabase)('salas de voz', () => {
       expect(find(await ended, bruno.client)?.watching).toBeNull();
     });
 
+    describe('prévia da transmissão', () => {
+      const JPEG = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBD';
+
+      it('guarda a miniatura mais recente e a entrega a quem pede, sem pôr a imagem na lista da sala', async () => {
+        const ana = await inRoom('Ana', 'Sala de estar');
+        const bruno = await inRoom('Bruno', 'Sala de estar');
+        const { userId } = { userId: ana.client.user.id };
+
+        expect((await bruno.client.socket.emitWithAck('stream:preview:get', { userId })).ok).toBe(false);
+        ok(await ana.client.socket.emitWithAck('stream:start', { title: 'Tela 1' }));
+        expect(await bruno.client.socket.emitWithAck('stream:preview:get', { userId })).toEqual({
+          ok: true,
+          data: { image: null },
+        });
+
+        ana.client.socket.emit('stream:preview', { image: JPEG });
+        await vi.waitFor(async () => {
+          expect(await bruno.client.socket.emitWithAck('stream:preview:get', { userId })).toEqual({
+            ok: true,
+            data: { image: JPEG },
+          });
+        });
+
+        // Parar a transmissão apaga a miniatura e a prévia deixa de existir.
+        ana.client.socket.emit('stream:stop');
+        await vi.waitFor(async () => {
+          expect((await bruno.client.socket.emitWithAck('stream:preview:get', { userId })).ok).toBe(false);
+        });
+      });
+
+      it('ignora miniaturas que não são JPEG, e quem não está ao vivo não manda nenhuma', async () => {
+        const ana = await inRoom('Ana', 'Sala de estar');
+        const bruno = await inRoom('Bruno', 'Sala de estar');
+        const { userId } = { userId: ana.client.user.id };
+
+        ana.client.socket.emit('stream:preview', { image: JPEG }); // ainda não está ao vivo
+        ok(await ana.client.socket.emitWithAck('stream:start', { title: 'Tela 1' }));
+        ana.client.socket.emit('stream:preview', { image: 'data:image/svg+xml;base64,PHN2Zz4=' });
+        ana.client.socket.emit('stream:preview', { image: `data:image/jpeg;base64,${'A'.repeat(200_000)}` });
+        ana.client.socket.emit('stream:preview', { image: 'data:image/jpeg;base64,<script>' });
+        // Dá tempo de o servidor processar (eventos do mesmo socket chegam em ordem).
+        expect(await bruno.client.socket.emitWithAck('stream:preview:get', { userId })).toEqual({
+          ok: true,
+          data: { image: null },
+        });
+      });
+
+      it('só quem pode entrar no canal vê a prévia', async () => {
+        const ana = await inRoom('Ana', 'Sala de estar');
+        const fora = await server.connect('Fora');
+        ok(await ana.client.socket.emitWithAck('stream:start', { title: 'Tela 1' }));
+        // "Fora" ainda não abriu o espaço, mas todo espaço é público: a permissão vem do canal.
+        await joinDemoSpace(fora);
+        expect((await fora.socket.emitWithAck('stream:preview:get', { userId: ana.client.user.id })).ok).toBe(true);
+        expect((await fora.socket.emitWithAck('stream:preview:get', { userId: 'ninguem' })).ok).toBe(false);
+      });
+    });
+
     it('quem sai da sala ao vivo também encerra a transmissão para quem assistia', async () => {
       const ana = await inRoom('Ana', 'Sala de estar');
       const bruno = await inRoom('Bruno', 'Sala de estar');
-      ok(await ana.client.socket.emitWithAck('stream:start'));
+      ok(await ana.client.socket.emitWithAck('stream:start', { title: 'Tela 1' }));
       ok(await bruno.client.socket.emitWithAck('stream:watch', { userId: ana.client.user.id }));
 
       const cleared = roster(bruno.client, (list) => !find(list, ana.client) && find(list, bruno.client)?.watching === null);
@@ -155,14 +214,14 @@ describe.skipIf(!hasTestDatabase)('salas de voz', () => {
 
     it('recusa transmitir fora de uma sala e assistir a quem não está ao vivo, a si mesmo ou em outra sala', async () => {
       const fora = await server.connect('Fora');
-      expect((await fora.socket.emitWithAck('stream:start')).ok).toBe(false);
+      expect((await fora.socket.emitWithAck('stream:start', { title: 'Tela 1' })).ok).toBe(false);
 
       const ana = await inRoom('Ana', 'Sala de estar');
       const bruno = await inRoom('Bruno', 'Sala de estar');
       const carla = await inRoom('Carla', 'Pareamento');
       expect((await bruno.client.socket.emitWithAck('stream:watch', { userId: ana.client.user.id })).ok).toBe(false);
 
-      ok(await ana.client.socket.emitWithAck('stream:start'));
+      ok(await ana.client.socket.emitWithAck('stream:start', { title: 'Tela 1' }));
       expect((await ana.client.socket.emitWithAck('stream:watch', { userId: ana.client.user.id })).ok).toBe(false);
       expect((await carla.client.socket.emitWithAck('stream:watch', { userId: ana.client.user.id })).ok).toBe(false);
       expect((await fora.socket.emitWithAck('stream:watch', { userId: ana.client.user.id })).ok).toBe(false);
@@ -179,7 +238,7 @@ describe.skipIf(!hasTestDatabase)('salas de voz', () => {
       const again = await server.connectWithToken(ana.client.token);
       await joinDemoSpace(again);
       ok(await again.socket.emitWithAck('voice:join', { channelId: sala.id }));
-      expect(await again.socket.emitWithAck('stream:start')).toEqual({
+      expect(await again.socket.emitWithAck('stream:start', { title: 'Tela 1' })).toEqual({
         ok: false,
         error: 'Você não tem permissão para compartilhar a tela neste canal.',
       });

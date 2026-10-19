@@ -190,9 +190,13 @@ export interface ClientToServerEvents {
   /** Liga ou desliga a câmera na sala em que está; ligar exige STREAM. */
   'voice:video': (req: { enabled: boolean }, ack: (res: Ack<null>) => void) => void;
   'voice:signal': (req: { to: Id; signal: SignalPayload }) => void;
-  /** Começa a compartilhar a tela na sala em que está; exige STREAM. */
-  'stream:start': (ack: (res: Ack<null>) => void) => void;
+  /** Começa a compartilhar a tela na sala em que está; exige STREAM. `title` é o que está sendo compartilhado. */
+  'stream:start': (req: { title: string }, ack: (res: Ack<null>) => void) => void;
   'stream:stop': () => void;
+  /** Quem transmite manda, de tempos em tempos, uma miniatura da tela (JPEG em data URL) para a prévia da lista. */
+  'stream:preview': (req: { image: string }) => void;
+  /** A miniatura mais recente da transmissão de alguém da sala; `null` se ainda não chegou nenhuma. */
+  'stream:preview:get': (req: { userId: Id }, ack: (res: Ack<{ image: string | null }>) => void) => void;
   /** Assiste à transmissão de alguém da mesma sala (uma de cada vez). */
   'stream:watch': (req: { userId: Id }, ack: (res: Ack<null>) => void) => void;
   'stream:unwatch': () => void;
