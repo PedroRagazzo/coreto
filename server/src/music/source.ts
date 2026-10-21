@@ -8,7 +8,7 @@ import type { NewTrack, Track } from './queue.js';
 /** Erro com mensagem pronta para mostrar no chat. */
 export class MusicError extends Error {}
 
-/** Áudio aberto: PCM de 16 bits, mono, 48 kHz (o que o WebRTC pede), mais quem para tudo. */
+/** Áudio aberto: PCM de 16 bits, estéreo (canais intercalados), 48 kHz (o que o WebRTC pede), mais quem para tudo. */
 export interface AudioHandle {
   pcm: Readable;
   /** Interrompe o download e a conversão. */
@@ -24,5 +24,7 @@ export interface MusicSource {
 }
 
 export const SAMPLE_RATE = 48000;
-/** Bytes de 10 ms de áudio mono de 16 bits: o tamanho do quadro que o WebRTC consome. */
-export const FRAME_BYTES = (SAMPLE_RATE / 100) * 2;
+/** Esquerdo e direito: a música toca em estéreo. */
+export const CHANNELS = 2;
+/** Bytes de 10 ms de áudio estéreo de 16 bits: o tamanho do quadro que o WebRTC consome. */
+export const FRAME_BYTES = (SAMPLE_RATE / 100) * 2 * CHANNELS;

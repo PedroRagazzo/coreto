@@ -6,12 +6,12 @@ import { makeHuman, type Human } from '../support/voice-peer.js';
 const BOT = 'bot-musica';
 const HUMAN = 'zz-humano';
 
-/** 10 ms de um tom de 440 Hz, contínuo entre os quadros. */
+/** 10 ms de um tom de 440 Hz só no canal esquerdo (o direito mudo), estéreo intercalado, contínuo entre os quadros. */
 function toneFrames() {
   let t = 0;
   return () => {
-    const samples = new Int16Array(480);
-    for (let i = 0; i < samples.length; i++) samples[i] = Math.round(8000 * Math.sin((2 * Math.PI * 440 * t++) / 48000));
+    const samples = new Int16Array(960);
+    for (let i = 0; i < samples.length; i += 2) samples[i] = Math.round(8000 * Math.sin((2 * Math.PI * 440 * t++) / 48000));
     return samples;
   };
 }
@@ -32,7 +32,7 @@ describe('BotVoice (WebRTC do bot de música)', () => {
     for (const fn of cleanup.splice(0)) fn();
   });
 
-  async function setup() {
+  async function setup(options: { stereo?: boolean } = {}) {
     const wrtc = await loadWrtc();
     let human: Human;
     const bot = new BotVoice({
@@ -42,7 +42,7 @@ describe('BotVoice (WebRTC do bot de música)', () => {
       iceTransportPolicy: 'all',
       sendSignal: (_to, signal) => human.receive(signal),
     });
-    human = makeHuman(wrtc, { selfId: HUMAN, botId: BOT }, (signal) => bot.handleSignal(HUMAN, signal));
+    human = makeHuman(wrtc, { selfId: HUMAN, botId: BOT }, (signal) => bot.handleSignal(HUMAN, signal), options);
     cleanup.push(() => human.close(), () => bot.close());
     const next = toneFrames();
     const timer = setInterval(() => bot.pushFrame(next()), 10);
@@ -57,6 +57,25 @@ describe('BotVoice (WebRTC do bot de música)', () => {
     const { peak, sampleRate } = human.stats();
     expect(sampleRate).toBe(48000);
     expect(peak).toBeGreaterThan(4000); // o tom de 440 Hz passou pelo Opus
+  }, 15_000);
+
+  it('manda estéreo de verdade: o esquerdo chega com o tom e o direito, mudo', async () => {
+    const { bot, human } = await setup();
+    bot.join([HUMAN]);
+    await until(() => human.stats().frames > 80);
+    const { channels, peakLeft, peakRight } = human.stats();
+    expect(channels).toBe(2);
+    expect(peakLeft).toBeGreaterThan(4000);
+    expect(peakRight).toBeLessThan(300);
+  }, 15_000);
+
+  it('quem não pede estéreo no SDP recebe a música em mono, sem quebrar', async () => {
+    const { bot, human } = await setup({ stereo: false });
+    bot.join([HUMAN]);
+    await until(() => human.stats().frames > 80);
+    const { channels, peak } = human.stats();
+    expect(channels).toBe(1);
+    expect(peak).toBeGreaterThan(1500); // o tom do canal esquerdo passa misturado (metade do volume)
   }, 15_000);
 
   it('atende quem liga depois (quem chega na sala liga para o bot)', async () => {

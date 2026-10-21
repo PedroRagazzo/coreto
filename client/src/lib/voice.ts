@@ -10,6 +10,7 @@
 // que quem recebe sabe qual vídeo é a câmera e qual é a tela.
 
 import type { Id } from '@shared/models';
+import { withStereoOpus } from '@shared/opus-sdp';
 import type { IceServer, SignalPayload } from '@shared/protocol';
 import type { ScreenPublishOptions, SfuSession } from './sfu';
 import { resolutionScale, viewerBitrate } from '@shared/stream-quality';
@@ -382,6 +383,8 @@ export interface VoiceEvents {
   onRemoteCamera?: (userId: Id, stream: MediaStream | null) => void;
   /** Você parou de compartilhar pelo próprio navegador (botão "Parar de compartilhar"). */
   onScreenEnded?: () => void;
+  /** Esta pessoa é um robô (o bot de música)? Com ele, a conexão pede áudio em estéreo e com mais qualidade. */
+  isBot?: (userId: Id) => boolean;
 }
 
 interface Peer {
@@ -1070,7 +1073,7 @@ export class VoiceManager {
     pc.onnegotiationneeded = async () => {
       try {
         peer.makingOffer = true;
-        await pc.setLocalDescription();
+        await this.describeLocally(peerId, pc);
         this.sendDescription(peerId, pc);
       } catch (err) {
         console.warn('[voz] falha ao negociar com', peerId, err);
@@ -1117,6 +1120,17 @@ export class VoiceManager {
     }
   }
 
+  /**
+   * O mesmo que `pc.setLocalDescription()` (oferta ou resposta, conforme o estado). Com o bot de música, o SDP
+   * pede Opus em estéreo e a 128 kbps: sem isso o navegador decodifica a música em mono. Com as pessoas, a voz
+   * continua mono (pedir estéreo dobraria o envio do microfone à toa).
+   */
+  private async describeLocally(peerId: Id, pc: RTCPeerConnection): Promise<void> {
+    if (!this.events.isBot?.(peerId)) return pc.setLocalDescription();
+    const description = pc.signalingState === 'have-remote-offer' ? await pc.createAnswer() : await pc.createOffer();
+    await pc.setLocalDescription({ type: description.type, sdp: withStereoOpus(description.sdp ?? '') });
+  }
+
   private addLocalAudio(peer: Peer): void {
     const stream = this.localStream;
     stream?.getAudioTracks().forEach((track) => peer.pc.addTrack(track, stream));
@@ -1142,7 +1156,7 @@ export class VoiceManager {
           // transceptor que a oferta criou (antes disso, criaria outro e renegociaria à toa).
           const first = !peer.sending;
           if (first) this.addLocalAudio(peer);
-          await pc.setLocalDescription();
+          await this.describeLocally(from, pc);
           this.sendDescription(from, pc);
           if (first) {
             this.applyScreenViewers();

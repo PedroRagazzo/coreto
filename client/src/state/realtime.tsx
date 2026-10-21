@@ -1128,6 +1128,7 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
       onRemoteScreen: (userId, stream) => dispatch({ type: 'screen:remote', userId, stream }),
       onRemoteCamera: (userId, stream) => dispatch({ type: 'camera:remote', userId, stream }),
       onScreenEnded: () => actions.stopScreenShare(),
+      isBot: (userId) => stateRef.current.users[userId]?.isBot === true,
     });
     socketRef.current = socket;
     voiceRef.current = voice;

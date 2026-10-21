@@ -8,7 +8,7 @@ import type { MusicConfig } from './config.js';
 import { CookieJar } from './cookies.js';
 import { youtubePlaylistUrl, youtubeVideoUrl, type MusicRequest } from './links.js';
 import type { NewTrack, Track } from './queue.js';
-import { MusicError, type AudioHandle, type MusicSource } from './source.js';
+import { CHANNELS, MusicError, type AudioHandle, type MusicSource } from './source.js';
 import { readSpotify, type SpotifyCollection } from './spotify.js';
 
 const MAX_JSON_BYTES = 30 * 1024 * 1024;
@@ -161,7 +161,7 @@ export class YtDlpSource implements MusicSource {
     });
     const ffmpeg = spawn(
       this.config.ffmpegPath,
-      ['-hide_banner', '-loglevel', 'error', '-nostdin', '-i', 'pipe:0', '-vn', '-f', 's16le', '-acodec', 'pcm_s16le', '-ar', '48000', '-ac', '1', 'pipe:1'],
+      ['-hide_banner', '-loglevel', 'error', '-nostdin', '-i', 'pipe:0', '-vn', '-f', 's16le', '-acodec', 'pcm_s16le', '-ar', '48000', '-ac', String(CHANNELS), 'pipe:1'],
       { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true },
     );
     ytdlp.stdout.pipe(ffmpeg.stdin);

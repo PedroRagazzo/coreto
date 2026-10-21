@@ -6,7 +6,7 @@
 
 import type { Id } from '../../../shared/src/models.js';
 import type { IceCandidate, IceServer, SessionDescription, SignalPayload } from '../../../shared/src/protocol.js';
-import { SAMPLE_RATE } from './source.js';
+import { CHANNELS, SAMPLE_RATE } from './source.js';
 
 // Só o que usamos do @roamhq/wrtc, para não puxar a biblioteca "DOM" para o servidor.
 interface WrtcTrack {
@@ -85,10 +85,16 @@ export class BotVoice {
     for (const id of peerIds) this.attach(this.connect(id));
   }
 
-  /** Um quadro de 10 ms (480 amostras, mono, 48 kHz) para todo mundo. */
+  /** Um quadro de 10 ms (480 amostras por canal, estéreo intercalado, 48 kHz) para todo mundo. */
   pushFrame(samples: Int16Array): void {
     if (this.closed || this.peers.size === 0) return;
-    this.source.onData({ samples, sampleRate: SAMPLE_RATE, bitsPerSample: 16, channelCount: 1, numberOfFrames: samples.length });
+    this.source.onData({
+      samples,
+      sampleRate: SAMPLE_RATE,
+      bitsPerSample: 16,
+      channelCount: CHANNELS,
+      numberOfFrames: samples.length / CHANNELS,
+    });
   }
 
   handleSignal(from: Id, signal: SignalPayload): void {

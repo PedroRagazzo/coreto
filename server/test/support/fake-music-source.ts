@@ -1,11 +1,11 @@
 import { Readable } from 'node:stream';
 import type { MusicRequest } from '../../src/music/links.js';
 import type { NewTrack, Track } from '../../src/music/queue.js';
-import { MusicError, type AudioHandle, type MusicSource } from '../../src/music/source.js';
+import { FRAME_BYTES, MusicError, type AudioHandle, type MusicSource } from '../../src/music/source.js';
 
 /**
- * Um "YouTube" de mentira: resolve pedidos sem rede e entrega um tom de 440 Hz em PCM, tão rápido
- * quanto o bot consumir. Pedidos: "erro" não é achado; uma fonte "quebrada" falha ao tocar.
+ * Um "YouTube" de mentira: resolve pedidos sem rede e entrega um tom de 440 Hz em PCM estéreo (só no
+ * canal esquerdo; o direito fica mudo), tão rápido quanto o bot consumir. Pedidos: "erro" não é achado; uma fonte "quebrada" falha ao tocar.
  */
 export class FakeMusicSource implements MusicSource {
   readonly opened: string[] = [];
@@ -45,8 +45,8 @@ export class FakeMusicSource implements MusicSource {
       read() {
         if (stopped || produced >= totalFrames) return void this.push(null);
         // 100 ms por vez, como um ffmpeg entregaria.
-        const chunk = Buffer.alloc(10 * 960);
-        for (let i = 0; i < chunk.length / 2; i++) chunk.writeInt16LE(Math.round(8000 * Math.sin((2 * Math.PI * 440 * t++) / 48000)), i * 2);
+        const chunk = Buffer.alloc(10 * FRAME_BYTES);
+        for (let i = 0; i < chunk.length / 4; i++) chunk.writeInt16LE(Math.round(8000 * Math.sin((2 * Math.PI * 440 * t++) / 48000)), i * 4);
         produced += 10;
         this.push(chunk);
       },
@@ -57,7 +57,7 @@ export class FakeMusicSource implements MusicSource {
         stopped = true;
         pcm.push(null);
       },
-      finished: new Promise((resolve) => pcm.on('end', () => resolve({ bytes: produced * 960, error: null }))),
+      finished: new Promise((resolve) => pcm.on('end', () => resolve({ bytes: produced * FRAME_BYTES, error: null }))),
     };
   }
 }

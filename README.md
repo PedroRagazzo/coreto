@@ -545,6 +545,8 @@ faixa da chamada aparece também uma minifaixa com a música e os botões de pau
 escrevem no chat. Por baixo, o servidor manda `music:state` a todos da sala a cada mudança (e a quem entra depois), e o
 painel pede com `music:play` e controla com `music:control`, com as mesmas regras do chat.
 
+**Estéreo.** A música toca em estéreo, em Opus a até 128 kbps. O Opus do WebRTC só usa estéreo se quem recebe pedir (`stereo=1` no SDP), então o site ajusta o SDP da conexão com o robô (`shared/src/opus-sdp.ts`); com as pessoas a voz continua mono. Um navegador que não pedisse estéreo ouviria a música em mono, sem quebrar.
+
 Só quem está num canal de voz usa os comandos, e só quem está na sala do robô controla (pular, pausar...). Ele toca
 numa sala por vez. Sem ninguém na sala por 1 minuto, ou com a fila vazia por 2 minutos (`MUSIC_IDLE_SECONDS`), ele sai.
 Na lista da sala ele aparece com o que está tocando embaixo do nome, e o botão direito nele ajusta o volume só para você,

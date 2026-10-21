@@ -1,4 +1,5 @@
 import type { SignalPayload } from '../../../shared/src/protocol.js';
+import { withStereoOpus } from '../../../shared/src/opus-sdp.js';
 import type { Wrtc } from '../../src/music/bot-voice.js';
 
 // Um "navegador" de mentira, com as mesmas regras de negociação do cliente, só para ver se o bot
@@ -7,13 +8,23 @@ export interface Human {
   receive(signal: SignalPayload): void;
   /** Liga para o bot, como quem entra numa sala onde ele já está. */
   callBot(): void;
-  stats(): { frames: number; peak: number; sampleRate: number };
+  /** `channels` é o que o decodificador entregou; os picos por canal só existem em estéreo (senão ficam em 0). */
+  stats(): { frames: number; peak: number; sampleRate: number; channels: number; peakLeft: number; peakRight: number };
   close(): void;
 }
 
-export function makeHuman(wrtc: Wrtc, ids: { selfId: string; botId: string }, toBot: (signal: SignalPayload) => void): Human {
+/**
+ * `stereo`: como o cliente, pede estéreo ao bot no SDP (com `false`, é um navegador antigo que decodifica em mono).
+ */
+export function makeHuman(
+  wrtc: Wrtc,
+  ids: { selfId: string; botId: string },
+  toBot: (signal: SignalPayload) => void,
+  { stereo = true }: { stereo?: boolean } = {},
+): Human {
+  const munged = (sdp: string | undefined) => (stereo && sdp ? withStereoOpus(sdp) : (sdp ?? ''));
   const { RTCPeerConnection } = wrtc;
-  const sinkApi = (wrtc as unknown as { nonstandard: { RTCAudioSink: new (track: unknown) => { ondata: (d: { samples: Int16Array; sampleRate: number }) => void; stop(): void } } }).nonstandard;
+  const sinkApi = (wrtc as unknown as { nonstandard: { RTCAudioSink: new (track: unknown) => { ondata: (d: { samples: Int16Array; sampleRate: number; channelCount: number }) => void; stop(): void } } }).nonstandard;
   const pc = new RTCPeerConnection({ iceServers: [], iceTransportPolicy: 'all' });
   const polite = ids.selfId < ids.botId;
   let makingOffer = false;
@@ -21,6 +32,9 @@ export function makeHuman(wrtc: Wrtc, ids: { selfId: string; botId: string }, to
   let frames = 0;
   let peak = 0;
   let sampleRate = 0;
+  let channels = 0;
+  let peakLeft = 0;
+  let peakRight = 0;
   const sinks: { stop(): void }[] = [];
 
   const track = (pc as unknown as { ontrack: ((e: { track: unknown; streams: unknown[] }) => void) | null });
@@ -31,7 +45,14 @@ export function makeHuman(wrtc: Wrtc, ids: { selfId: string; botId: string }, to
     sink.ondata = (d) => {
       frames++;
       sampleRate = d.sampleRate;
+      channels = d.channelCount;
       for (const v of d.samples) peak = Math.max(peak, Math.abs(v));
+      if (d.channelCount === 2) {
+        for (let i = 0; i + 1 < d.samples.length; i += 2) {
+          peakLeft = Math.max(peakLeft, Math.abs(d.samples[i]));
+          peakRight = Math.max(peakRight, Math.abs(d.samples[i + 1]));
+        }
+      }
     };
     sinks.push(sink);
   };
@@ -42,7 +63,8 @@ export function makeHuman(wrtc: Wrtc, ids: { selfId: string; botId: string }, to
     void (async () => {
       try {
         makingOffer = true;
-        await pc.setLocalDescription(await pc.createOffer());
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription({ type: 'offer', sdp: munged(offer.sdp) });
         const d = pc.localDescription!;
         toBot({ kind: 'description', description: { type: d.type as 'offer', sdp: d.sdp } });
       } finally {
@@ -70,7 +92,8 @@ export function makeHuman(wrtc: Wrtc, ids: { selfId: string; botId: string }, to
         if (collision) await pc.setLocalDescription({ type: 'rollback' });
         await pc.setRemoteDescription(signal.description);
         if (signal.description.type === 'offer') {
-          await pc.setLocalDescription(await pc.createAnswer());
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription({ type: 'answer', sdp: munged(answer.sdp) });
           const d = pc.localDescription!;
           toBot({ kind: 'description', description: { type: d.type as 'answer', sdp: d.sdp } });
         }
@@ -82,7 +105,7 @@ export function makeHuman(wrtc: Wrtc, ids: { selfId: string; botId: string }, to
       const micTrack = mic.createTrack();
       pc.addTrack(micTrack, new wrtc.MediaStream([micTrack]));
     },
-    stats: () => ({ frames, peak, sampleRate }),
+    stats: () => ({ frames, peak, sampleRate, channels, peakLeft, peakRight }),
     close() {
       for (const s of sinks) s.stop();
       pc.close();
