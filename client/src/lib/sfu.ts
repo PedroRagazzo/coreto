@@ -32,7 +32,7 @@ export interface ScreenPublishOptions {
 const isScreenSource = (source: Track.Source) => source === Track.Source.ScreenShare || source === Track.Source.ScreenShareAudio;
 
 export class SfuSession {
-  private watching: Id | null = null;
+  private watching: ReadonlySet<Id> = new Set();
   private closed = false;
   /** Só depois de conectar os avisos de queda e reconexão valem; falhar ao conectar é erro de `connect`. */
   private connected = false;
@@ -140,9 +140,9 @@ export class SfuSession {
 
   // ── Quem assiste ─────────────────────────────────────────────────────────────
 
-  /** Passa a receber a tela de `userId` (e deixa de receber a de quem assistia antes); `null` para de receber. */
-  watch(userId: Id | null): void {
-    this.watching = userId;
+  /** Passa a receber só as telas de `userIds` (todas de uma vez); lista vazia para de receber. */
+  watch(userIds: Iterable<Id>): void {
+    this.watching = new Set(userIds);
     this.syncSubscriptions();
   }
 
@@ -164,7 +164,7 @@ export class SfuSession {
     this.room.remoteParticipants.forEach((participant: RemoteParticipant) => {
       participant.trackPublications.forEach((publication: RemoteTrackPublication) => {
         if (!isScreenSource(publication.source)) return;
-        const wanted = participant.identity === this.watching;
+        const wanted = this.watching.has(participant.identity);
         if (publication.isSubscribed !== wanted) publication.setSubscribed(wanted);
       });
     });

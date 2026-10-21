@@ -162,7 +162,7 @@ function StreamCard({ participant, isMe }: { participant: VoiceParticipant; isMe
   const { state, actions } = useRealtime();
   const name = displayNameOf(state.snapshot, state.users, participant.userId);
   const room = state.myVoice.channelId ? (state.voice[state.myVoice.channelId] ?? []) : [];
-  const viewers = room.filter((p: VoiceParticipant) => p.watching === participant.userId).length;
+  const viewers = room.filter((p: VoiceParticipant) => p.watching.includes(participant.userId)).length;
   return (
     <li className="relative flex aspect-video flex-col items-center justify-center gap-3 rounded-lg bg-panel p-4 text-center">
       <span className="absolute top-2 left-2">

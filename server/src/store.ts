@@ -77,7 +77,7 @@ export const toParticipant = ({
   streaming,
   streamTitle,
   activity,
-  watching,
+  watching: [...watching],
 });
 
 /** Quem vive dentro do servidor (o bot de música) e precisa saber o que acontece nas salas de voz. */

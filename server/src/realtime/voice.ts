@@ -6,7 +6,7 @@
 // assiste a quem (`streaming`/`watching` na lista da sala). Quem transmite
 // lê essa lista e manda o vídeo apenas para quem está assistindo.
 
-import type { Id } from '../../../shared/src/models.js';
+import { MAX_WATCHED_STREAMS, type Id } from '../../../shared/src/models.js';
 import { Permission } from '../../../shared/src/permissions.js';
 import type { SignalPayload } from '../../../shared/src/protocol.js';
 import { toParticipant, type Store, type VoiceSession } from '../store.js';
@@ -71,7 +71,7 @@ export function endVoiceSession(io: IO, store: Store, session: VoiceSession, rea
 /** Quem assistia à transmissão deixa de assistir (ela acabou). */
 function stopWatchersOf(store: Store, streamer: VoiceSession): void {
   for (const viewer of store.voiceIn(streamer.channelId)) {
-    if (viewer.watching === streamer.userId) viewer.watching = null;
+    if (viewer.watching.includes(streamer.userId)) viewer.watching = viewer.watching.filter((id) => id !== streamer.userId);
   }
 }
 
@@ -107,7 +107,7 @@ export function registerVoice(io: IO, socket: AppSocket, store: Store, ice: IceC
       streaming: false,
       streamTitle: null,
       activity: null,
-      watching: null,
+      watching: [],
       socketId: socket.id,
       streamPreview: null,
       streamPreviewAt: 0,
@@ -220,17 +220,24 @@ export function registerVoice(io: IO, socket: AppSocket, store: Store, ice: IceC
     if (!streamer?.streaming || streamer.channelId !== session.channelId || streamer.userId === userId) {
       return ack({ ok: false, error: 'Essa transmissão não está disponível.' });
     }
-    if (session.watching !== streamer.userId) {
-      session.watching = streamer.userId;
+    if (!session.watching.includes(streamer.userId)) {
+      if (session.watching.length >= MAX_WATCHED_STREAMS) {
+        return ack({ ok: false, error: `Você já está assistindo a ${MAX_WATCHED_STREAMS} transmissões. Feche uma para abrir outra.` });
+      }
+      session.watching = [...session.watching, streamer.userId];
       broadcastRoster(io, store, session.spaceId, session.channelId);
     }
     ack({ ok: true, data: null });
   });
 
-  socket.on('stream:unwatch', () => {
+  // Com `userId`, para de assistir só a essa transmissão; sem ele (versões antigas do site), a todas.
+  socket.on('stream:unwatch', (req) => {
     const session = mySession();
-    if (!session?.watching) return;
-    session.watching = null;
+    if (!session || session.watching.length === 0) return;
+    const only = typeof req?.userId === 'string' ? req.userId : null;
+    const left = only ? session.watching.filter((id) => id !== only) : [];
+    if (left.length === session.watching.length) return;
+    session.watching = left;
     broadcastRoster(io, store, session.spaceId, session.channelId);
   });
 

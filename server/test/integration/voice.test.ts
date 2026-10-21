@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { VoiceParticipant } from '../../../shared/src/models.js';
+import { MAX_WATCHED_STREAMS } from '../../../shared/src/models.js';
 import { Permission } from '../../../shared/src/permissions.js';
 import type { SignalPayload } from '../../../shared/src/protocol.js';
 import { hasTestDatabase } from '../support/database.js';
@@ -134,13 +135,13 @@ describe.skipIf(!hasTestDatabase)('salas de voz', () => {
       // O nome do que é compartilhado chega limpo para quem está na sala.
       expect(find(await live, ana.client)?.streamTitle).toBe('Fortnite');
 
-      const watching = roster(ana.client, (list) => find(list, bruno.client)?.watching === ana.client.user.id);
+      const watching = roster(ana.client, (list) => find(list, bruno.client)?.watching.includes(ana.client.user.id) === true);
       ok(await bruno.client.socket.emitWithAck('stream:watch', { userId: ana.client.user.id }));
       await watching;
 
       const ended = roster(bruno.client, (list) => find(list, ana.client)?.streaming === false);
       ana.client.socket.emit('stream:stop');
-      expect(find(await ended, bruno.client)?.watching).toBeNull();
+      expect(find(await ended, bruno.client)?.watching).toEqual([]);
     });
 
     describe('prévia da transmissão', () => {
@@ -207,9 +208,69 @@ describe.skipIf(!hasTestDatabase)('salas de voz', () => {
       ok(await ana.client.socket.emitWithAck('stream:start', { title: 'Tela 1' }));
       ok(await bruno.client.socket.emitWithAck('stream:watch', { userId: ana.client.user.id }));
 
-      const cleared = roster(bruno.client, (list) => !find(list, ana.client) && find(list, bruno.client)?.watching === null);
+      const cleared = roster(bruno.client, (list) => !find(list, ana.client) && find(list, bruno.client)?.watching.length === 0);
       ana.client.socket.emit('voice:leave');
       await cleared;
+    });
+
+    describe('assistir a várias transmissões ao mesmo tempo', () => {
+      it('acumula as transmissões, e cada "parar de assistir" tira só a escolhida', async () => {
+        const ana = await inRoom('Ana', 'Sala de estar');
+        const bia = await inRoom('Bia', 'Sala de estar');
+        const caio = await inRoom('Caio', 'Sala de estar');
+        const a = ana.client.user.id;
+        const b = bia.client.user.id;
+        ok(await ana.client.socket.emitWithAck('stream:start', { title: 'Tela A' }));
+        ok(await bia.client.socket.emitWithAck('stream:start', { title: 'Tela B' }));
+
+        let seen = roster(ana.client, (list) => find(list, caio.client)?.watching.length === 2);
+        ok(await caio.client.socket.emitWithAck('stream:watch', { userId: a }));
+        ok(await caio.client.socket.emitWithAck('stream:watch', { userId: b }));
+        expect(find(await seen, caio.client)?.watching).toEqual([a, b]);
+
+        // Pedir de novo a mesma não duplica.
+        ok(await caio.client.socket.emitWithAck('stream:watch', { userId: a }));
+
+        seen = roster(ana.client, (list) => find(list, caio.client)?.watching.length === 1);
+        caio.client.socket.emit('stream:unwatch', { userId: a });
+        expect(find(await seen, caio.client)?.watching).toEqual([b]);
+
+        // Sem `userId` (site antigo), para de assistir a todas.
+        seen = roster(ana.client, (list) => find(list, caio.client)?.watching.length === 0);
+        caio.client.socket.emit('stream:unwatch');
+        await seen;
+      });
+
+      it('quando uma das transmissões acaba, só ela sai da lista de quem assistia', async () => {
+        const ana = await inRoom('Ana', 'Sala de estar');
+        const bia = await inRoom('Bia', 'Sala de estar');
+        const caio = await inRoom('Caio', 'Sala de estar');
+        ok(await ana.client.socket.emitWithAck('stream:start', { title: 'Tela A' }));
+        ok(await bia.client.socket.emitWithAck('stream:start', { title: 'Tela B' }));
+        ok(await caio.client.socket.emitWithAck('stream:watch', { userId: ana.client.user.id }));
+        ok(await caio.client.socket.emitWithAck('stream:watch', { userId: bia.client.user.id }));
+
+        const ended = roster(caio.client, (list) => find(list, ana.client)?.streaming === false);
+        ana.client.socket.emit('stream:stop');
+        expect(find(await ended, caio.client)?.watching).toEqual([bia.client.user.id]);
+      });
+
+      it('limita quantas transmissões a mesma pessoa assiste de uma vez', async () => {
+        const watcher = await inRoom('Espectador', 'Sala de estar');
+        const streamers: TestClient[] = [];
+        for (const name of ['A', 'B', 'C', 'D', 'E']) {
+          const s = await inRoom(`Tela ${name}`, 'Sala de estar');
+          ok(await s.client.socket.emitWithAck('stream:start', { title: name }));
+          streamers.push(s.client);
+        }
+        for (const s of streamers.slice(0, MAX_WATCHED_STREAMS)) {
+          ok(await watcher.client.socket.emitWithAck('stream:watch', { userId: s.user.id }));
+        }
+        const refused = await watcher.client.socket.emitWithAck('stream:watch', { userId: streamers[MAX_WATCHED_STREAMS].user.id });
+        expect(refused.ok).toBe(false);
+        // Quem já está na lista pode ser pedida de novo sem esbarrar no limite.
+        ok(await watcher.client.socket.emitWithAck('stream:watch', { userId: streamers[0].user.id }));
+      });
     });
 
     it('recusa transmitir fora de uma sala e assistir a quem não está ao vivo, a si mesmo ou em outra sala', async () => {

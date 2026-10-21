@@ -15,7 +15,7 @@ export function VoiceStatusBar() {
   const music = useMusic();
   const voice = state.myVoice;
   const me = state.me?.id;
-  const viewers = voice.channelId ? (state.voice[voice.channelId] ?? []).filter((p) => p.watching === me).length : 0;
+  const viewers = voice.channelId ? (state.voice[voice.channelId] ?? []).filter((p) => me !== undefined && p.watching.includes(me)).length : 0;
 
   // Um aviso (microfone negado, falha ao compartilhar...) aparece acima da chamada, sem escondê-la.
   const alert = voice.error && (

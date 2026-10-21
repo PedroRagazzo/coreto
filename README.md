@@ -472,6 +472,8 @@ quantas pessoas estão assistindo (e quem, ao passar o mouse), volume do som da 
 prévia sem som e o contador "N assistindo" na barra de voz. Parar pelo botão do Coreto, pelo aviso do navegador ou
 saindo da chamada mostra "A transmissão terminou" para quem assistia.
 
+**Várias transmissões ao mesmo tempo.** Dá para assistir a até 4 (`MAX_WATCHED_STREAMS`) de uma vez: cada clique num nome abre mais uma no painel, e `watching` na lista da sala é uma lista. Com mais de uma aberta, uma fica **em destaque** (grande, com o som) e as outras viram miniaturas ao lado; o botão de ampliar numa miniatura troca quem é a grande, e o seletor do topo muda para a **grade**, com todas do mesmo tamanho. Cada tela tem seu próprio botão de tela cheia e de fechar (`stream:unwatch` com `userId` para só a escolhida). Só a que está em destaque toca som, e o ícone de alto-falante de cada uma liga ou desliga o dela. As telas ficam sempre no mesmo lugar do documento e só mudam de posição na grade (CSS), então trocar o destaque não reinicia os vídeos.
+
 **Mudar a qualidade durante a transmissão:** quem transmite abre as **Configurações da transmissão** (engrenagem no
 palco da própria tela, na faixa da chamada ou no rodapé da visão da chamada) e troca resolução, quadros, prioridade e
 upload sem parar nem escolher a tela de novo. A captura passa a entregar a nova altura e os novos quadros

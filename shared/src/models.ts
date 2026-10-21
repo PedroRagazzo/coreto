@@ -125,9 +125,12 @@ export interface VoiceParticipant {
   streamTitle: string | null;
   /** O que a pessoa está fazendo na sala, hoje só o que o bot de música está tocando; `null` quando nada. */
   activity: string | null;
-  /** De quem está assistindo a transmissão, na mesma sala. */
-  watching: Id | null;
+  /** De quem está assistindo a transmissão, na mesma sala (pode ser mais de uma, até `MAX_WATCHED_STREAMS`). */
+  watching: Id[];
 }
+
+/** Quantas transmissões a mesma pessoa assiste ao mesmo tempo (cada uma é um vídeo a mais para receber e decodificar). */
+export const MAX_WATCHED_STREAMS = 4;
 
 /** Tudo que o cliente precisa para desenhar um espaço ao entrar nele. */
 export interface SpaceSnapshot {

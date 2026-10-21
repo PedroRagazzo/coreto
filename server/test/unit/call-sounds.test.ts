@@ -11,7 +11,7 @@ const person = (userId: string, patch: Partial<VoiceParticipant> = {}): VoicePar
   streaming: false,
   streamTitle: null,
   activity: null,
-  watching: null,
+  watching: [],
   ...patch,
 });
 
@@ -54,20 +54,32 @@ describe('soundsForChange', () => {
 
   it('avisa quando alguém começa ou para de assistir à sua transmissão', () => {
     const before = call([person(ME, { streaming: true }), person('ana')]);
-    const after = call([person(ME, { streaming: true }), person('ana', { watching: ME })]);
+    const after = call([person(ME, { streaming: true }), person('ana', { watching: [ME] })]);
     expect(soundsForChange(before, after, ME, true)).toEqual(['streamJoin']);
     expect(soundsForChange(after, before, ME, true)).toEqual(['streamLeave']);
   });
 
   it('avisa quando alguém entra na transmissão que você está assistindo', () => {
-    const before = call([person(ME, { watching: 'ana' }), person('ana', { streaming: true }), person('bia')]);
-    const after = call([person(ME, { watching: 'ana' }), person('ana', { streaming: true }), person('bia', { watching: 'ana' })]);
+    const before = call([person(ME, { watching: ['ana'] }), person('ana', { streaming: true }), person('bia')]);
+    const after = call([person(ME, { watching: ['ana'] }), person('ana', { streaming: true }), person('bia', { watching: ['ana'] })]);
     expect(soundsForChange(before, after, ME, true)).toEqual(['streamJoin']);
+  });
+
+  it('com mais de uma transmissão aberta, avisa de quem entra em qualquer uma delas', () => {
+    const me = person(ME, { watching: ['ana', 'caio'] });
+    const base = [me, person('ana', { streaming: true }), person('caio', { streaming: true }), person('bia', { watching: ['ana'] })];
+    const before = call(base);
+    // A Bia sai da transmissão da Ana e entra na do Caio: um som de saída e um de entrada.
+    const after = call([...base.slice(0, 3), person('bia', { watching: ['caio'] })]);
+    expect(soundsForChange(before, after, ME, true).sort()).toEqual(['streamJoin', 'streamLeave']);
+    // Quem entra numa terceira transmissão, que você não assiste, não conta.
+    const third = call([...base.slice(0, 3), person('bia', { watching: ['ana', 'dede'] })]);
+    expect(soundsForChange(before, third, ME, true)).toEqual([]);
   });
 
   it('ignora quem assiste a uma transmissão em que você não está', () => {
     const before = call([person(ME), person('ana', { streaming: true }), person('bia')]);
-    const after = call([person(ME), person('ana', { streaming: true }), person('bia', { watching: 'ana' })]);
+    const after = call([person(ME), person('ana', { streaming: true }), person('bia', { watching: ['ana'] })]);
     expect(soundsForChange(before, after, ME, true)).toEqual([]);
   });
 

@@ -454,7 +454,7 @@ export class VoiceManager {
   private sfuSession: SfuSession | null = null;
   private sfuConnecting: Promise<SfuSession | null> | null = null;
   /** De quem você assiste a tela agora (segundo o servidor). */
-  private watchedScreen: Id | null = null;
+  private watchedScreens: Id[] = [];
   private camera: MediaStream | null = null;
   /** Fluxos fixos onde câmera e tela viajam; os ids são anunciados a cada pessoa. */
   private cameraCarrier = new MediaStream();
@@ -526,7 +526,7 @@ export class VoiceManager {
     this.shownScreens.clear();
     this.sfuInterruptedForViewing = false;
     this.sfuAvailable = false;
-    this.watchedScreen = null;
+    this.watchedScreens = [];
     if (this.selfId) this.detector.unwatch(this.selfId);
     this.detector.stop();
     this.mic?.close();
@@ -688,7 +688,7 @@ export class VoiceManager {
           return null;
         }
         this.sfuSession = session;
-        session.watch(this.watchedScreen);
+        session.watch(this.watchedScreens);
         return session;
       } catch (err) {
         console.warn('[voz] não foi possível entrar no servidor de mídia', err);
@@ -760,12 +760,12 @@ export class VoiceManager {
     session?.close();
   }
 
-  /** Avisa de quem você assiste a tela (`null` = ninguém); é daí que vem a imagem do servidor de mídia. */
-  setWatching(userId: Id | null): void {
-    this.watchedScreen = userId;
+  /** Avisa de quem você assiste a tela (lista vazia = ninguém); é daí que vem a imagem do servidor de mídia. */
+  setWatching(userIds: Id[]): void {
+    this.watchedScreens = userIds;
     if (!this.sfuAvailable) return;
-    if (this.sfuSession) this.sfuSession.watch(userId);
-    else if (userId) void this.connectSfu();
+    if (this.sfuSession) this.sfuSession.watch(userIds);
+    else if (userIds.length > 0) void this.connectSfu();
   }
 
   /** As opções da transmissão em andamento, ou `null` se você não está transmitindo. */

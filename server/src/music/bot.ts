@@ -382,7 +382,7 @@ export class MusicBot implements VoiceObserver {
       streaming: false,
       streamTitle: null,
       activity: null,
-      watching: null,
+      watching: [],
       socketId: BOT_SOCKET_ID,
       streamPreview: null,
       streamPreviewAt: 0,

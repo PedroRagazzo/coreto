@@ -40,7 +40,7 @@ export function AppShell() {
       <main className="flex min-w-0 flex-1 flex-col">
         <UpdateBanner />
         <ConnectionBanner />
-        {state.stage ? (
+        {state.stages.length > 0 ? (
           <StreamStage />
         ) : state.callView && state.myVoice.channelId ? (
           <CallView />

@@ -97,8 +97,12 @@ export interface RealtimeState {
   myScreen: MediaStream | null;
   /** Telas que chegam de outras pessoas da chamada, por quem transmite. */
   screens: Record<Id, MediaStream>;
-  /** Transmissão aberta no painel central (a sua, para a prévia, ou a de quem você assiste). */
-  stage: Id | null;
+  /** Transmissões abertas no painel central (a sua, para a prévia, e as de quem você assiste), na ordem em que abriram. */
+  stages: Id[];
+  /** A transmissão em destaque (a maior, e a que toca som); sempre uma das abertas, ou `null` se não há nenhuma. */
+  focusedStage: Id | null;
+  /** Com várias abertas: uma grande e as outras pequenas (`focus`), ou todas do mesmo tamanho (`grid`). */
+  stageLayout: 'focus' | 'grid';
   /** Sua câmera, enquanto ligada (para o seu quadro no mosaico). */
   myCamera: MediaStream | null;
   /** Câmeras que chegam de outras pessoas da chamada. */
@@ -148,7 +152,9 @@ const initialState: RealtimeState = {
   music: null,
   myScreen: null,
   screens: {},
-  stage: null,
+  stages: [],
+  focusedStage: null,
+  stageLayout: 'focus',
   myCamera: null,
   cameras: {},
   callView: false,
@@ -202,7 +208,10 @@ type Action =
   | { type: 'music:state'; state: MusicState | null }
   | { type: 'screen:mine'; stream: MediaStream | null }
   | { type: 'screen:remote'; userId: Id; stream: MediaStream | null }
-  | { type: 'stage'; userId: Id | null }
+  | { type: 'stage:open'; userId: Id }
+  | { type: 'stage:close'; userId: Id | null }
+  | { type: 'stage:focus'; userId: Id }
+  | { type: 'stage:layout'; layout: 'focus' | 'grid' }
   | { type: 'camera:mine'; stream: MediaStream | null }
   | { type: 'camera:remote'; userId: Id; stream: MediaStream | null }
   | { type: 'callView'; open: boolean };
@@ -210,6 +219,14 @@ type Action =
 function withoutKey<T>(record: Record<Id, T> | undefined, key: Id): Record<Id, T> {
   const { [key]: _removed, ...rest } = record ?? {};
   return rest;
+}
+
+/** O que muda ao fechar uma transmissão aberta; se era a em destaque, o destaque passa para a última que sobrou. */
+function closeStage(state: RealtimeState, userId: Id): Pick<RealtimeState, 'stages' | 'focusedStage'> {
+  if (!state.stages.includes(userId)) return { stages: state.stages, focusedStage: state.focusedStage };
+  const stages = state.stages.filter((id) => id !== userId);
+  const focusedStage = state.focusedStage === userId ? (stages[stages.length - 1] ?? null) : state.focusedStage;
+  return { stages, focusedStage };
 }
 
 function reducer(state: RealtimeState, action: Action): RealtimeState {
@@ -319,7 +336,8 @@ function reducer(state: RealtimeState, action: Action): RealtimeState {
     case 'dm:select':
       return {
         ...state,
-        stage: null,
+        stages: [],
+        focusedStage: null,
         callView: false,
         activeSpaceId: null,
         activeDirectId: action.conversationId,
@@ -329,7 +347,8 @@ function reducer(state: RealtimeState, action: Action): RealtimeState {
     case 'space:select':
       return {
         ...state,
-        stage: null,
+        stages: [],
+        focusedStage: null,
         callView: false,
         activeSpaceId: action.spaceId,
         snapshot: state.snapshot?.space.id === action.spaceId ? state.snapshot : null,
@@ -347,7 +366,8 @@ function reducer(state: RealtimeState, action: Action): RealtimeState {
     case 'channel:select':
       return {
         ...state,
-        stage: null,
+        stages: [],
+        focusedStage: null,
         callView: false,
         activeChannelBySpace: { ...state.activeChannelBySpace, [action.spaceId]: action.channelId },
       };
@@ -492,7 +512,8 @@ function reducer(state: RealtimeState, action: Action): RealtimeState {
           music: null,
           myScreen: null,
           screens: {},
-          stage: null,
+          stages: [],
+          focusedStage: null,
           myCamera: null,
           cameras: {},
           callView: false,
@@ -523,7 +544,7 @@ function reducer(state: RealtimeState, action: Action): RealtimeState {
         ...state,
         myScreen: action.stream,
         myVoice: { ...state.myVoice, streaming: action.stream !== null },
-        stage: action.stream === null && state.stage === state.me?.id ? null : state.stage,
+        ...(action.stream === null && state.me ? closeStage(state, state.me.id) : {}),
       };
 
     case 'screen:remote':
@@ -534,8 +555,22 @@ function reducer(state: RealtimeState, action: Action): RealtimeState {
           : withoutKey(state.screens, action.userId),
       };
 
-    case 'stage':
-      return { ...state, stage: action.userId };
+    case 'stage:open':
+      // Abrir uma transmissão já aberta só a põe em destaque; uma nova entra no fim e também fica em destaque.
+      return {
+        ...state,
+        stages: state.stages.includes(action.userId) ? state.stages : [...state.stages, action.userId],
+        focusedStage: action.userId,
+      };
+
+    case 'stage:close':
+      return { ...state, ...(action.userId === null ? { stages: [], focusedStage: null } : closeStage(state, action.userId)) };
+
+    case 'stage:focus':
+      return state.stages.includes(action.userId) ? { ...state, focusedStage: action.userId } : state;
+
+    case 'stage:layout':
+      return { ...state, stageLayout: action.layout };
 
     case 'camera:mine':
       return { ...state, myCamera: action.stream, myVoice: { ...state.myVoice, video: action.stream !== null } };
@@ -603,8 +638,12 @@ export interface RealtimeActions {
    * Para você, abre a prévia. Falhas aparecem como aviso na barra de voz.
    */
   watchStream(userId: Id): void;
-  /** Fecha o palco (e para de receber a tela de quem você assistia). */
-  closeStage(): void;
+  /** Fecha uma transmissão aberta (a de `userId`, ou todas sem ele) e para de receber a tela de quem você assistia. */
+  closeStage(userId?: Id): void;
+  /** Põe uma das transmissões abertas em destaque (a maior, com som). */
+  focusStage(userId: Id): void;
+  /** Várias abertas: uma grande e as outras pequenas, ou todas do mesmo tamanho. */
+  setStageLayout(layout: 'focus' | 'grid'): void;
   /** Liga ou desliga a câmera; falhas aparecem como aviso na barra de voz. */
   toggleCamera(): void;
   /** Entra no canal de voz (se ainda não estiver nele) e abre o mosaico da chamada. */
@@ -748,7 +787,7 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
       const { me, voice } = stateRef.current;
       if (!socket || !me) return 'Sem conexão com o servidor.';
       if (userId === me.id) {
-        dispatch({ type: 'stage', userId });
+        dispatch({ type: 'stage:open', userId });
         return null;
       }
       const channelId = Object.keys(voice).find((id) => voice[id].some((p) => p.userId === userId && p.streaming));
@@ -759,10 +798,10 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
       }
       // O palco abre antes do pedido: a lista da sala com você assistindo chega antes da resposta,
       // e sem o palco aberto o efeito que cancela transmissões "esquecidas" pararia esta.
-      dispatch({ type: 'stage', userId });
+      dispatch({ type: 'stage:open', userId });
       const res = await socket.emitWithAck('stream:watch', { userId });
       if (!res.ok) {
-        dispatch({ type: 'stage', userId: null });
+        dispatch({ type: 'stage:close', userId });
         return res.error;
       }
       return null;
@@ -947,7 +986,7 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
         if (audioFailed) {
           dispatch({ type: 'voice:self', patch: { error: 'O sistema não liberou o som: a tela está indo sem áudio.' } });
         }
-        dispatch({ type: 'stage', userId: stateRef.current.me?.id ?? null });
+        if (stateRef.current.me) dispatch({ type: 'stage:open', userId: stateRef.current.me.id });
         return null;
       },
 
@@ -982,8 +1021,16 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
         });
       },
 
-      closeStage() {
-        dispatch({ type: 'stage', userId: null });
+      closeStage(userId) {
+        dispatch({ type: 'stage:close', userId: userId ?? null });
+      },
+
+      focusStage(userId) {
+        dispatch({ type: 'stage:focus', userId });
+      },
+
+      setStageLayout(layout) {
+        dispatch({ type: 'stage:layout', layout });
       },
 
       toggleCamera() {
@@ -1018,7 +1065,7 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
       openCall(channelId) {
         void (async () => {
           if (await joinVoice(channelId)) {
-            dispatch({ type: 'stage', userId: null });
+            dispatch({ type: 'stage:close', userId: null });
             dispatch({ type: 'callView', open: true });
           }
         })();
@@ -1228,20 +1275,23 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
   const myRoom = state.myVoice.channelId ? state.voice[state.myVoice.channelId] : undefined;
   const myId = state.me?.id;
   useEffect(() => {
-    const viewers = (myRoom ?? []).filter((p) => p.watching === myId).map((p) => p.userId);
+    const viewers = (myRoom ?? []).filter((p) => p.watching.includes(myId ?? '')).map((p) => p.userId);
     voiceRef.current?.setScreenViewers(viewers);
   }, [myRoom, myId]);
 
-  // O servidor diz que você assiste a alguém, mas o palco não mostra essa pessoa: pare de receber.
-  const watchingOnServer = myRoom?.find((p) => p.userId === myId)?.watching ?? null;
+  // O servidor diz que você assiste a alguém, mas o palco não mostra essa pessoa: pare de receber só dela.
+  const watchingOnServer = useMemo(() => myRoom?.find((p) => p.userId === myId)?.watching ?? [], [myRoom, myId]);
+  const watchingKey = watchingOnServer.join(',');
   useEffect(() => {
-    if (watchingOnServer && state.stage !== watchingOnServer) socketRef.current?.emit('stream:unwatch');
-  }, [watchingOnServer, state.stage]);
+    for (const id of watchingOnServer) if (!state.stages.includes(id)) socketRef.current?.emit('stream:unwatch', { userId: id });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `watchingKey` representa a lista
+  }, [watchingKey, state.stages]);
 
-  // Com servidor de mídia, a imagem de quem você assiste chega de lá: avisa de quem é.
+  // Com servidor de mídia, a imagem de quem você assiste chega de lá: avisa de quem são.
   useEffect(() => {
     voiceRef.current?.setWatching(watchingOnServer);
-  }, [watchingOnServer]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `watchingKey` representa a lista
+  }, [watchingKey]);
 
   const value = useMemo(() => ({ state, actions }), [state, actions]);
   return <RealtimeContext.Provider value={value}>{children}</RealtimeContext.Provider>;

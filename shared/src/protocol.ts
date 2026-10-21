@@ -242,9 +242,10 @@ export interface ClientToServerEvents {
   'music:play': (req: { input: string; next?: boolean }, ack: (res: Ack<{ message: string }>) => void) => void;
   /** Controla o bot de música; só quem está na mesma sala de voz que ele. */
   'music:control': (req: MusicControl, ack: (res: Ack<null>) => void) => void;
-  /** Assiste à transmissão de alguém da mesma sala (uma de cada vez). */
+  /** Assiste à transmissão de alguém da mesma sala (até `MAX_WATCHED_STREAMS` ao mesmo tempo). */
   'stream:watch':(req: { userId: Id }, ack: (res: Ack<null>) => void) => void;
-  'stream:unwatch': () => void;
+  /** Para de assistir à transmissão de `userId`; sem ele, a todas. */
+  'stream:unwatch': (req?: { userId?: Id }) => void;
 }
 
 export interface ServerToClientEvents {

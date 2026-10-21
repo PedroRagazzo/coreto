@@ -254,8 +254,8 @@ function VoiceChannelItem({ channel, onEdit }: ChannelItemProps) {
                     userId={p.userId}
                     name={name}
                     title={p.streamTitle}
-                    watchers={participants.filter((other) => other.watching === p.userId).length}
-                    staged={state.stage === p.userId}
+                    watchers={participants.filter((other) => other.watching.includes(p.userId)).length}
+                    staged={state.stages.includes(p.userId)}
                     mine={p.userId === state.me?.id}
                     className={rowClass}
                   >
