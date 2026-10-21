@@ -23,7 +23,7 @@ interface WrtcPeerConnection {
   onnegotiationneeded: (() => void) | null;
   onicecandidate: ((event: { candidate: (IceCandidate & { candidate: string }) | null }) => void) | null;
   onconnectionstatechange: (() => void) | null;
-  addTrack(track: WrtcTrack): unknown;
+  addTrack(track: WrtcTrack, stream: unknown): unknown;
   createOffer(): Promise<SessionDescription>;
   createAnswer(): Promise<SessionDescription>;
   setLocalDescription(description?: SessionDescription | { type: 'rollback' }): Promise<void>;
@@ -34,6 +34,7 @@ interface WrtcPeerConnection {
 }
 export interface Wrtc {
   RTCPeerConnection: new (config: { iceServers: IceServer[]; iceTransportPolicy: 'all' | 'relay' }) => WrtcPeerConnection;
+  MediaStream: new (tracks?: WrtcTrack[]) => unknown;
   nonstandard: { RTCAudioSource: new () => WrtcAudioSource };
 }
 
@@ -63,6 +64,8 @@ export interface BotVoiceOptions {
 export class BotVoice {
   private readonly source: WrtcAudioSource;
   private readonly track: WrtcTrack;
+  /** O navegador só toca uma faixa que chega dentro de um fluxo (`streams` do `ontrack`); sem ele, fica muda. */
+  private readonly stream: unknown;
   private readonly peers = new Map<Id, Peer>();
   private signals: Promise<void> = Promise.resolve();
   private closed = false;
@@ -70,6 +73,7 @@ export class BotVoice {
   constructor(private readonly options: BotVoiceOptions) {
     this.source = new options.wrtc.nonstandard.RTCAudioSource();
     this.track = this.source.createTrack();
+    this.stream = new options.wrtc.MediaStream([this.track]);
   }
 
   get peerCount(): number {
@@ -142,7 +146,7 @@ export class BotVoice {
   /** Liga o áudio do bot à conexão. Quando é o bot que liga, isso dispara a primeira oferta. */
   private attach(peer: Peer): void {
     if (peer.sending) return;
-    peer.pc.addTrack(this.track);
+    peer.pc.addTrack(this.track, this.stream);
     peer.sending = true;
   }
 

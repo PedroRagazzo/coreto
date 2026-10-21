@@ -23,8 +23,10 @@ export function makeHuman(wrtc: Wrtc, ids: { selfId: string; botId: string }, to
   let sampleRate = 0;
   const sinks: { stop(): void }[] = [];
 
-  const track = (pc as unknown as { ontrack: ((e: { track: unknown }) => void) | null });
-  track.ontrack = ({ track: remote }) => {
+  const track = (pc as unknown as { ontrack: ((e: { track: unknown; streams: unknown[] }) => void) | null });
+  track.ontrack = ({ track: remote, streams: [stream] }) => {
+    // Como o cliente (client/src/lib/voice.ts): faixa sem fluxo associado é ignorada, e o navegador não toca o som.
+    if (!stream) return;
     const sink = new sinkApi.RTCAudioSink(remote);
     sink.ondata = (d) => {
       frames++;
@@ -77,7 +79,8 @@ export function makeHuman(wrtc: Wrtc, ids: { selfId: string; botId: string }, to
     callBot() {
       // Um microfone de mentira (silêncio) só para ter o que enviar e disparar a oferta.
       const mic = new wrtc.nonstandard.RTCAudioSource();
-      pc.addTrack(mic.createTrack());
+      const micTrack = mic.createTrack();
+      pc.addTrack(micTrack, new wrtc.MediaStream([micTrack]));
     },
     stats: () => ({ frames, peak, sampleRate }),
     close() {
