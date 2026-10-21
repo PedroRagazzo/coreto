@@ -109,8 +109,8 @@ export class MusicBot implements VoiceObserver {
   }
 
   /** Um pedido de música vindo do painel. */
-  async playFromPanel(authorId: Id, input: string): Promise<PanelResult> {
-    return this.fromPanel(authorId, { name: 'play', args: input.slice(0, 600) });
+  async playFromPanel(authorId: Id, input: string, next = false): Promise<PanelResult> {
+    return this.fromPanel(authorId, { name: next ? 'playnext' : 'play', args: input.slice(0, 600) });
   }
 
   /** Um controle vindo do painel (pular, pausar, volume, tirar da fila...). */
@@ -121,11 +121,13 @@ export class MusicBot implements VoiceObserver {
       case 'resume':
       case 'stop':
       case 'clear':
+      case 'shuffle':
         return this.fromPanel(authorId, { name: control.action, args: '' });
       case 'volume':
         return this.fromPanel(authorId, { name: 'volume', args: String(control.volume) });
       case 'remove':
-        return this.fromPanel(authorId, { name: 'remove', args: String(control.id) });
+      case 'top':
+        return this.fromPanel(authorId, { name: control.action, args: String(control.id) });
     }
   }
 
@@ -181,7 +183,9 @@ export class MusicBot implements VoiceObserver {
     if (!author || author.socketId === BOT_SOCKET_ID) {
       return reply('Entre em um canal de voz antes de usar os comandos de música.', true);
     }
-    if (command.name === 'play') return this.play(command.args, authorId, author, reply, channel);
+    if (command.name === 'play' || command.name === 'playnext') {
+      return this.play(command.args, authorId, author, reply, channel, command.name === 'playnext');
+    }
 
     const room = this.room;
     if (!room || room.channelId !== author.channelId) {
@@ -225,6 +229,18 @@ export class MusicBot implements VoiceObserver {
         this.publish(room);
         return reply(`Tirei **${track.title}** da fila.`);
       }
+      case 'top': {
+        const track = room.queue.upcoming().find((t) => t.id === command.args);
+        if (!track || !room.queue.moveToFront(track.id)) return reply('Essa música já saiu da fila.', true);
+        this.publish(room);
+        return reply(`**${track.title}** toca a seguir.`);
+      }
+      case 'shuffle': {
+        const count = room.queue.shuffle();
+        if (count < 2) return reply('A fila precisa ter pelo menos duas músicas para embaralhar.');
+        this.publish(room);
+        return reply(`Embaralhei as ${count} músicas da fila.`);
+      }
       case 'queue':
         return reply(this.describeQueue(room));
       case 'now':
@@ -243,7 +259,14 @@ export class MusicBot implements VoiceObserver {
     }
   }
 
-  private async play(args: string, authorId: Id, author: VoiceSession, reply: Reply, channel: Channel | null): Promise<void> {
+  private async play(
+    args: string,
+    authorId: Id,
+    author: VoiceSession,
+    reply: Reply,
+    channel: Channel | null,
+    front = false,
+  ): Promise<void> {
     const { store, config, source } = this.deps;
     const request = parseMusicRequest(args);
     if (request.kind === 'invalid') return reply(request.reason, true);
@@ -274,15 +297,23 @@ export class MusicBot implements VoiceObserver {
     if (channel) room.textChannel = channel;
 
     const wasIdle = !room.now;
-    const added = room.queue.add(found);
+    const added = room.queue.add(found, { front });
     room.idleSince = null;
     if (wasIdle) {
       await this.playNext(room);
       if (added.length > 1) await reply(`Mais ${added.length - 1} músicas na fila.`);
     } else {
       this.publish(room);
-      if (added.length === 1) await reply(`Na fila (#${room.queue.size}): ${describeTrack(added[0])} · pedido por ${requestedBy}`);
-      else await reply(`${added.length} músicas adicionadas à fila${added.length < found.length ? ` (a fila comporta ${config.maxQueue})` : ''}.`);
+      if (added.length === 1) {
+        await reply(
+          front
+            ? `Toca a seguir: ${describeTrack(added[0])} · pedido por ${requestedBy}`
+            : `Na fila (#${room.queue.size}): ${describeTrack(added[0])} · pedido por ${requestedBy}`,
+        );
+      } else {
+        const where = front ? 'tocam a seguir' : 'adicionadas à fila';
+        await reply(`${added.length} músicas ${where}${added.length < found.length ? ` (a fila comporta ${config.maxQueue})` : ''}.`);
+      }
     }
     // No chat, o aviso "Tocando agora" já vai para o canal; o painel não tem chat, então recebe o texto no retorno.
     if (wasIdle && !channel) await reply(`Tocando: ${describeTrack(added[0])}.`);

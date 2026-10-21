@@ -33,12 +33,33 @@ export class TrackQueue {
     return this.waiting;
   }
 
-  /** Coloca no fim; devolve as que couberam (a fila tem tamanho máximo), já com id. */
-  add(tracks: NewTrack[]): Track[] {
+  /**
+   * Coloca no fim (ou, com `front`, na frente, para tocar a seguir, mantendo a ordem das que vêm juntas);
+   * devolve as que couberam (a fila tem tamanho máximo), já com id.
+   */
+  add(tracks: NewTrack[], { front = false }: { front?: boolean } = {}): Track[] {
     const room = Math.max(0, this.maxWaiting - this.waiting.length);
     const accepted = tracks.slice(0, room).map((track) => ({ ...track, id: randomUUID() }));
-    this.waiting.push(...accepted);
+    if (front) this.waiting.unshift(...accepted);
+    else this.waiting.push(...accepted);
     return accepted;
+  }
+
+  /** Passa uma música que espera para a frente da fila; `false` se ela não está mais na fila. */
+  moveToFront(id: string): boolean {
+    const at = this.waiting.findIndex((track) => track.id === id);
+    if (at < 0) return false;
+    this.waiting.unshift(...this.waiting.splice(at, 1));
+    return true;
+  }
+
+  /** Embaralha as que esperam (a atual não muda); devolve quantas eram. */
+  shuffle(random: () => number = Math.random): number {
+    for (let i = this.waiting.length - 1; i > 0; i--) {
+      const j = Math.floor(random() * (i + 1));
+      [this.waiting[i], this.waiting[j]] = [this.waiting[j], this.waiting[i]];
+    }
+    return this.waiting.length;
   }
 
   /** Passa para a próxima; `null` quando acabou. */

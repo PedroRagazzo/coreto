@@ -74,6 +74,16 @@ describe('comandos do bot de música', () => {
     expect(parseCommand('/fila')).toEqual({ name: 'queue', args: '' });
   });
 
+  it('lê "tocar a seguir" e "embaralhar", e não deixa o painel ser chamado pelo chat', () => {
+    expect(parseCommand('/playnext rick astley')).toEqual({ name: 'playnext', args: 'rick astley' });
+    expect(parseCommand('/tocarseguir luar')).toEqual({ name: 'playnext', args: 'luar' });
+    expect(parseCommand('/embaralhar')).toEqual({ name: 'shuffle', args: '' });
+    expect(parseCommand('/shuffle')).toEqual({ name: 'shuffle', args: '' });
+    // "remove" e "top" só existem no painel (recebem um id); no chat não são comandos.
+    expect(parseCommand('/remove abc')).toBeNull();
+    expect(parseCommand('/top abc')).toBeNull();
+  });
+
   it('ignora o que não é comando', () => {
     expect(parseCommand('oi pessoal')).toBeNull();
     expect(parseCommand('/shrug')).toBeNull();
@@ -113,6 +123,39 @@ describe('fila de músicas', () => {
     expect(queue.current?.title).toBe('a');
     queue.reset();
     expect(queue.current).toBeNull();
+  });
+
+  it('põe na frente da fila, mantendo a ordem das que vêm juntas', () => {
+    const queue = new TrackQueue(5);
+    queue.add([track('a'), track('b')]);
+    expect(queue.add([track('x'), track('y')], { front: true })).toHaveLength(2);
+    expect(queue.upcoming().map((t) => t.title)).toEqual(['x', 'y', 'a', 'b']);
+  });
+
+  it('passa uma música que espera para a frente', () => {
+    const queue = new TrackQueue(5);
+    const [a, b, c] = queue.add([track('a'), track('b'), track('c')]);
+    expect(queue.moveToFront(c.id)).toBe(true);
+    expect(queue.upcoming().map((t) => t.title)).toEqual(['c', 'a', 'b']);
+    expect(queue.moveToFront(a.id)).toBe(true);
+    expect(queue.upcoming().map((t) => t.title)).toEqual(['a', 'c', 'b']);
+    queue.remove(b.id);
+    expect(queue.moveToFront(b.id)).toBe(false);
+  });
+
+  it('embaralha só a espera, sem perder nem repetir ninguém, e não mexe na atual', () => {
+    const queue = new TrackQueue(10);
+    queue.add(['a', 'b', 'c', 'd', 'e'].map(track));
+    queue.advance();
+    const titles = () => queue.upcoming().map((t) => t.title);
+    // Com um sorteio fixo o resultado é conhecido (Fisher-Yates de trás para frente).
+    expect(queue.shuffle(() => 0)).toBe(4);
+    expect(titles()).toEqual(['c', 'd', 'e', 'b']);
+    expect([...titles()].sort()).toEqual(['b', 'c', 'd', 'e']);
+    expect(queue.current?.title).toBe('a');
+    // Sem música para embaralhar, nada acontece.
+    queue.clearWaiting();
+    expect(queue.shuffle()).toBe(0);
   });
 
   it('formata duração e descrição', () => {

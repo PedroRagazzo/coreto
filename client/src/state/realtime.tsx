@@ -587,7 +587,7 @@ export interface RealtimeActions {
   startScreenShare(options: ScreenShareOptions): Promise<string | null>;
   stopScreenShare(): void;
   /** Pede uma música ao bot (link do YouTube/Spotify ou busca). Devolve o aviso para mostrar, ou o motivo da recusa. */
-  musicPlay(input: string): Promise<{ message: string } | { error: string }>;
+  musicPlay(input: string, next?: boolean): Promise<{ message: string } | { error: string }>;
   /** Controla o bot de música (pular, pausar, volume...). Devolve o motivo da recusa, ou `null`. */
   musicControl(request: MusicControl): Promise<string | null>;
   /** As opções da transmissão em andamento, ou `null` se você não está transmitindo. */
@@ -959,8 +959,8 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
         return voiceRef.current?.updateScreen(patch) ?? Promise.resolve(null);
       },
 
-      async musicPlay(input) {
-        const res = await socketRef.current?.emitWithAck('music:play', { input });
+      async musicPlay(input, next = false) {
+        const res = await socketRef.current?.emitWithAck('music:play', { input, next });
         if (!res) return { error: 'Sem conexão com o servidor.' };
         return res.ok ? { message: res.data.message } : { error: res.error };
       },

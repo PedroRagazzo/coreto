@@ -149,6 +149,28 @@ describe.skipIf(!hasTestDatabase)('bot de música', () => {
     await ana.say('/stop');
   }, 30_000);
 
+  it('toca a seguir (na frente da fila) e embaralha a fila', async () => {
+    const ana = await person('Ana');
+    await ana.say('/play um');
+    await ana.say('/play dois');
+    await ana.say('/play tres');
+    expect(await ana.say('/playnext quatro')).toMatch(/Toca a seguir:.*quatro/);
+
+    const queue = await ana.say('/fila');
+    expect(queue).toContain('1. **quatro**');
+    expect(queue).toContain('2. **dois**');
+    expect(queue).toContain('3. **tres**');
+
+    expect(await ana.say('/shuffle')).toContain('Embaralhei as 3 músicas');
+    const shuffled = await ana.say('/fila');
+    for (const title of ['dois', 'tres', 'quatro']) expect(shuffled).toContain(`**${title}**`);
+    expect(shuffled).toContain('Tocando: **um**');
+
+    await ana.say('/clear');
+    expect(await ana.say('/shuffle')).toContain('pelo menos duas');
+    await ana.say('/stop');
+  }, 30_000);
+
   it('passa para a próxima sozinho quando a música acaba, e sai quando a fila esvazia', async () => {
     const ana = await person('Ana');
     await ana.say('/play curta');
@@ -283,6 +305,35 @@ describe.skipIf(!hasTestDatabase)('bot de música', () => {
 
       // Nada disso falou no chat: o painel não tem canal de texto.
       expect(chatReplies).toEqual([]);
+    }, 40_000);
+
+    it('toca a seguir e embaralha pelo painel', async () => {
+      const ana = await person('Ana');
+      await play(ana, 'luar');
+      const full = state(ana, (s) => s?.queue.length === 3);
+      for (const title of ['dois', 'tres', 'quatro']) await play(ana, title);
+
+      // Uma música que já espera passa para a frente.
+      const before = (await full)!;
+      const four = before.queue.find((t) => t.title === 'quatro')!;
+      let next = state(ana, (s) => s?.queue[0]?.title === 'quatro');
+      ok(await control(ana, { action: 'top', id: four.id }));
+      expect((await next)!.queue.map((t) => t.title).sort()).toEqual(['dois', 'quatro', 'tres']);
+      expect(await control(ana, { action: 'top', id: 'nao-existe' })).toEqual({ ok: false, error: 'Essa música já saiu da fila.' });
+
+      // Um pedido novo com `next` entra na frente.
+      next = state(ana, (s) => s?.queue[0]?.title === 'cinco');
+      ok(await ana.client.socket.emitWithAck('music:play', { input: 'cinco', next: true }));
+      expect((await next)!.queue).toHaveLength(4);
+
+      // Embaralhar mantém as mesmas músicas e o que está tocando.
+      next = state(ana, (s) => s?.queue.length === 4);
+      ok(await control(ana, { action: 'shuffle' }));
+      const shuffled = (await next)!;
+      expect(shuffled.queue.map((t) => t.title).sort()).toEqual(['cinco', 'dois', 'quatro', 'tres']);
+      expect(shuffled.current?.title).toBe('luar');
+
+      ok(await control(ana, { action: 'stop' }));
     }, 40_000);
 
     it('quem entra na sala com o bot tocando já recebe o estado', async () => {

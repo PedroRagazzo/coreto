@@ -531,14 +531,16 @@ comandos são mensagens de chat comuns; o robô responde no mesmo canal. Entre n
 | Comando | O que faz |
 |---|---|
 | `/play <link ou nome da música>` (`/tocar`, `/p`) | toca agora ou entra na fila |
+| `/playnext <link ou nome>` (`/tocarseguir`, `/pn`) | põe na frente da fila, para tocar logo depois da atual |
 | `/skip` (`/pular`) · `/pause` · `/resume` | pula, pausa e continua |
 | `/queue` (`/fila`) · `/now` · `/clear` | mostra a fila, o que toca, esvazia a fila |
+| `/shuffle` (`/embaralhar`) | embaralha as músicas da fila (a que toca não muda) |
 | `/volume <0 a 150>` | volume do robô para todos (100 é o normal) |
 | `/stop` (`/parar`) · `/help` | para tudo e sai da chamada; lista os comandos |
 
 **Painel da sala.** Quem prefere botões a comandos usa o botão **Música** da faixa da chamada (ou o do rodapé da visão
-da chamada): o painel mostra o que está tocando (com barra de progresso), a fila (com o botão de tirar cada música e de
-limpar), pausa, pula, para, ajusta o volume do robô e tem um campo para colar um link ou digitar o nome da música. Na
+da chamada): o painel mostra o que está tocando (com barra de progresso), a fila (com os botões de tirar cada música, de
+fazê-la **tocar a seguir**, de **embaralhar** e de limpar), pausa, pula, para, ajusta o volume do robô e tem um campo para colar um link ou digitar o nome da música (**Adicionar** põe no fim da fila, **Tocar a seguir** na frente). Na
 faixa da chamada aparece também uma minifaixa com a música e os botões de pausar e pular. Os pedidos do painel não
 escrevem no chat. Por baixo, o servidor manda `music:state` a todos da sala a cada mudança (e a quem entra depois), e o
 painel pede com `music:play` e controla com `music:control`, com as mesmas regras do chat.

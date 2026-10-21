@@ -100,8 +100,8 @@ export interface MusicState {
 }
 
 export type MusicControl =
-  | { action: 'skip' | 'pause' | 'resume' | 'stop' | 'clear' }
-  | { action: 'remove'; id: string }
+  | { action: 'skip' | 'pause' | 'resume' | 'stop' | 'clear' | 'shuffle' }
+  | { action: 'remove' | 'top'; id: string }
   | { action: 'volume'; volume: number };
 
 export interface IceServer {
@@ -238,8 +238,8 @@ export interface ClientToServerEvents {
   'stream:preview': (req: { image: string }) => void;
   /** A miniatura mais recente da transmissão de alguém da sala; `null` se ainda não chegou nenhuma. */
   'stream:preview:get': (req: { userId: Id }, ack: (res: Ack<{ image: string | null }>) => void) => void;
-  /** Pede uma música ao bot (link do YouTube/Spotify ou busca); a resposta traz o aviso para mostrar. */
-  'music:play': (req: { input: string }, ack: (res: Ack<{ message: string }>) => void) => void;
+  /** Pede uma música ao bot (link do YouTube/Spotify ou busca); com `next`, ela vai para a frente da fila. A resposta traz o aviso. */
+  'music:play': (req: { input: string; next?: boolean }, ack: (res: Ack<{ message: string }>) => void) => void;
   /** Controla o bot de música; só quem está na mesma sala de voz que ele. */
   'music:control': (req: MusicControl, ack: (res: Ack<null>) => void) => void;
   /** Assiste à transmissão de alguém da mesma sala (uma de cada vez). */

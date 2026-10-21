@@ -1,5 +1,5 @@
 import type { MusicControl, MusicState, MusicTrackInfo } from '@shared/protocol';
-import { ListMusic, Music2, Pause, Play, SkipForward, Square, Trash2, Volume2, X } from 'lucide-react';
+import { ArrowUpToLine, ListMusic, Music2, Pause, Play, Shuffle, SkipForward, Square, Trash2, Volume2, X } from 'lucide-react';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useRealtime } from '../state/realtime';
 import { Modal } from './Modal';
@@ -58,13 +58,12 @@ export function MusicDialog({ onClose }: { onClose: () => void }) {
     if (error) setMessage({ text: error, error: true });
   }
 
-  async function add(e: FormEvent) {
-    e.preventDefault();
+  async function add(next: boolean) {
     const text = input.trim();
     if (!text || busy) return;
     setBusy(true);
     setMessage(null);
-    const result = await actions.musicPlay(text);
+    const result = await actions.musicPlay(text, next);
     setBusy(false);
     if ('error' in result) setMessage({ text: result.error, error: true });
     else {
@@ -81,7 +80,13 @@ export function MusicDialog({ onClose }: { onClose: () => void }) {
         onControl={(request) => void control(request)}
       />
 
-      <form onSubmit={add} className="mt-5 flex gap-2">
+      <form
+        onSubmit={(e: FormEvent) => {
+          e.preventDefault();
+          void add(false);
+        }}
+        className="mt-5 flex gap-2"
+      >
         <input
           type="text"
           value={input}
@@ -99,6 +104,15 @@ export function MusicDialog({ onClose }: { onClose: () => void }) {
         >
           {busy ? 'Buscando…' : 'Adicionar'}
         </button>
+        <button
+          type="button"
+          onClick={() => void add(true)}
+          disabled={busy || input.trim() === ''}
+          title="Coloca na frente da fila, para tocar logo depois da que está tocando"
+          className="shrink-0 rounded-md bg-elevated px-3 py-2 text-sm font-semibold text-fg hover:bg-hover disabled:opacity-50"
+        >
+          Tocar a seguir
+        </button>
       </form>
       <div aria-live="polite" className="mt-2 min-h-5 text-sm">
         {message && <p className={message.error ? 'text-dnd' : 'text-muted'}>{message.text}</p>}
@@ -108,6 +122,8 @@ export function MusicDialog({ onClose }: { onClose: () => void }) {
       <Queue
         tracks={music?.state.queue ?? []}
         onRemove={(id) => void control({ action: 'remove', id })}
+        onPlayNext={(id) => void control({ action: 'top', id })}
+        onShuffle={() => void control({ action: 'shuffle' })}
         onClear={() => void control({ action: 'clear' })}
       />
 
@@ -217,7 +233,19 @@ function NowPlaying({
   );
 }
 
-function Queue({ tracks, onRemove, onClear }: { tracks: MusicTrackInfo[]; onRemove: (id: string) => void; onClear: () => void }) {
+function Queue({
+  tracks,
+  onRemove,
+  onPlayNext,
+  onShuffle,
+  onClear,
+}: {
+  tracks: MusicTrackInfo[];
+  onRemove: (id: string) => void;
+  onPlayNext: (id: string) => void;
+  onShuffle: () => void;
+  onClear: () => void;
+}) {
   if (tracks.length === 0) return null;
   const total = tracks.reduce((sum, t) => sum + (t.durationSeconds ?? 0), 0);
   return (
@@ -227,7 +255,16 @@ function Queue({ tracks, onRemove, onClear }: { tracks: MusicTrackInfo[]; onRemo
           <ListMusic size={14} aria-hidden />
           Na fila ({tracks.length}){total > 0 ? ` · ${formatClock(total)}` : ''}
         </h3>
-        <button type="button" onClick={onClear} className="ml-auto flex items-center gap-1 rounded px-2 py-1 text-xs text-muted hover:bg-hover hover:text-fg">
+        <button
+          type="button"
+          onClick={onShuffle}
+          disabled={tracks.length < 2}
+          className="ml-auto flex items-center gap-1 rounded px-2 py-1 text-xs text-muted hover:bg-hover hover:text-fg disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <Shuffle size={13} aria-hidden />
+          Embaralhar
+        </button>
+        <button type="button" onClick={onClear} className="flex items-center gap-1 rounded px-2 py-1 text-xs text-muted hover:bg-hover hover:text-fg">
           <Trash2 size={13} aria-hidden />
           Limpar fila
         </button>
@@ -247,6 +284,17 @@ function Queue({ tracks, onRemove, onClear }: { tracks: MusicTrackInfo[]; onRemo
                 {track.requestedBy}
               </p>
             </div>
+            {i > 0 && (
+              <button
+                type="button"
+                onClick={() => onPlayNext(track.id)}
+                aria-label={`Tocar ${track.title} a seguir`}
+                title="Tocar a seguir"
+                className="shrink-0 rounded p-1.5 text-faint hover:bg-hover hover:text-fg"
+              >
+                <ArrowUpToLine size={15} />
+              </button>
+            )}
             <button
               type="button"
               onClick={() => onRemove(track.id)}
