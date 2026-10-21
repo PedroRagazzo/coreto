@@ -1,6 +1,7 @@
-import { Eye, Headphones, HeadphoneOff, Mic, MicOff, MonitorUp, MonitorX, PhoneOff, Settings2, Video, VideoOff, X } from 'lucide-react';
+import { Eye, Headphones, HeadphoneOff, Mic, MicOff, MonitorUp, MonitorX, Music2, Pause, PhoneOff, Play, Settings2, SkipForward, Video, VideoOff, X } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { useRealtime } from '../state/realtime';
+import { MusicDialog, useMusic } from './MusicDialog';
 import { ScreenShareDialog } from './ScreenShareDialog';
 import { StreamSettingsDialog } from './StreamSettingsDialog';
 import { LiveBadge } from './StreamStage';
@@ -10,6 +11,8 @@ export function VoiceStatusBar() {
   const { state, actions } = useRealtime();
   const [choosingScreen, setChoosingScreen] = useState(false);
   const [configuring, setConfiguring] = useState(false);
+  const [musicOpen, setMusicOpen] = useState(false);
+  const music = useMusic();
   const voice = state.myVoice;
   const me = state.me?.id;
   const viewers = voice.channelId ? (state.voice[voice.channelId] ?? []).filter((p) => p.watching === me).length : 0;
@@ -99,6 +102,39 @@ export function VoiceStatusBar() {
             </div>
           ) : null)}
 
+        {/* O que o bot de música está tocando, com os controles principais; o painel completo abre no botão "Música". */}
+        {voice.channelId && music?.state.current && (
+          <div className="mt-2 flex items-center gap-1.5 rounded-md bg-elevated/60 px-2 py-1.5">
+            <button
+              type="button"
+              onClick={() => setMusicOpen(true)}
+              title="Abrir o painel de música"
+              className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-xs text-muted hover:text-fg"
+            >
+              <Music2 size={14} className="shrink-0 text-accent" aria-hidden />
+              <span className="truncate">{music.state.current.title}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => void actions.musicControl({ action: music.state.paused ? 'resume' : 'pause' })}
+              aria-label={music.state.paused ? 'Continuar a música' : 'Pausar a música'}
+              title={music.state.paused ? 'Continuar' : 'Pausar'}
+              className="rounded p-1 text-muted hover:bg-hover hover:text-fg"
+            >
+              {music.state.paused ? <Play size={15} /> : <Pause size={15} />}
+            </button>
+            <button
+              type="button"
+              onClick={() => void actions.musicControl({ action: 'skip' })}
+              aria-label="Pular a música"
+              title="Pular"
+              className="rounded p-1 text-muted hover:bg-hover hover:text-fg"
+            >
+              <SkipForward size={15} />
+            </button>
+          </div>
+        )}
+
         {/* Como no Discord: Câmera e Tela lado a lado. */}
         {voice.channelId && (
           <div className="mt-2 grid grid-cols-2 gap-2">
@@ -125,11 +161,20 @@ export function VoiceStatusBar() {
               <MonitorUp size={16} />
               Tela
             </button>
+            <button
+              type="button"
+              onClick={() => setMusicOpen(true)}
+              className="col-span-2 flex items-center justify-center gap-1.5 rounded-md bg-elevated py-1.5 text-sm font-medium text-muted hover:bg-hover hover:text-fg"
+            >
+              <Music2 size={16} />
+              Música
+            </button>
           </div>
         )}
       </div>
       {choosingScreen && <ScreenShareDialog onClose={() => setChoosingScreen(false)} />}
       {configuring && voice.streaming && <StreamSettingsDialog onClose={() => setConfiguring(false)} />}
+      {musicOpen && voice.channelId && <MusicDialog onClose={() => setMusicOpen(false)} />}
     </>
   );
 }

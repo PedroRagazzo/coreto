@@ -6,6 +6,7 @@ import { INVALID_SESSION, type LoginRequest, type LoginResponse } from '../../sh
 import { LoginThrottle } from './auth.js';
 import { LatestInstaller } from './download.js';
 import type { MusicBot, MusicFactory } from './music/index.js';
+import { registerMusic } from './music/socket.js';
 import { registerChat } from './realtime/chat.js';
 import { registerDirect } from './realtime/direct.js';
 import { registerManagement } from './realtime/manage.js';
@@ -112,6 +113,7 @@ export async function startServer(
     registerDirect(socket, store);
     registerManagement(io, socket, store);
     registerVoice(io, socket, store, ice);
+    registerMusic(socket, () => music);
   });
 
   music = (await createMusic?.({ io, store, ice })) ?? null;

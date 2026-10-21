@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseCommand } from '../../src/music/commands.js';
 import { parseMusicRequest } from '../../src/music/links.js';
-import { describeTrack, formatDuration, TrackQueue, type Track } from '../../src/music/queue.js';
+import { describeTrack, formatDuration, TrackQueue, type NewTrack } from '../../src/music/queue.js';
 import { parseEmbed } from '../../src/music/spotify.js';
 import { explainYtDlpError } from '../../src/music/ytdlp-source.js';
 import { mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
@@ -84,11 +84,11 @@ describe('comandos do bot de música', () => {
 });
 
 describe('fila de músicas', () => {
-  const track = (title: string): Track => ({ requestedBy: 'Ana', title, artist: null, durationSeconds: 100, source: title });
+  const track = (title: string): NewTrack => ({ requestedBy: 'Ana', title, artist: null, durationSeconds: 100, source: title });
 
   it('toca na ordem em que foi pedido', () => {
     const queue = new TrackQueue(5);
-    expect(queue.add([track('a'), track('b'), track('c')])).toBe(3);
+    expect(queue.add([track('a'), track('b'), track('c')])).toHaveLength(3);
     expect(queue.advance()?.title).toBe('a');
     expect(queue.current?.title).toBe('a');
     expect(queue.advance()?.title).toBe('b');
@@ -100,8 +100,8 @@ describe('fila de músicas', () => {
 
   it('respeita o tamanho máximo e diz quantas coube', () => {
     const queue = new TrackQueue(2);
-    expect(queue.add([track('a'), track('b'), track('c')])).toBe(2);
-    expect(queue.add([track('d')])).toBe(0);
+    expect(queue.add([track('a'), track('b'), track('c')])).toHaveLength(2);
+    expect(queue.add([track('d')])).toHaveLength(0);
     expect(queue.upcoming().map((t) => t.title)).toEqual(['a', 'b']);
   });
 

@@ -1,11 +1,12 @@
 // "Coreto Música": um robô que entra na sala de voz de quem pede e toca links do YouTube e do Spotify.
-// Os comandos são mensagens de chat ("/play ..."); as respostas voltam como mensagens do robô. O áudio
+// Dá para comandá-lo pelo chat ("/play ...") ou pelo painel da sala (music:play e music:control). O áudio
 // vai pela própria chamada, como mais um participante (bot-voice.ts), então o volume por pessoa, o anel
-// de quem fala e "ensurdecer" funcionam como com qualquer outra voz.
+// de quem fala e "ensurdecer" funcionam como com qualquer outra voz. Quem está na sala recebe o estado
+// do robô (o que toca, a fila, pausa, volume) em `music:state` a cada mudança.
 
 import type { Channel, Id, Message } from '../../../shared/src/models.js';
 import { hasPermission, Permission } from '../../../shared/src/permissions.js';
-import { MAX_MESSAGE_LENGTH, type SignalPayload } from '../../../shared/src/protocol.js';
+import { MAX_MESSAGE_LENGTH, type MusicControl, type MusicState, type MusicTrackInfo, type SignalPayload } from '../../../shared/src/protocol.js';
 import { joinPublicSpaces } from '../realtime/membership.js';
 import { rooms, type IO } from '../realtime/types.js';
 import { broadcastRoster, endVoiceSession } from '../realtime/voice.js';
@@ -50,12 +51,17 @@ interface Room {
   now: Playing | null;
   paused: boolean;
   volume: number;
-  /** Onde responder: o canal de texto do último comando. */
-  textChannel: Channel;
+  /** Onde responder no chat: o canal do último comando de chat; `null` se só se usou o painel. */
+  textChannel: Channel | null;
+  /** Último problema ao tocar, para o painel mostrar. */
+  notice: string | null;
   emptySince: number | null;
   idleSince: number | null;
   timer: ReturnType<typeof setInterval>;
 }
+
+/** Como responder a quem pediu: no chat (uma mensagem) ou ao painel (texto devolvido no ack). */
+type Reply = (text: string, isError?: boolean) => Promise<void>;
 
 export interface MusicBotDeps {
   io: IO;
@@ -66,6 +72,17 @@ export interface MusicBotDeps {
   wrtc: Wrtc;
   userId: Id;
 }
+
+/** O resultado de um pedido do painel: o aviso para mostrar, ou o motivo da recusa. */
+export type PanelResult = { ok: true; message: string } | { ok: false; error: string };
+
+const trackInfo = (track: Track): MusicTrackInfo => ({
+  id: track.id,
+  title: track.title,
+  artist: track.artist,
+  durationSeconds: track.durationSeconds,
+  requestedBy: track.requestedBy,
+});
 
 export class MusicBot implements VoiceObserver {
   private room: Room | null = null;
@@ -85,15 +102,55 @@ export class MusicBot implements VoiceObserver {
     if (message.authorId === this.userId || this.deps.store.users.get(message.authorId)?.isBot) return;
     const command = parseCommand(message.content);
     if (!command) return;
-    this.commands = this.commands
-      .then(() => this.run(command, message.authorId, channel))
-      .catch((err: unknown) => console.error('[música] comando', command.name, err));
+    const reply: Reply = (text) => this.say(channel, text);
+    this.enqueue(() => this.run(command, message.authorId, reply, channel)).catch((err: unknown) =>
+      console.error('[música] comando', command.name, err),
+    );
+  }
+
+  /** Um pedido de música vindo do painel. */
+  async playFromPanel(authorId: Id, input: string): Promise<PanelResult> {
+    return this.fromPanel(authorId, { name: 'play', args: input.slice(0, 600) });
+  }
+
+  /** Um controle vindo do painel (pular, pausar, volume, tirar da fila...). */
+  async controlFromPanel(authorId: Id, control: MusicControl): Promise<PanelResult> {
+    switch (control.action) {
+      case 'skip':
+      case 'pause':
+      case 'resume':
+      case 'stop':
+      case 'clear':
+        return this.fromPanel(authorId, { name: control.action, args: '' });
+      case 'volume':
+        return this.fromPanel(authorId, { name: 'volume', args: String(control.volume) });
+      case 'remove':
+        return this.fromPanel(authorId, { name: 'remove', args: String(control.id) });
+    }
+  }
+
+  private async fromPanel(authorId: Id, command: MusicCommand): Promise<PanelResult> {
+    const messages: string[] = [];
+    let failure: string | null = null;
+    const reply: Reply = async (text, isError) => {
+      if (isError) failure ??= text;
+      else messages.push(text);
+    };
+    await this.enqueue(() => this.run(command, authorId, reply, null));
+    return failure ? { ok: false, error: failure } : { ok: true, message: messages.join(' ') };
   }
 
   signal(from: Id, to: Id, signal: SignalPayload): boolean {
     if (to !== this.userId) return false;
     this.room?.voice.handleSignal(from, signal);
     return true;
+  }
+
+  sessionStarted(session: VoiceSession): void {
+    const room = this.room;
+    if (!room || session.socketId === BOT_SOCKET_ID || session.channelId !== room.channelId) return;
+    // Quem entra na sala com o bot já vê o que está tocando.
+    this.deps.io.to(session.socketId).emit('music:state', this.state(room));
   }
 
   sessionEnded(session: VoiceSession): void {
@@ -108,83 +165,104 @@ export class MusicBot implements VoiceObserver {
     if (this.room) this.leave(this.room);
   }
 
+  private enqueue(job: () => Promise<void>): Promise<void> {
+    const next = this.commands.then(job);
+    this.commands = next.catch(() => {});
+    return next;
+  }
+
   // ── Comandos ───────────────────────────────────────────────────────────────
 
-  private async run(command: MusicCommand, authorId: Id, channel: Channel): Promise<void> {
+  private async run(command: MusicCommand, authorId: Id, reply: Reply, channel: Channel | null): Promise<void> {
     const { store } = this.deps;
-    if (command.name === 'help') return this.say(channel, HELP_TEXT);
+    if (command.name === 'help') return reply(HELP_TEXT);
 
     const author = store.voice.get(authorId);
     if (!author || author.socketId === BOT_SOCKET_ID) {
-      return this.say(channel, 'Entre em um canal de voz antes de usar os comandos de música.');
+      return reply('Entre em um canal de voz antes de usar os comandos de música.', true);
     }
-    if (command.name === 'play') return this.play(command.args, authorId, author, channel);
+    if (command.name === 'play') return this.play(command.args, authorId, author, reply, channel);
 
     const room = this.room;
     if (!room || room.channelId !== author.channelId) {
-      return this.say(channel, room ? `Só quem está no canal de voz onde estou tocando (${this.channelName(room.channelId)}) pode usar esse comando.` : 'Não estou tocando nada agora.');
+      return reply(
+        room
+          ? `Só quem está no canal de voz onde estou tocando (${this.channelName(room.channelId)}) pode usar esse comando.`
+          : 'Não estou tocando nada agora.',
+        true,
+      );
     }
-    room.textChannel = channel;
+    if (channel) room.textChannel = channel;
 
     switch (command.name) {
       case 'skip':
-        if (!room.now) return this.say(channel, 'Não há nada tocando.');
-        await this.say(channel, `Pulei **${room.now.track.title}**.`);
+        if (!room.now) return reply('Não há nada tocando.', true);
+        await reply(`Pulei **${room.now.track.title}**.`);
         return this.playNext(room);
       case 'pause':
-        if (!room.now) return this.say(channel, 'Não há nada tocando.');
+        if (!room.now) return reply('Não há nada tocando.', true);
         room.paused = true;
         room.pacer.pause();
-        return this.say(channel, 'Pausado. Use `/resume` para continuar.');
+        this.publish(room);
+        return reply('Pausado. Use `/resume` para continuar.');
       case 'resume':
-        if (!room.paused) return this.say(channel, 'Não está pausado.');
+        if (!room.paused) return reply('Não está pausado.', true);
         room.paused = false;
         if (room.now) room.pacer.start();
-        return this.say(channel, 'Continuando.');
+        this.publish(room);
+        return reply('Continuando.');
       case 'stop':
-        await this.say(channel, 'Parando e saindo da chamada.');
+        await reply('Parando e saindo da chamada.');
         return this.leave(room);
       case 'clear': {
         const removed = room.queue.clearWaiting();
-        return this.say(channel, removed > 0 ? `Tirei ${removed} música${removed === 1 ? '' : 's'} da fila.` : 'A fila já está vazia.');
+        this.publish(room);
+        return reply(removed > 0 ? `Tirei ${removed} música${removed === 1 ? '' : 's'} da fila.` : 'A fila já está vazia.');
+      }
+      case 'remove': {
+        const track = room.queue.upcoming().find((t) => t.id === command.args);
+        if (!track || !room.queue.remove(track.id)) return reply('Essa música já saiu da fila.', true);
+        this.publish(room);
+        return reply(`Tirei **${track.title}** da fila.`);
       }
       case 'queue':
-        return this.say(channel, this.describeQueue(room));
+        return reply(this.describeQueue(room));
       case 'now':
-        return this.say(channel, room.now ? `Tocando: ${describeTrack(room.now.track)} · pedido por ${room.now.track.requestedBy}` : 'Não há nada tocando.');
+        return reply(room.now ? `Tocando: ${describeTrack(room.now.track)} · pedido por ${room.now.track.requestedBy}` : 'Não há nada tocando.');
       case 'volume': {
-        if (!command.args) return this.say(channel, `Volume: ${room.volume}%.`);
+        if (!command.args) return reply(`Volume: ${room.volume}%.`);
         const value = Number(command.args.replace('%', ''));
         if (!Number.isFinite(value) || value < 0 || value > MAX_VOLUME) {
-          return this.say(channel, `Use um número de 0 a ${MAX_VOLUME} (100 é o volume normal).`);
+          return reply(`Use um número de 0 a ${MAX_VOLUME} (100 é o volume normal).`, true);
         }
         room.volume = Math.round(value);
         room.pacer.gain = room.volume / 100;
-        return this.say(channel, `Volume: ${room.volume}%. (Cada pessoa também pode ajustar a minha voz só para si, clicando com o botão direito em mim.)`);
+        this.publish(room);
+        return reply(`Volume: ${room.volume}%. (Cada pessoa também pode ajustar a minha voz só para si, clicando com o botão direito em mim.)`);
       }
     }
   }
 
-  private async play(args: string, authorId: Id, author: VoiceSession, channel: Channel): Promise<void> {
+  private async play(args: string, authorId: Id, author: VoiceSession, reply: Reply, channel: Channel | null): Promise<void> {
     const { store, config, source } = this.deps;
     const request = parseMusicRequest(args);
-    if (request.kind === 'invalid') return this.say(channel, request.reason);
+    if (request.kind === 'invalid') return reply(request.reason, true);
     if (this.room && this.room.channelId !== author.channelId) {
       if (this.humans(this.room) > 0) {
-        return this.say(channel, `Já estou tocando em ${this.channelName(this.room.channelId)}. Entre lá ou espere acabar.`);
+        return reply(`Já estou tocando em ${this.channelName(this.room.channelId)}. Entre lá ou espere acabar.`, true);
       }
       this.leave(this.room);
     }
     const requestedBy = store.users.get(authorId)?.displayName ?? 'alguém';
 
     const capacity = config.maxQueue - (this.room?.queue.size ?? 0);
-    if (capacity <= 0) return this.say(channel, `A fila está cheia (${config.maxQueue} músicas).`);
+    if (capacity <= 0) return reply(`A fila está cheia (${config.maxQueue} músicas).`, true);
 
-    let tracks: Track[];
+    let found;
     try {
-      tracks = await source.resolve(request, requestedBy, Math.min(capacity, config.maxPlaylistTracks));
+      found = await source.resolve(request, requestedBy, Math.min(capacity, config.maxPlaylistTracks));
     } catch (err) {
-      if (err instanceof MusicError) return this.say(channel, err.message);
+      if (err instanceof MusicError) return reply(err.message, true);
       throw err;
     }
 
@@ -192,20 +270,22 @@ export class MusicBot implements VoiceObserver {
     const still = store.voice.get(authorId);
     if (!still || still.channelId !== author.channelId) return;
     const room = this.room ?? (await this.join(author, channel));
-    if (!room) return this.say(channel, 'Não consegui entrar na chamada.');
-    room.textChannel = channel;
+    if (!room) return reply('Não consegui entrar na chamada.', true);
+    if (channel) room.textChannel = channel;
 
     const wasIdle = !room.now;
-    const added = room.queue.add(tracks);
+    const added = room.queue.add(found);
     room.idleSince = null;
     if (wasIdle) {
       await this.playNext(room);
-      if (added > 1) await this.say(channel, `Mais ${added - 1} músicas na fila.`);
-    } else if (added === 1) {
-      await this.say(channel, `Na fila (#${room.queue.size}): ${describeTrack(tracks[0])} · pedido por ${requestedBy}`);
+      if (added.length > 1) await reply(`Mais ${added.length - 1} músicas na fila.`);
     } else {
-      await this.say(channel, `${added} músicas adicionadas à fila${added < tracks.length ? ` (a fila comporta ${config.maxQueue})` : ''}.`);
+      this.publish(room);
+      if (added.length === 1) await reply(`Na fila (#${room.queue.size}): ${describeTrack(added[0])} · pedido por ${requestedBy}`);
+      else await reply(`${added.length} músicas adicionadas à fila${added.length < found.length ? ` (a fila comporta ${config.maxQueue})` : ''}.`);
     }
+    // No chat, o aviso "Tocando agora" já vai para o canal; o painel não tem chat, então recebe o texto no retorno.
+    if (wasIdle && !channel) await reply(`Tocando: ${describeTrack(added[0])}.`);
   }
 
   private describeQueue(room: Room): string {
@@ -223,10 +303,29 @@ export class MusicBot implements VoiceObserver {
     return lines.join('\n');
   }
 
+  // ── Estado para o painel ───────────────────────────────────────────────────
+
+  private state(room: Room): MusicState {
+    return {
+      channelId: room.channelId,
+      current: room.now ? { ...trackInfo(room.now.track), positionMs: room.pacer.playedMs } : null,
+      paused: room.paused,
+      volume: room.volume,
+      queue: room.queue.upcoming().map(trackInfo),
+      notice: room.notice,
+    };
+  }
+
+  /** Manda o estado a quem está na sala. */
+  private publish(room: Room): void {
+    if (this.room !== room) return;
+    this.deps.io.to(rooms.voice(room.channelId)).emit('music:state', this.state(room));
+  }
+
   // ── Sala de voz ────────────────────────────────────────────────────────────
 
   /** Entra no canal de voz de quem pediu e liga para quem já está lá. */
-  private async join(author: VoiceSession, channel: Channel): Promise<Room | null> {
+  private async join(author: VoiceSession, channel: Channel | null): Promise<Room | null> {
     const { io, store, ice, wrtc, userId } = this.deps;
     const voiceChannel = store.channels.get(author.channelId);
     if (!voiceChannel) return null;
@@ -272,6 +371,7 @@ export class MusicBot implements VoiceObserver {
       paused: false,
       volume: 100,
       textChannel: channel,
+      notice: null,
       emptySince: null,
       idleSince: null,
       timer: setInterval(() => this.tick(), TICK_MS),
@@ -287,6 +387,7 @@ export class MusicBot implements VoiceObserver {
 
   private leave(room: Room): void {
     if (this.room !== room) return;
+    this.deps.io.to(rooms.voice(room.channelId)).emit('music:state', null);
     this.room = null;
     clearInterval(room.timer);
     room.now?.handle.stop();
@@ -318,8 +419,9 @@ export class MusicBot implements VoiceObserver {
         now.handle.pcm.resume();
       }
     } else if (room.idleSince !== null && Date.now() - room.idleSince > this.deps.config.idleSeconds * 1000) {
-      void this.say(room.textChannel, 'Fila vazia, saindo da chamada. Use `/play` para me chamar de novo.').then(() => this.leave(room));
       room.idleSince = null;
+      const goodbye = room.textChannel ? this.say(room.textChannel, 'Fila vazia, saindo da chamada. Use `/play` para me chamar de novo.') : Promise.resolve();
+      void goodbye.then(() => this.leave(room));
     }
     if (room.emptySince !== null) {
       if (this.humans(room) > 0) room.emptySince = null;
@@ -338,9 +440,11 @@ export class MusicBot implements VoiceObserver {
     if (!track) {
       this.setActivity(room, null);
       room.idleSince = Date.now();
+      this.publish(room);
       return;
     }
     room.idleSince = null;
+    room.notice = null;
     const handle = this.deps.source.open(track);
     const playing: Playing = { track, handle, throttled: false };
     room.now = playing;
@@ -360,16 +464,19 @@ export class MusicBot implements VoiceObserver {
     });
     void handle.finished.then(({ error }) => {
       if (room.now !== playing || !error) return;
-      void this.say(room.textChannel, `Não consegui tocar **${track.title}**: ${error}`);
+      room.notice = `Não consegui tocar ${track.title}: ${error}`;
+      this.publish(room);
+      if (room.textChannel) void this.say(room.textChannel, `Não consegui tocar **${track.title}**: ${error}`);
     });
     if (!room.paused) room.pacer.start();
-    await this.say(room.textChannel, `▶ Tocando agora: ${describeTrack(track)} · pedido por ${track.requestedBy}`);
+    this.publish(room);
+    if (room.textChannel) await this.say(room.textChannel, `▶ Tocando agora: ${describeTrack(track)} · pedido por ${track.requestedBy}`);
   }
 
   private onTrackEnded(): void {
     const room = this.room;
     if (!room) return;
-    this.commands = this.commands.then(() => this.playNext(room)).catch((err: unknown) => console.error('[música] próxima', err));
+    this.enqueue(() => this.playNext(room)).catch((err: unknown) => console.error('[música] próxima', err));
   }
 
   private setActivity(room: Room, text: string | null): void {

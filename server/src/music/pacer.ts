@@ -27,6 +27,7 @@ export class FramePacer {
   private sent = 0;
   private running = false;
   private ending = false;
+  private played = 0;
   /** Multiplicador do volume; 1 deixa o áudio como veio. */
   gain = 1;
 
@@ -35,6 +36,11 @@ export class FramePacer {
     private readonly onEnded: () => void,
     private readonly clock: Clock = realClock,
   ) {}
+
+  /** Milissegundos de áudio já entregues desde o último `stop()` (a posição da música). */
+  get playedMs(): number {
+    return this.played * FRAME_MS;
+  }
 
   /** Milissegundos de áudio esperando para tocar. */
   get bufferedMs(): number {
@@ -71,6 +77,7 @@ export class FramePacer {
     this.chunks = [];
     this.queued = 0;
     this.ending = false;
+    this.played = 0;
   }
 
   private schedule(): void {
@@ -85,8 +92,10 @@ export class FramePacer {
     for (let i = 0; i < Math.min(Math.max(due, 1), MAX_CATCH_UP_FRAMES); i++) {
       const frame = this.take();
       this.sent++;
-      if (frame) this.sink(this.scaled(frame));
-      else if (this.ending) {
+      if (frame) {
+        this.played++;
+        this.sink(this.scaled(frame));
+      } else if (this.ending) {
         this.running = false;
         this.onEnded();
         return;

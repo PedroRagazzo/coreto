@@ -1,9 +1,10 @@
 import type { Id, VoiceParticipant } from '@shared/models';
-import { HeadphoneOff, Mic, MicOff, MonitorUp, PhoneOff, Settings2, Video, VideoOff, Volume2, X } from 'lucide-react';
+import { HeadphoneOff, Mic, MicOff, MonitorUp, Music2, PhoneOff, Settings2, Video, VideoOff, Volume2, X } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useRealtime } from '../state/realtime';
 import { displayNameOf } from '../state/selectors';
 import { Avatar } from './Avatar';
+import { MusicDialog, useMusic } from './MusicDialog';
 import { ScreenShareDialog } from './ScreenShareDialog';
 import { StreamSettingsDialog } from './StreamSettingsDialog';
 import { LiveBadge } from './StreamStage';
@@ -18,6 +19,8 @@ export function CallView() {
   const { state, actions } = useRealtime();
   const [choosingScreen, setChoosingScreen] = useState(false);
   const [configuring, setConfiguring] = useState(false);
+  const [musicOpen, setMusicOpen] = useState(false);
+  const music = useMusic();
   const voice = state.myVoice;
   const room = voice.channelId ? (state.voice[voice.channelId] ?? []) : [];
   const me = state.me?.id;
@@ -77,6 +80,9 @@ export function CallView() {
             <Settings2 size={20} />
           </CallButton>
         )}
+        <CallButton label="Música" active={Boolean(music?.state.current)} onClick={() => setMusicOpen(true)}>
+          <Music2 size={20} />
+        </CallButton>
         <CallButton
           label={voice.muted ? 'Ativar microfone' : 'Desativar microfone'}
           danger={voice.muted}
@@ -91,6 +97,7 @@ export function CallView() {
       </footer>
       {choosingScreen && <ScreenShareDialog onClose={() => setChoosingScreen(false)} />}
       {configuring && voice.streaming && <StreamSettingsDialog onClose={() => setConfiguring(false)} />}
+      {musicOpen && <MusicDialog onClose={() => setMusicOpen(false)} />}
     </>
   );
 }

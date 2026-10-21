@@ -505,6 +505,13 @@ comandos são mensagens de chat comuns; o robô responde no mesmo canal. Entre n
 | `/volume <0 a 150>` | volume do robô para todos (100 é o normal) |
 | `/stop` (`/parar`) · `/help` | para tudo e sai da chamada; lista os comandos |
 
+**Painel da sala.** Quem prefere botões a comandos usa o botão **Música** da faixa da chamada (ou o do rodapé da visão
+da chamada): o painel mostra o que está tocando (com barra de progresso), a fila (com o botão de tirar cada música e de
+limpar), pausa, pula, para, ajusta o volume do robô e tem um campo para colar um link ou digitar o nome da música. Na
+faixa da chamada aparece também uma minifaixa com a música e os botões de pausar e pular. Os pedidos do painel não
+escrevem no chat. Por baixo, o servidor manda `music:state` a todos da sala a cada mudança (e a quem entra depois), e o
+painel pede com `music:play` e controla com `music:control`, com as mesmas regras do chat.
+
 Só quem está num canal de voz usa os comandos, e só quem está na sala do robô controla (pular, pausar...). Ele toca
 numa sala por vez. Sem ninguém na sala por 1 minuto, ou com a fila vazia por 2 minutos (`MUSIC_IDLE_SECONDS`), ele sai.
 Na lista da sala ele aparece com o que está tocando embaixo do nome, e o botão direito nele ajusta o volume só para você,

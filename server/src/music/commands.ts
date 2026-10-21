@@ -1,7 +1,7 @@
 // Comandos de chat do bot de música: "/play <link ou busca>", "/skip", "/queue"... São mensagens
 // comuns que começam com "/"; o que não for um comando conhecido continua sendo só uma mensagem.
 
-export type CommandName = 'play' | 'skip' | 'pause' | 'resume' | 'stop' | 'queue' | 'now' | 'volume' | 'clear' | 'help';
+export type CommandName = 'play' | 'skip' | 'pause' | 'resume' | 'stop' | 'queue' | 'now' | 'volume' | 'clear' | 'help' | 'remove';
 
 export interface MusicCommand {
   name: CommandName;

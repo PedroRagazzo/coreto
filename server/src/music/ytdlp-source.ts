@@ -7,7 +7,7 @@ import { Transform } from 'node:stream';
 import type { MusicConfig } from './config.js';
 import { CookieJar } from './cookies.js';
 import { youtubePlaylistUrl, youtubeVideoUrl, type MusicRequest } from './links.js';
-import type { Track } from './queue.js';
+import type { NewTrack, Track } from './queue.js';
 import { MusicError, type AudioHandle, type MusicSource } from './source.js';
 import { readSpotify, type SpotifyCollection } from './spotify.js';
 
@@ -96,7 +96,7 @@ export class YtDlpSource implements MusicSource {
     });
   }
 
-  async resolve(request: MusicRequest, requestedBy: string, limit: number): Promise<Track[]> {
+  async resolve(request: MusicRequest, requestedBy: string, limit: number): Promise<NewTrack[]> {
     switch (request.kind) {
       case 'youtube-video': {
         const info = await this.json(['--no-playlist', youtubeVideoUrl(request.id)]);
@@ -128,7 +128,7 @@ export class YtDlpSource implements MusicSource {
   }
 
   /** Uma música do YouTube; recusa transmissões ao vivo e músicas longas demais. */
-  private fromInfo(info: YtInfo, requestedBy: string): Track {
+  private fromInfo(info: YtInfo, requestedBy: string): NewTrack {
     if (!info.id || !VIDEO_ID.test(info.id)) throw new MusicError('Não consegui identificar esse vídeo.');
     if (info.is_live || info.live_status === 'is_live') throw new MusicError('Transmissões ao vivo não são suportadas.');
     const duration = typeof info.duration === 'number' && info.duration > 0 ? Math.round(info.duration) : null;
@@ -145,7 +145,7 @@ export class YtDlpSource implements MusicSource {
   }
 
   /** Em listas, o que não dá para tocar (privado, apagado, ao vivo, longo) é pulado em silêncio. */
-  private tryFromInfo(info: YtInfo, requestedBy: string): Track[] {
+  private tryFromInfo(info: YtInfo, requestedBy: string): NewTrack[] {
     if (!info.title || /^\[(private|deleted) video\]$/i.test(info.title)) return [];
     try {
       return [this.fromInfo(info, requestedBy)];

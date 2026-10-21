@@ -22,6 +22,8 @@ import {
   type CreateChannelRequest,
   type Ack,
   type DirectConversationPayload,
+  type MusicControl,
+  type MusicState,
   type SearchRequest,
   type SearchResult,
   type SelectableStatus,
@@ -89,6 +91,8 @@ export interface RealtimeState {
   mentions: Record<Id, MentionCount>;
   /** Quem está falando agora na sua chamada (medido localmente). */
   speaking: Record<Id, true>;
+  /** O bot de música na sua sala de voz, com a hora local em que o estado chegou (para andar a barra de progresso). */
+  music: { state: MusicState; receivedAt: number } | null;
   /** Sua tela, enquanto você transmite (para a prévia). */
   myScreen: MediaStream | null;
   /** Telas que chegam de outras pessoas da chamada, por quem transmite. */
@@ -141,6 +145,7 @@ const initialState: RealtimeState = {
   myVoice: IDLE_VOICE,
   mentions: {},
   speaking: {},
+  music: null,
   myScreen: null,
   screens: {},
   stage: null,
@@ -194,6 +199,7 @@ type Action =
   | { type: 'voice:self'; patch: Partial<MyVoiceState> }
   | { type: 'mentions:update'; mention: MentionCount }
   | { type: 'speaking'; userIds: Id[] }
+  | { type: 'music:state'; state: MusicState | null }
   | { type: 'screen:mine'; stream: MediaStream | null }
   | { type: 'screen:remote'; userId: Id; stream: MediaStream | null }
   | { type: 'stage'; userId: Id | null }
@@ -483,6 +489,7 @@ function reducer(state: RealtimeState, action: Action): RealtimeState {
         return {
           ...state,
           myVoice: { ...myVoice, streaming: false, video: false },
+          music: null,
           myScreen: null,
           screens: {},
           stage: null,
@@ -507,6 +514,9 @@ function reducer(state: RealtimeState, action: Action): RealtimeState {
 
     case 'speaking':
       return { ...state, speaking: Object.fromEntries(action.userIds.map((id) => [id, true as const])) };
+
+    case 'music:state':
+      return { ...state, music: action.state ? { state: action.state, receivedAt: Date.now() } : null };
 
     case 'screen:mine':
       return {
@@ -576,6 +586,10 @@ export interface RealtimeActions {
   /** Abre o seletor de tela e começa a transmitir. Resolve com erro ou `null` (também se a pessoa cancelar). */
   startScreenShare(options: ScreenShareOptions): Promise<string | null>;
   stopScreenShare(): void;
+  /** Pede uma música ao bot (link do YouTube/Spotify ou busca). Devolve o aviso para mostrar, ou o motivo da recusa. */
+  musicPlay(input: string): Promise<{ message: string } | { error: string }>;
+  /** Controla o bot de música (pular, pausar, volume...). Devolve o motivo da recusa, ou `null`. */
+  musicControl(request: MusicControl): Promise<string | null>;
   /** As opções da transmissão em andamento, ou `null` se você não está transmitindo. */
   screenOptions(): ScreenShareOptions | null;
   /** Muda a qualidade com a transmissão no ar; devolve as opções valendo, ou `null` se ela acabou. */
@@ -945,6 +959,17 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
         return voiceRef.current?.updateScreen(patch) ?? Promise.resolve(null);
       },
 
+      async musicPlay(input) {
+        const res = await socketRef.current?.emitWithAck('music:play', { input });
+        if (!res) return { error: 'Sem conexão com o servidor.' };
+        return res.ok ? { message: res.data.message } : { error: res.error };
+      },
+
+      async musicControl(request) {
+        const res = await socketRef.current?.emitWithAck('music:control', request);
+        return !res ? 'Sem conexão com o servidor.' : res.ok ? null : res.error;
+      },
+
       stopScreenShare() {
         voiceRef.current?.stopScreen();
         socketRef.current?.emit('stream:stop');
@@ -1149,6 +1174,7 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
     socket.on('voice:update', ({ channelId, participants }) =>
       dispatch({ type: 'voice:update', channelId, participants }),
     );
+    socket.on('music:state', (musicState) => dispatch({ type: 'music:state', state: musicState }));
     socket.on('voice:ended', ({ reason }) => {
       voice.teardown();
       dispatch({ type: 'voice:self', patch: { ...IDLE_VOICE, error: reason } });

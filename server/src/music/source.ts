@@ -3,7 +3,7 @@
 
 import type { Readable } from 'node:stream';
 import type { MusicRequest } from './links.js';
-import type { Track } from './queue.js';
+import type { NewTrack, Track } from './queue.js';
 
 /** Erro com mensagem pronta para mostrar no chat. */
 export class MusicError extends Error {}
@@ -19,7 +19,7 @@ export interface AudioHandle {
 
 export interface MusicSource {
   /** Transforma o pedido em músicas; lança `MusicError` com o motivo se não der. */
-  resolve(request: MusicRequest, requestedBy: string, limit: number): Promise<Track[]>;
+  resolve(request: MusicRequest, requestedBy: string, limit: number): Promise<NewTrack[]>;
   open(track: Track): AudioHandle;
 }
 

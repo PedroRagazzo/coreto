@@ -1,6 +1,6 @@
 import { Readable } from 'node:stream';
 import type { MusicRequest } from '../../src/music/links.js';
-import type { Track } from '../../src/music/queue.js';
+import type { NewTrack, Track } from '../../src/music/queue.js';
 import { MusicError, type AudioHandle, type MusicSource } from '../../src/music/source.js';
 
 /**
@@ -10,8 +10,8 @@ import { MusicError, type AudioHandle, type MusicSource } from '../../src/music/
 export class FakeMusicSource implements MusicSource {
   readonly opened: string[] = [];
 
-  async resolve(request: MusicRequest, requestedBy: string): Promise<Track[]> {
-    const make = (title: string, source = `fake:${title}`, durationSeconds = 4): Track => ({
+  async resolve(request: MusicRequest, requestedBy: string): Promise<NewTrack[]> {
+    const make = (title: string, source = `fake:${title}`, durationSeconds = 4): NewTrack => ({
       requestedBy,
       title,
       artist: 'Banda de Teste',

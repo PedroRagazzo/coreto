@@ -74,6 +74,36 @@ export type SignalPayload =
    */
   | { kind: 'media'; camera: string; screen: string };
 
+/** Uma música da fila do bot de música. */
+export interface MusicTrackInfo {
+  /** Identifica a música na fila (para tirá-la de lá). */
+  id: string;
+  title: string;
+  artist: string | null;
+  /** Em segundos; `null` quando não se sabe. */
+  durationSeconds: number | null;
+  /** Nome de quem pediu. */
+  requestedBy: string;
+}
+
+/** O que o bot de música está fazendo na sala de voz; chega a quem está nela. */
+export interface MusicState {
+  channelId: Id;
+  /** A que está tocando, com o ponto em que está; `null` com a fila parada. */
+  current: (MusicTrackInfo & { positionMs: number }) | null;
+  paused: boolean;
+  /** 0 a 150; 100 é o volume normal. */
+  volume: number;
+  queue: MusicTrackInfo[];
+  /** Último problema ao tocar (ex.: vídeo privado); some quando a próxima música começa. */
+  notice: string | null;
+}
+
+export type MusicControl =
+  | { action: 'skip' | 'pause' | 'resume' | 'stop' | 'clear' }
+  | { action: 'remove'; id: string }
+  | { action: 'volume'; volume: number };
+
 export interface IceServer {
   urls: string | string[];
   username?: string;
@@ -197,8 +227,12 @@ export interface ClientToServerEvents {
   'stream:preview': (req: { image: string }) => void;
   /** A miniatura mais recente da transmissão de alguém da sala; `null` se ainda não chegou nenhuma. */
   'stream:preview:get': (req: { userId: Id }, ack: (res: Ack<{ image: string | null }>) => void) => void;
+  /** Pede uma música ao bot (link do YouTube/Spotify ou busca); a resposta traz o aviso para mostrar. */
+  'music:play': (req: { input: string }, ack: (res: Ack<{ message: string }>) => void) => void;
+  /** Controla o bot de música; só quem está na mesma sala de voz que ele. */
+  'music:control': (req: MusicControl, ack: (res: Ack<null>) => void) => void;
   /** Assiste à transmissão de alguém da mesma sala (uma de cada vez). */
-  'stream:watch': (req: { userId: Id }, ack: (res: Ack<null>) => void) => void;
+  'stream:watch':(req: { userId: Id }, ack: (res: Ack<null>) => void) => void;
   'stream:unwatch': () => void;
 }
 
@@ -235,6 +269,8 @@ export interface ServerToClientEvents {
   'voice:peer-left': (payload: { userId: Id }) => void;
   'voice:signal': (payload: { from: Id; signal: SignalPayload }) => void;
   'voice:ended': (payload: { reason: string }) => void;
+  /** O estado do bot de música na sala em que você está; `null` quando ele saiu da chamada. */
+  'music:state': (state: MusicState | null) => void;
 }
 
 export interface SocketData {

@@ -114,6 +114,8 @@ export function registerVoice(io: IO, socket: AppSocket, store: Store, ice: IceC
     void socket.join(rooms.voice(channel.id));
     broadcastRoster(io, store, channel.spaceId, channel.id);
     ack({ ok: true, data: { peers, iceServers: ice.iceServers(userId), iceTransportPolicy: ice.transportPolicy } });
+    const session = store.voice.get(userId);
+    if (session) for (const observer of store.voiceObservers) observer.sessionStarted?.(session);
   });
 
   socket.on('voice:leave', leave);

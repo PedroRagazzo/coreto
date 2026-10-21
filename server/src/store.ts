@@ -84,6 +84,8 @@ export const toParticipant = ({
 export interface VoiceObserver {
   /** A sinalização é para um participante que vive no servidor; devolve `true` se foi tratada. */
   signal?(from: Id, to: Id, signal: SignalPayload): boolean;
+  /** Alguém entrou na sala de voz (a sessão já está registrada). */
+  sessionStarted?(session: VoiceSession): void;
   /** Alguém saiu da sala (por conta própria, desconexão ou porque o canal acabou). */
   sessionEnded?(session: VoiceSession): void;
 }

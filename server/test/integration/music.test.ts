@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { Message, VoiceParticipant } from '../../../shared/src/models.js';
+import type { MusicControl, MusicState } from '../../../shared/src/protocol.js';
 import { loadWrtc, type Wrtc } from '../../src/music/bot-voice.js';
 import { BOT_NAME } from '../../src/music/bot.js';
 import { createMusic, musicConfigFromEnv, type MusicBot } from '../../src/music/index.js';
@@ -220,4 +221,112 @@ describe.skipIf(!hasTestDatabase)('bot de música', () => {
     await ana.send('/shrug');
     expect(await quiet).toBe('calado');
   }, 15_000);
+
+  describe('painel da sala', () => {
+    const state = (p: Person, check: (s: MusicState | null) => boolean = () => true, ms = 8_000) =>
+      nextEvent(p.client.socket, 'music:state', check, ms);
+    const play = async (p: Person, input: string) => ok(await p.client.socket.emitWithAck('music:play', { input }));
+    const control = (p: Person, request: MusicControl) => p.client.socket.emitWithAck('music:control', request);
+
+    it('pede música, mostra o que toca e a fila, e controla tudo sem usar o chat', async () => {
+      const ana = await person('Ana');
+      const chatReplies: string[] = [];
+      ana.client.socket.on('message:new', (m: Message) => m.authorId === ana.botId && chatReplies.push(m.content));
+
+      let playing = state(ana, (s) => s?.current?.title === 'luar');
+      const first = await play(ana, 'luar');
+      expect(first.message).toContain('Tocando');
+      const s1 = (await playing)!;
+      expect(s1).toMatchObject({ paused: false, volume: 100, queue: [], notice: null });
+      expect(s1.current).toMatchObject({ title: 'luar', artist: 'Banda de Teste', requestedBy: expect.stringContaining('Ana') });
+
+      // Segunda música: entra na fila com id.
+      const queued = state(ana, (s) => (s?.queue.length ?? 0) === 1);
+      expect((await play(ana, 'dois')).message).toContain('Na fila');
+      const s2 = (await queued)!;
+      expect(s2.queue[0]).toMatchObject({ title: 'dois' });
+      expect(s2.queue[0].id).toBeTruthy();
+
+      // Volume, pausa (com a posição andando) e retomada.
+      let next = state(ana, (s) => s?.volume === 40);
+      ok(await control(ana, { action: 'volume', volume: 40 }));
+      await next;
+      await wait(1200);
+      next = state(ana, (s) => s?.paused === true);
+      ok(await control(ana, { action: 'pause' }));
+      const paused = (await next)!;
+      expect(paused.current!.positionMs).toBeGreaterThan(800);
+      next = state(ana, (s) => s?.paused === false);
+      ok(await control(ana, { action: 'resume' }));
+      await next;
+
+      // Tirar da fila e esvaziar.
+      next = state(ana, (s) => s?.queue.length === 0);
+      ok(await control(ana, { action: 'remove', id: s2.queue[0].id }));
+      await next;
+      expect(await control(ana, { action: 'remove', id: s2.queue[0].id })).toEqual({ ok: false, error: 'Essa música já saiu da fila.' });
+      await play(ana, 'tres');
+      next = state(ana, (s) => s?.queue.length === 0 && s?.current?.title === 'luar');
+      ok(await control(ana, { action: 'clear' }));
+      await next;
+
+      // Pular sem fila: a música acaba e o painel mostra a sala parada.
+      next = state(ana, (s) => s !== null && s.current === null);
+      ok(await control(ana, { action: 'skip' }));
+      await next;
+
+      // Parar: o bot sai e o painel recebe `null`.
+      const left = state(ana, (s) => s === null);
+      await play(ana, 'quatro');
+      ok(await control(ana, { action: 'stop' }));
+      await left;
+
+      // Nada disso falou no chat: o painel não tem canal de texto.
+      expect(chatReplies).toEqual([]);
+    }, 40_000);
+
+    it('quem entra na sala com o bot tocando já recebe o estado', async () => {
+      const ana = await person('Ana');
+      await play(ana, 'cancao');
+      const bruno = await person('Bruno', { inVoice: false });
+      const got = state(bruno, (s) => s?.current?.title === 'cancao');
+      ok(await bruno.client.socket.emitWithAck('voice:join', { channelId: bruno.voice }));
+      expect((await got)!.channelId).toBe(bruno.voice);
+      ok(await control(ana, { action: 'stop' }));
+    }, 30_000);
+
+    it('avisa no painel quando uma música não toca', async () => {
+      const ana = await person('Ana');
+      const failed = state(ana, (s) => Boolean(s?.notice));
+      await play(ana, 'quebrada');
+      expect((await failed)!.notice).toContain('Esse vídeo é privado');
+      ok(await control(ana, { action: 'stop' }));
+    }, 30_000);
+
+    it('recusa quem não está em voz, quem está em outra sala e pedidos malformados', async () => {
+      const fora = await person('Fora', { inVoice: false });
+      expect(await fora.client.socket.emitWithAck('music:play', { input: 'oi' })).toEqual({
+        ok: false,
+        error: 'Entre em um canal de voz antes de usar os comandos de música.',
+      });
+      expect((await control(fora, { action: 'skip' })).ok).toBe(false);
+
+      const ana = await person('Ana');
+      await play(ana, 'toco');
+      const outra = await person('Carla', { inVoice: false });
+      const pareamento = channelNamed(await joinDemoSpace(outra.client), 'Pareamento').id;
+      ok(await outra.client.socket.emitWithAck('voice:join', { channelId: pareamento }));
+      const refused = await control(outra, { action: 'skip' });
+      expect(refused.ok).toBe(false);
+      expect(refused.ok === false && refused.error).toContain('Só quem está no canal de voz');
+
+      const invalid = await ana.client.socket.emitWithAck('music:control', { action: 'explodir' } as never);
+      expect(invalid).toEqual({ ok: false, error: 'Pedido inválido.' });
+      expect(await ana.client.socket.emitWithAck('music:play', { input: 'https://exemplo.com/x.mp3' })).toEqual({
+        ok: false,
+        error: 'Só links do YouTube e do Spotify.',
+      });
+      ok(await control(ana, { action: 'stop' }));
+    }, 40_000);
+  });
 });
