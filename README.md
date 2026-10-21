@@ -530,15 +530,26 @@ log. O áudio do robô atravessa a rede como o de qualquer pessoa, então a cham
 | `YTDLP_PATH`, `FFMPEG_PATH` | `yt-dlp` e `ffmpeg` no PATH |
 | `YTDLP_COOKIES_FILE` | nenhum. Arquivo `cookies.txt` de uma conta do YouTube (veja abaixo) |
 | `YTDLP_JS_RUNTIMES` | `node`. Runtime que o `yt-dlp` usa para decifrar o YouTube |
+| `YTDLP_EXTRA_ARGS` | nenhum. Argumentos extras para o `yt-dlp`, separados por espaço (ex.: `--proxy socks5://host:1080`) |
 | `MUSIC_MAX_QUEUE` / `MUSIC_MAX_PLAYLIST` / `MUSIC_MAX_MINUTES` | `50` músicas / `25` por pedido / `180` minutos |
 | `MUSIC_IDLE_SECONDS` | `120` |
 
 **Avisos importantes.**
 
 - **O YouTube costuma bloquear IPs de servidor** ("confirme que você não é um robô"). Quando isso acontece o robô
-  responde com o motivo. A saída é dar cookies de uma conta do YouTube ao `yt-dlp`: exporte um `cookies.txt` (por
-  exemplo com uma extensão de navegador), coloque-o num volume do container e defina `YTDLP_COOKIES_FILE` com o caminho.
-  Use uma conta secundária: o YouTube pode restringi-la.
+  responde com o motivo. A saída é dar cookies de uma conta do YouTube ao `yt-dlp`:
+  1. Use uma conta Google **secundária** (o YouTube pode restringi-la por ser usada de um servidor).
+  2. Numa **janela anônima**, entre nessa conta no YouTube, abra `https://www.youtube.com/robots.txt` na mesma aba,
+     exporte os cookies de `youtube.com` no formato Netscape (extensão como "Get cookies.txt LOCALLY") e feche a janela
+     anônima. Assim o YouTube não troca os cookies depois e o arquivo dura mais.
+  3. No Dokploy, na aplicação: **Advanced → Mounts → File Mount**, cole o conteúdo do `cookies.txt` e escolha o
+     caminho de montagem (por exemplo `/app/cookies.txt`).
+  4. Em **Environment**, defina `YTDLP_COOKIES_FILE=/app/cookies.txt` e faça o deploy de novo.
+
+  O arquivo é um segredo (quem o tem entra na conta): nunca o publique nem o ponha no repositório. O servidor trabalha
+  numa cópia dele na pasta temporária, porque o `yt-dlp` regrava o arquivo e a montagem pode ser somente leitura. Se o
+  robô disser que o YouTube "recusou os cookies", exporte de novo. Outra saída, sem conta: `YTDLP_EXTRA_ARGS` com um
+  proxy residencial (`--proxy socks5://...`).
 - Baixar áudio do YouTube viola os termos de uso dele (bots como Rythm e Groovy foram fechados por isso no Discord). Em
   um servidor pequeno de amigos o risco é baixo, mas é seu.
 - O `yt-dlp` precisa acompanhar o YouTube: se de repente nada tocar, atualize a versão no `Dockerfile` (`YTDLP_VERSION`

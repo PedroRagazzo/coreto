@@ -4,6 +4,11 @@ import { parseMusicRequest } from '../../src/music/links.js';
 import { describeTrack, formatDuration, TrackQueue, type Track } from '../../src/music/queue.js';
 import { parseEmbed } from '../../src/music/spotify.js';
 import { explainYtDlpError } from '../../src/music/ytdlp-source.js';
+import { mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { musicConfigFromEnv } from '../../src/music/config.js';
+import { CookieJar } from '../../src/music/cookies.js';
 
 describe('links do bot de música', () => {
   const id = 'dQw4w9WgXcQ';
@@ -172,5 +177,54 @@ describe('erros do yt-dlp em português', () => {
     ['', 'Não consegui carregar esse áudio'],
   ])('%s', (stderr, expected) => {
     expect(explainYtDlpError(stderr)).toContain(expected);
+  });
+});
+
+describe('erro de bloqueio com e sem cookies', () => {
+  it('manda configurar os cookies, ou renová-los se já existirem', () => {
+    const blocked = "ERROR: Sign in to confirm you're not a bot";
+    expect(explainYtDlpError(blocked)).toContain('YTDLP_COOKIES_FILE');
+    expect(explainYtDlpError(blocked, true)).toContain('exportar o cookies.txt de novo');
+  });
+});
+
+describe('cookies do YouTube', () => {
+  it('trabalha numa cópia (o original pode ser somente leitura) e a atualiza quando o original muda', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'coreto-cookies-'));
+    try {
+      const original = join(dir, 'cookies.txt');
+      const header = '# Netscape HTTP Cookie File';
+      writeFileSync(original, `${header} A`);
+      const jar = new CookieJar(original);
+      const copy = jar.path();
+      expect(copy).not.toBeNull();
+      expect(copy).not.toBe(original);
+      expect(readFileSync(copy!, 'utf8')).toContain('A');
+
+      // O yt-dlp regrava a cópia; o original não é tocado.
+      writeFileSync(copy!, 'renovado');
+      expect(jar.path()).toBe(copy);
+      expect(readFileSync(copy!, 'utf8')).toBe('renovado');
+      expect(readFileSync(original, 'utf8')).toContain('A');
+
+      // O administrador trocou o arquivo: a cópia é refeita.
+      writeFileSync(original, `${header} B`);
+      const later = new Date(Date.now() + 5000);
+      utimesSync(original, later, later);
+      expect(readFileSync(jar.path()!, 'utf8')).toContain('B');
+      rmSync(copy!, { force: true });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('sem arquivo configurado, ou com arquivo que não existe, segue sem cookies', () => {
+    expect(new CookieJar(null).path()).toBeNull();
+    expect(new CookieJar(join(tmpdir(), 'coreto-nao-existe.txt')).path()).toBeNull();
+  });
+
+  it('lê os argumentos extras do yt-dlp do ambiente', () => {
+    expect(musicConfigFromEnv({ YTDLP_EXTRA_ARGS: ' --proxy   socks5://h:1080 ' }).extraArgs).toEqual(['--proxy', 'socks5://h:1080']);
+    expect(musicConfigFromEnv({}).extraArgs).toEqual([]);
   });
 });

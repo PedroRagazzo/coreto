@@ -5,6 +5,7 @@
 import { execFile, spawn } from 'node:child_process';
 import { Transform } from 'node:stream';
 import type { MusicConfig } from './config.js';
+import { CookieJar } from './cookies.js';
 import { youtubePlaylistUrl, youtubeVideoUrl, type MusicRequest } from './links.js';
 import type { Track } from './queue.js';
 import { MusicError, type AudioHandle, type MusicSource } from './source.js';
@@ -28,10 +29,12 @@ interface YtInfo {
 }
 
 /** Traduz a saída de erro do yt-dlp para algo que o chat entenda. */
-export function explainYtDlpError(stderr: string): string {
+export function explainYtDlpError(stderr: string, hasCookies = false): string {
   const text = stderr.toLowerCase();
   if (text.includes('not a bot') || text.includes('sign in to confirm')) {
-    return 'O YouTube bloqueou este servidor (pediu para confirmar que não sou um robô). Quem administra o Coreto precisa configurar os cookies do YouTube (YTDLP_COOKIES_FILE).';
+    return hasCookies
+      ? 'O YouTube recusou os cookies configurados (podem ter expirado). Quem administra o Coreto precisa exportar o cookies.txt de novo.'
+      : 'O YouTube bloqueou este servidor (pediu para confirmar que não sou um robô). Quem administra o Coreto precisa configurar os cookies do YouTube (YTDLP_COOKIES_FILE).';
   }
   if (text.includes('private video')) return 'Esse vídeo é privado.';
   if (text.includes('age') && text.includes('restricted')) return 'Esse vídeo tem restrição de idade.';
@@ -45,10 +48,14 @@ export function explainYtDlpError(stderr: string): string {
 }
 
 export class YtDlpSource implements MusicSource {
+  private readonly cookies: CookieJar;
+
   constructor(
     private readonly config: MusicConfig,
     private readonly spotify: typeof readSpotify = readSpotify,
-  ) {}
+  ) {
+    this.cookies = new CookieJar(config.cookiesFile);
+  }
 
   private baseArgs(): string[] {
     return [
@@ -61,8 +68,14 @@ export class YtDlpSource implements MusicSource {
       '3',
       '--js-runtimes',
       this.config.jsRuntimes,
-      ...(this.config.cookiesFile ? ['--cookies', this.config.cookiesFile] : []),
+      ...this.cookieArgs(),
+      ...this.config.extraArgs,
     ];
+  }
+
+  private cookieArgs(): string[] {
+    const path = this.cookies.path();
+    return path ? ['--cookies', path] : [];
   }
 
   private json(args: string[]): Promise<YtInfo> {
@@ -72,7 +85,7 @@ export class YtDlpSource implements MusicSource {
         [...this.baseArgs(), '-J', ...args],
         { maxBuffer: MAX_JSON_BYTES, timeout: RESOLVE_TIMEOUT_MS, windowsHide: true },
         (err, stdout, stderr) => {
-          if (err) return reject(new MusicError(explainYtDlpError(String(stderr) || err.message)));
+          if (err) return reject(new MusicError(explainYtDlpError(String(stderr) || err.message, this.cookies.path() !== null)));
           try {
             resolve(JSON.parse(stdout) as YtInfo);
           } catch {
@@ -170,6 +183,7 @@ export class YtDlpSource implements MusicSource {
     ytdlp.stderr.on('data', (d: Buffer) => (ytdlpErrors = (ytdlpErrors + d).slice(-4000)));
     ffmpeg.stderr.on('data', (d: Buffer) => (ffmpegErrors = (ffmpegErrors + d).slice(-2000)));
 
+    const hasCookies = this.cookies.path() !== null;
     let stopped = false;
     let timedOut = false;
     const stop = () => {
@@ -193,7 +207,7 @@ export class YtDlpSource implements MusicSource {
         if (stopped && !timedOut) return resolve({ bytes, error: null });
         if (timedOut) return resolve({ bytes, error: 'O áudio demorou demais para começar.' });
         if (ytdlpCode !== 0 || bytes === 0) {
-          return resolve({ bytes, error: explainYtDlpError(ytdlpErrors || ffmpegErrors) });
+          return resolve({ bytes, error: explainYtDlpError(ytdlpErrors || ffmpegErrors, hasCookies) });
         }
         resolve({ bytes, error: null });
       };
