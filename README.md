@@ -112,9 +112,9 @@ de mídia (ou se ele cair), a tela segue pela malha como antes, sem ninguém pre
    ```
 
    Faça o deploy do app de novo. Quem entrar numa chamada a partir daí transmite pelo servidor de mídia.
-5. Para conferir de fora, sem o segredo: `node deploy/livekit/check.mjs livekit.<IP>.nip.io <IP>` (domínio HTTPS,
-   porta TCP 7881 e porta UDP 7882). No palco da transmissão, o painel de estatísticas mostra
-   "servidor de mídia" quando a imagem está passando por ele e "direto (P2P)" quando não.
+5. Para conferir de fora, sem o segredo: `node deploy/livekit/check.mjs livekit.<IP>.nip.io <IP>` (domínio HTTPS e porta
+   TCP 7881). A porta UDP 7882 só se confere com uma transmissão de verdade: no palco, o painel de estatísticas
+   mostra "servidor de mídia" quando a imagem está passando por ele e "direto (P2P)" quando não.
 
 O servidor do Coreto só assina os tokens de acesso (JWT) com o segredo; quem pode transmitir (permissão STREAM)
 recebe um token que envia vídeo, e os outros, um que só recebe. A sala do LiveKit é a sala de voz. Quem está atrás
