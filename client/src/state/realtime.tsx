@@ -1237,6 +1237,11 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
     if (watchingOnServer && state.stage !== watchingOnServer) socketRef.current?.emit('stream:unwatch');
   }, [watchingOnServer, state.stage]);
 
+  // Com servidor de mídia, a imagem de quem você assiste chega de lá: avisa de quem é.
+  useEffect(() => {
+    voiceRef.current?.setWatching(watchingOnServer);
+  }, [watchingOnServer]);
+
   const value = useMemo(() => ({ state, actions }), [state, actions]);
   return <RealtimeContext.Provider value={value}>{children}</RealtimeContext.Provider>;
 }

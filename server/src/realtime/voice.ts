@@ -10,6 +10,7 @@ import type { Id } from '../../../shared/src/models.js';
 import { Permission } from '../../../shared/src/permissions.js';
 import type { SignalPayload } from '../../../shared/src/protocol.js';
 import { toParticipant, type Store, type VoiceSession } from '../store.js';
+import type { SfuConfig } from '../sfu.js';
 import type { IceConfig } from '../turn.js';
 import { channelWithPermission, isFunction } from './guards.js';
 import { rooms, type AppSocket, type IO } from './types.js';
@@ -74,7 +75,7 @@ function stopWatchersOf(store: Store, streamer: VoiceSession): void {
   }
 }
 
-export function registerVoice(io: IO, socket: AppSocket, store: Store, ice: IceConfig): void {
+export function registerVoice(io: IO, socket: AppSocket, store: Store, ice: IceConfig, sfu: SfuConfig | null = null): void {
   const { userId } = socket.data;
   const endSession = (session: VoiceSession, reason?: string) => endVoiceSession(io, store, session, reason);
 
@@ -113,7 +114,10 @@ export function registerVoice(io: IO, socket: AppSocket, store: Store, ice: IceC
     });
     void socket.join(rooms.voice(channel.id));
     broadcastRoster(io, store, channel.spaceId, channel.id);
-    ack({ ok: true, data: { peers, iceServers: ice.iceServers(userId), iceTransportPolicy: ice.transportPolicy } });
+    ack({
+      ok: true,
+      data: { peers, iceServers: ice.iceServers(userId), iceTransportPolicy: ice.transportPolicy, sfu: Boolean(sfu?.ready()) },
+    });
     const session = store.voice.get(userId);
     if (session) for (const observer of store.voiceObservers) observer.sessionStarted?.(session);
   });
@@ -176,6 +180,17 @@ export function registerVoice(io: IO, socket: AppSocket, store: Store, ice: IceC
     session.streamPreview = null;
     stopWatchersOf(store, session);
     broadcastRoster(io, store, session.spaceId, session.channelId);
+  });
+
+  // A sala do servidor de mídia é a sala de voz: só quem está na chamada entra, e só quem pode
+  // transmitir (STREAM) recebe o direito de enviar vídeo.
+  socket.on('sfu:token', (ack) => {
+    if (!isFunction(ack)) return;
+    const session = mySession();
+    if (!session) return ack({ ok: false, error: 'Entre em um canal de voz primeiro.' });
+    if (!sfu?.ready()) return ack({ ok: false, error: 'O servidor de mídia não está disponível.' });
+    const canPublish = Boolean(channelWithPermission(store, userId, session.channelId, 'voice', Permission.STREAM));
+    ack({ ok: true, data: { url: sfu.url, token: sfu.token({ userId, channelId: session.channelId, canPublish }) } });
   });
 
   socket.on('stream:preview', (req) => {

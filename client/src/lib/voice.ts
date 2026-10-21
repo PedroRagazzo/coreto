@@ -11,6 +11,7 @@
 
 import type { Id } from '@shared/models';
 import type { IceServer, SignalPayload } from '@shared/protocol';
+import type { SfuSession } from './sfu';
 import { resolutionScale, viewerBitrate } from '@shared/stream-quality';
 import {
   DEFAULT_SETTINGS,
@@ -328,6 +329,8 @@ export interface StreamStats {
   limit: 'none' | 'bandwidth' | 'cpu' | 'other' | null;
   /** Só ao transmitir: para quantas pessoas o vídeo está indo. */
   viewers: number;
+  /** Por onde a imagem passa: pelo servidor de mídia (uma cópia só) ou direto entre os navegadores (uma cópia por espectador). */
+  via: 'sfu' | 'p2p';
 }
 
 function codecName(report: RTCStatsReport, codecId: unknown): string | null {
@@ -401,7 +404,30 @@ export class VoiceManager {
   private deafened = false;
   private selfId: Id | null = null;
   private readonly detector: SpeakingDetector;
-  private screen: { stream: MediaStream; options: ScreenShareOptions; feed: AppAudioFeed | null; preview: PreviewCapture } | null = null;
+  /**
+   * `transport` diz por onde a tela sai: `pending` enquanto tenta o servidor de mídia (ninguém recebe
+   * pela malha nesse meio-tempo, para a imagem não chegar duas vezes), `sfu` quando já está lá, `p2p`
+   * quando não há servidor de mídia ou ele falhou.
+   */
+  private screen: {
+    stream: MediaStream;
+    options: ScreenShareOptions;
+    feed: AppAudioFeed | null;
+    preview: PreviewCapture;
+    transport: 'pending' | 'sfu' | 'p2p';
+    /** O servidor de mídia caiu por um instante e a tela está na malha até ele voltar. */
+    sfuInterrupted?: boolean;
+  } | null = null;
+  /** As telas que chegam de outras pessoas, por onde chegam, e a que cada pessoa está vendo agora. */
+  private readonly remoteScreens = { sfu: new Map<Id, MediaStream>(), p2p: new Map<Id, MediaStream>() };
+  private readonly shownScreens = new Map<Id, MediaStream>();
+  private sfuInterruptedForViewing = false;
+  /** O servidor avisou, ao entrar, que há servidor de mídia para as transmissões. */
+  private sfuAvailable = false;
+  private sfuSession: SfuSession | null = null;
+  private sfuConnecting: Promise<SfuSession | null> | null = null;
+  /** De quem você assiste a tela agora (segundo o servidor). */
+  private watchedScreen: Id | null = null;
   private camera: MediaStream | null = null;
   /** Fluxos fixos onde câmera e tela viajam; os ids são anunciados a cada pessoa. */
   private cameraCarrier = new MediaStream();
@@ -447,6 +473,7 @@ export class VoiceManager {
     this.screenCarrier = new MediaStream();
     this.iceServers = res.data.iceServers;
     this.iceTransportPolicy = res.data.iceTransportPolicy;
+    this.sfuAvailable = res.data.sfu;
     this.selfId = selfId;
     this.setMuted(startMuted);
     // Microfone desativado manda silêncio, então você deixa de "falar" sozinho.
@@ -466,6 +493,13 @@ export class VoiceManager {
     this.stopScreen();
     this.stopCamera();
     for (const peerId of [...this.peers.keys()]) this.closePeer(peerId);
+    this.closeSfu();
+    this.remoteScreens.sfu.clear();
+    this.remoteScreens.p2p.clear();
+    this.shownScreens.clear();
+    this.sfuInterruptedForViewing = false;
+    this.sfuAvailable = false;
+    this.watchedScreen = null;
     if (this.selfId) this.detector.unwatch(this.selfId);
     this.detector.stop();
     this.mic?.close();
@@ -566,9 +600,141 @@ export class VoiceManager {
       if (this.screen?.stream === stream) this.events.onScreenEnded?.();
     });
     const preview = new PreviewCapture(stream, (image) => this.socket.emit('stream:preview', { image }));
-    this.screen = { stream, options, feed, preview };
+    const screen = { stream, options, feed, preview, transport: this.sfuAvailable ? ('pending' as const) : ('p2p' as const) };
+    this.screen = screen;
     this.applyScreenViewers();
+    if (this.sfuAvailable) void this.publishViaSfu(screen);
     return { stream, audioFailed, title: await captureTitle(video) };
+  }
+
+  /**
+   * Tenta mandar a tela pelo servidor de mídia. Se ele não responde, a tela segue pela malha P2P,
+   * como sem servidor de mídia nenhum: ninguém fica sem imagem.
+   */
+  private async publishViaSfu(screen: NonNullable<VoiceManager['screen']>): Promise<void> {
+    const stillMine = () => this.screen === screen;
+    try {
+      const session = await this.connectSfu();
+      const [video] = screen.stream.getVideoTracks();
+      const [audio] = screen.stream.getAudioTracks();
+      if (!session || !video || !stillMine()) throw new Error(session ? 'a transmissão acabou' : 'sem conexão com o servidor de mídia');
+      const bitrate = viewerBitrate(screen.options, 1);
+      await session.publishScreen(video, audio ?? null, {
+        maxBitrate: bitrate,
+        maxFramerate: screen.options.frameRate,
+        priority: screen.options.priority,
+      });
+      if (!stillMine()) {
+        void session.unpublishScreen();
+        return;
+      }
+      screen.transport = 'sfu';
+    } catch (err) {
+      if (!stillMine()) return;
+      console.warn('[voz] servidor de mídia indisponível; a tela vai pela malha P2P', err);
+      screen.transport = 'p2p';
+    }
+    this.applyScreenViewers();
+  }
+
+  /** Entra (uma vez por chamada) na sala do servidor de mídia; `null` se ele não responde. */
+  private connectSfu(): Promise<SfuSession | null> {
+    if (this.sfuSession) return Promise.resolve(this.sfuSession);
+    this.sfuConnecting ??= (async () => {
+      try {
+        const res = await this.socket.emitWithAck('sfu:token');
+        if (!res.ok) throw new Error(res.error);
+        const { SfuSession } = await import('./sfu');
+        const session = await SfuSession.connect(res.data, {
+          rtcConfig: { iceServers: this.iceServers, iceTransportPolicy: this.iceTransportPolicy },
+          onScreen: (userId, stream) => this.setRemoteScreen('sfu', userId, stream),
+          onClosed: () => this.sfuClosed(session),
+          onReconnecting: () => this.sfuInterrupted(session, true),
+          onReconnected: () => this.sfuInterrupted(session, false),
+        });
+        if (!this.sfuAvailable) {
+          session.close(); // saiu da chamada enquanto conectava
+          return null;
+        }
+        this.sfuSession = session;
+        session.watch(this.watchedScreen);
+        return session;
+      } catch (err) {
+        console.warn('[voz] não foi possível entrar no servidor de mídia', err);
+        return null;
+      } finally {
+        this.sfuConnecting = null;
+      }
+    })();
+    return this.sfuConnecting;
+  }
+
+  /** A conexão com o servidor de mídia caiu de vez: a tela, se estava lá, volta para a malha P2P. */
+  private sfuClosed(session: SfuSession): void {
+    if (this.sfuSession !== session) return;
+    this.sfuSession = null;
+    if (this.screen?.transport === 'sfu' || this.screen?.sfuInterrupted) {
+      this.screen.transport = 'p2p';
+      this.screen.sfuInterrupted = false;
+      this.applyScreenViewers();
+    }
+  }
+
+  /**
+   * O servidor de mídia ficou fora do ar por um instante (e o LiveKit tenta voltar): enquanto isso a tela
+   * segue pela malha P2P para ninguém ficar com a imagem congelada, e volta para o servidor quando ele volta.
+   */
+  private sfuInterrupted(session: SfuSession, interrupted: boolean): void {
+    if (this.sfuSession !== session) return;
+    this.sfuInterruptedForViewing = interrupted;
+    for (const userId of new Set([...this.remoteScreens.sfu.keys(), ...this.remoteScreens.p2p.keys()])) this.showBestScreen(userId);
+    const screen = this.screen;
+    if (!screen) return;
+    if (interrupted && screen.transport === 'sfu') {
+      screen.transport = 'p2p';
+      screen.sfuInterrupted = true;
+      this.applyScreenViewers();
+    } else if (!interrupted && screen.sfuInterrupted) {
+      screen.transport = 'sfu';
+      screen.sfuInterrupted = false;
+      this.applyScreenViewers();
+    }
+  }
+
+  /**
+   * A tela de alguém chega pelo servidor de mídia, pela malha P2P ou pelas duas (numa troca de uma para
+   * a outra). Quem vê só recebe uma: a do servidor de mídia, se existe, senão a da malha.
+   */
+  private setRemoteScreen(source: 'sfu' | 'p2p', userId: Id, stream: MediaStream | null): void {
+    const sources = this.remoteScreens[source];
+    if (stream) sources.set(userId, stream);
+    else sources.delete(userId);
+    this.showBestScreen(userId);
+  }
+
+  private showBestScreen(userId: Id): void {
+    // Com o servidor de mídia fora do ar o que ele mostra está congelado: vale a malha, se ela tem imagem.
+    const fromSfu = this.sfuInterruptedForViewing ? undefined : this.remoteScreens.sfu.get(userId);
+    const best = fromSfu ?? this.remoteScreens.p2p.get(userId) ?? null;
+    if ((this.shownScreens.get(userId) ?? null) === best) return;
+    if (best) this.shownScreens.set(userId, best);
+    else this.shownScreens.delete(userId);
+    this.events.onRemoteScreen?.(userId, best);
+  }
+
+  private closeSfu(): void {
+    const session = this.sfuSession;
+    this.sfuSession = null;
+    this.sfuConnecting = null;
+    session?.close();
+  }
+
+  /** Avisa de quem você assiste a tela (`null` = ninguém); é daí que vem a imagem do servidor de mídia. */
+  setWatching(userId: Id | null): void {
+    this.watchedScreen = userId;
+    if (!this.sfuAvailable) return;
+    if (this.sfuSession) this.sfuSession.watch(userId);
+    else if (userId) void this.connectSfu();
   }
 
   /** As opções da transmissão em andamento, ou `null` se você não está transmitindo. */
@@ -616,6 +782,7 @@ export class VoiceManager {
     this.screen.feed?.close();
     this.screen.preview.stop();
     this.screen = null;
+    void this.sfuSession?.unpublishScreen();
     this.applyScreenViewers();
   }
 
@@ -634,8 +801,12 @@ export class VoiceManager {
     const video = this.screen?.stream.getVideoTracks()[0] ?? null;
     const audio = this.screen?.stream.getAudioTracks()[0] ?? null;
     const options = this.screen?.options;
-    const viewers = [...this.peers.keys()].filter((id) => this.screenViewers.has(id)).length;
-    const bitrate = options ? viewerBitrate(options, viewers) : 0;
+    // Pelo servidor de mídia (ou a caminho dele), a malha P2P não manda a tela a ninguém.
+    const direct = (this.screen?.transport ?? 'p2p') === 'p2p';
+    const p2pViewers = direct ? this.screenViewers : new Set<Id>();
+    const viewers = [...this.peers.keys()].filter((id) => p2pViewers.has(id)).length;
+    // Na malha o upload se divide entre os espectadores; no servidor de mídia sai uma cópia só.
+    const bitrate = options ? viewerBitrate(options, direct ? viewers : 1) : 0;
     const encodings: RTCRtpEncodingParameters[] =
       options && video
         ? [
@@ -647,9 +818,13 @@ export class VoiceManager {
           ]
         : [];
     for (const [peerId, peer] of this.peers) {
-      const watching = this.screen !== null && this.screenViewers.has(peerId);
+      const watching = this.screen !== null && p2pViewers.has(peerId);
       this.sendTrack(peer, 'screenVideo', watching ? video : null, this.screenCarrier, encodings);
       this.sendTrack(peer, 'screenAudio', watching ? audio : null, this.screenCarrier, []);
+    }
+    const sender = this.screen?.transport === 'sfu' ? this.sfuSession?.videoSender : null;
+    if (sender && encodings.length && options) {
+      void this.updateEncoding(sender, encodings[0], options.priority === 'sharp' ? 'maintain-resolution' : 'maintain-framerate');
     }
   }
 
@@ -674,9 +849,14 @@ export class VoiceManager {
     if (track && encodings.length) void this.updateEncoding(transceiver.sender, encodings[0]);
   }
 
-  private async updateEncoding(sender: RTCRtpSender, encoding: RTCRtpEncodingParameters): Promise<void> {
+  private async updateEncoding(
+    sender: RTCRtpSender,
+    encoding: RTCRtpEncodingParameters,
+    degradationPreference?: RTCDegradationPreference,
+  ): Promise<void> {
     const params = sender.getParameters();
     if (!params.encodings?.length) return;
+    if (degradationPreference) params.degradationPreference = degradationPreference;
     params.encodings[0].maxBitrate = encoding.maxBitrate;
     params.encodings[0].maxFramerate = encoding.maxFramerate;
     if (encoding.scaleResolutionDownBy !== undefined) params.encodings[0].scaleResolutionDownBy = encoding.scaleResolutionDownBy;
@@ -707,13 +887,16 @@ export class VoiceManager {
   }
 
   private async receivingStats(userId: Id): Promise<StreamStats | null> {
+    // Pelo servidor de mídia a imagem não vem da conexão com a pessoa, mas da conexão com o servidor.
+    const sfuReceiver = this.sfuInterruptedForViewing ? null : (this.sfuSession?.receiverFor(userId) ?? null);
     const peer = this.peers.get(userId);
     const screenId = peer?.remoteMedia?.screen;
     const track = screenId ? peer?.remoteVideo.get(screenId)?.getVideoTracks()[0] : undefined;
-    const receiver = track && peer?.pc.getReceivers().find((r) => r.track === track);
-    if (!peer || !receiver) return null;
+    const receiver = sfuReceiver ?? (track && peer?.pc.getReceivers().find((r) => r.track === track));
+    if (!receiver || (!sfuReceiver && !peer)) return null;
 
-    const [report, all] = await Promise.all([receiver.getStats(), peer.pc.getStats()]);
+    const report = await receiver.getStats();
+    const all = sfuReceiver || !peer ? report : await peer.pc.getStats();
     let inbound: Record<string, unknown> | undefined;
     report.forEach((stat) => {
       if (stat.type === 'inbound-rtp' && stat.kind === 'video') inbound = stat;
@@ -733,6 +916,7 @@ export class VoiceManager {
       codec: codecName(report, inbound['codecId']),
       limit: null,
       viewers: 0,
+      via: sfuReceiver ? 'sfu' : 'p2p',
     };
   }
 
@@ -749,9 +933,20 @@ export class VoiceManager {
     let viewers = 0;
     const limits = ['none', 'other', 'bandwidth', 'cpu'] as const;
 
-    for (const [peerId, peer] of this.peers) {
-      const sender = peer.screenVideo?.sender;
-      if (!sender || !this.screenViewers.has(peerId) || !sender.track) continue;
+    // Pelo servidor de mídia há um emissor só; pela malha, um por espectador.
+    const via = this.screen.transport === 'sfu' ? 'sfu' : 'p2p';
+    const senders: { key: string; sender: RTCRtpSender }[] = [];
+    if (via === 'sfu') {
+      const sender = this.sfuSession?.videoSender;
+      if (sender) senders.push({ key: 'out:sfu', sender });
+    } else {
+      for (const [peerId, peer] of this.peers) {
+        const sender = peer.screenVideo?.sender;
+        if (sender?.track && this.screenViewers.has(peerId)) senders.push({ key: `out:${peerId}`, sender });
+      }
+    }
+
+    for (const { key, sender } of senders) {
       const report = await sender.getStats();
       let outbound: Record<string, unknown> | undefined;
       let remote: Record<string, unknown> | undefined;
@@ -761,7 +956,7 @@ export class VoiceManager {
       });
       if (!outbound) continue;
       viewers++;
-      const rate = this.rate(`out:${peerId}`, Number(outbound['bytesSent'] ?? 0), Number(outbound['framesEncoded'] ?? 0));
+      const rate = this.rate(key, Number(outbound['bytesSent'] ?? 0), Number(outbound['framesEncoded'] ?? 0));
       kbps += rate.kbps;
       fps = Math.max(fps, rate.fps);
       width = Math.max(width, Number(outbound['frameWidth'] ?? 0));
@@ -777,7 +972,9 @@ export class VoiceManager {
         if (Number.isFinite(round)) rtt = Math.max(rtt ?? 0, round * 1000);
       }
     }
-    return { role: 'sending', width, height, fps, kbps, lossPercent: loss, rttMs: rtt, codec, limit: limits[worst], viewers };
+    // No servidor de mídia o emissor é um só, então quem assiste vem da lista da sala.
+    if (via === 'sfu' && viewers > 0) viewers = [...this.screenViewers].filter((id) => id !== this.selfId).length;
+    return { role: 'sending', width, height, fps, kbps, lossPercent: loss, rttMs: rtt, codec, limit: limits[worst], viewers, via };
   }
 
   // ── Câmera ─────────────────────────────────────────────────────────────────
@@ -874,7 +1071,7 @@ export class VoiceManager {
     if (!media) return;
     for (const [id, stream] of peer.remoteVideo) {
       if (id === media.camera) this.events.onRemoteCamera?.(peerId, stream);
-      else if (id === media.screen) this.events.onRemoteScreen?.(peerId, stream);
+      else if (id === media.screen) this.setRemoteScreen('p2p', peerId, stream);
     }
   }
 
@@ -939,7 +1136,7 @@ export class VoiceManager {
     peer.voice?.close();
     this.detector.unwatch(peerId);
     this.peers.delete(peerId);
-    this.events.onRemoteScreen?.(peerId, null);
+    this.setRemoteScreen('p2p', peerId, null);
     this.events.onRemoteCamera?.(peerId, null);
   }
 }

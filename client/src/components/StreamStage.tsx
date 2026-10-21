@@ -246,7 +246,11 @@ const mbps = (kbps: number) => `${(kbps / 1000).toLocaleString('pt-BR', { maximu
 function advice(stats: StreamStats): string | null {
   if (stats.role === 'sending') {
     if (stats.limit === 'cpu') return 'Seu computador está no limite: escolha uma resolução menor ou menos quadros por segundo.';
-    if (stats.limit === 'bandwidth') return 'A sua internet de envio está no limite: a imagem é reduzida para caber. Menos gente assistindo melhora.';
+    if (stats.limit === 'bandwidth') {
+      return stats.via === 'sfu'
+        ? 'A sua internet de envio está no limite: a imagem é reduzida para caber. Escolha uma resolução menor ou menos quadros por segundo.'
+        : 'A sua internet de envio está no limite: a imagem é reduzida para caber. Menos gente assistindo melhora.';
+    }
     if (stats.lossPercent > 3) return 'Há perda de pacotes no caminho até quem assiste.';
     return null;
   }
@@ -268,10 +272,11 @@ function StatsPanel({ stats }: { stats: StreamStats | null }) {
         <>
           <p className="font-semibold">
             {stats.role === 'sending' ? `Enviando para ${stats.viewers} ${stats.viewers === 1 ? 'pessoa' : 'pessoas'}` : 'Recebendo'}
+            {stats.via === 'sfu' ? ' · servidor de mídia' : ' · direto (P2P)'}
           </p>
           <p>
             {stats.width && stats.height ? `${stats.width}×${stats.height}` : '—'} · {Math.round(stats.fps)} fps · {mbps(stats.kbps)}
-            {stats.role === 'sending' && stats.viewers > 1 ? ' no total' : ''}
+            {stats.role === 'sending' && stats.via === 'p2p' && stats.viewers > 1 ? ' no total' : ''}
           </p>
           <p>
             {stats.codec ? `${stats.codec} · ` : ''}perda {stats.lossPercent.toFixed(1)}%

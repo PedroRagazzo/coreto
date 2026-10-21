@@ -91,6 +91,36 @@ Assim ninguém precisa copiar o segredo. A VPS precisa aceitar a porta 3490 (UDP
 TURN exigindo autenticação). O coturn recusa retransmitir para endereços internos (10.x, 172.16–31.x, 192.168.x,
 127.x), para ninguém usar o TURN para alcançar a rede interna da VPS.
 
+### Servidor de mídia (SFU) para transmissões de tela
+
+Na malha P2P, quem transmite a tela envia uma cópia do vídeo para cada espectador; com 3 ou mais, o upload se
+divide e a imagem perde nitidez. Com um servidor de mídia ([LiveKit](https://livekit.io)), quem transmite envia
+**uma cópia só** e o servidor a reparte. Só a tela passa por ele: a voz e a câmera continuam P2P. Sem o servidor
+de mídia (ou se ele cair), a tela segue pela malha como antes, sem ninguém precisar fazer nada.
+
+1. No Dokploy, crie um serviço **Compose** (tipo "Docker Compose", não Stack) apontando para
+   `deploy/livekit/docker-compose.yml`, com `LIVEKIT_NODE_IP` = IP público da VPS.
+2. Na aba **Domains** desse serviço, crie um domínio HTTPS para o serviço `livekit`, porta **7880** (sem domínio
+   próprio, `livekit.<IP-da-VPS>.nip.io`).
+3. Libere na VPS a porta **7881 (TCP)** e a **7882 (UDP)**, por onde o vídeo passa.
+4. No app do Coreto, monte o volume `coreto-livekit-secret` em `/livekit` (o compose cria o segredo nele na primeira
+   subida, como no TURN) e defina:
+
+   ```
+   LIVEKIT_URL=wss://livekit.<IP-da-VPS>.nip.io
+   LIVEKIT_SECRET_FILE=/livekit/livekit-secret
+   ```
+
+   Faça o deploy do app de novo. Quem entrar numa chamada a partir daí transmite pelo servidor de mídia.
+5. Para conferir de fora, sem o segredo: `node deploy/livekit/check.mjs livekit.<IP>.nip.io <IP>` (domínio HTTPS,
+   porta TCP 7881 e porta UDP 7882). No palco da transmissão, o painel de estatísticas mostra
+   "servidor de mídia" quando a imagem está passando por ele e "direto (P2P)" quando não.
+
+O servidor do Coreto só assina os tokens de acesso (JWT) com o segredo; quem pode transmitir (permissão STREAM)
+recebe um token que envia vídeo, e os outros, um que só recebe. A sala do LiveKit é a sala de voz. Quem está atrás
+de NAT restrito chega ao servidor de mídia pelo TURN do Coreto. Variáveis: `LIVEKIT_URL`, `LIVEKIT_API_KEY`
+(padrão `coreto`), `LIVEKIT_API_SECRET` ou `LIVEKIT_SECRET_FILE`, `LIVEKIT_TOKEN_TTL_SECONDS`.
+
 ### Backup do banco
 
 A imagem traz o `pg_dump` 17. `npm run backup -w server` grava uma cópia compactada em `/data/backups` e guarda as
@@ -185,6 +215,7 @@ coreto/
 │   └── protocol.ts          Eventos socket.io tipados + formatos de sinalização WebRTC
 ├── Dockerfile               Imagem de produção: site + API + socket.io num container
 ├── deploy/coturn/           TURN para o Dokploy (compose) e verificador sem segredo (check.mjs)
+├── deploy/livekit/          Servidor de mídia (LiveKit) para as transmissões de tela, e verificador (check.mjs)
 ├── desktop/                 App de desktop (Electron) e instalador do Windows
 ├── server/
 │   ├── prisma/              Esquema (schema.prisma) e migrations do PostgreSQL

@@ -14,6 +14,7 @@ import { joinPublicSpaces } from './realtime/membership.js';
 import { registerPresence } from './realtime/presence.js';
 import type { IO } from './realtime/types.js';
 import { registerVoice } from './realtime/voice.js';
+import { sfuConfigFromEnv, type SfuConfig } from './sfu.js';
 import type { Store } from './store.js';
 import { serveClient } from './static.js';
 import { iceConfigFromEnv, type IceConfig } from './turn.js';
@@ -29,6 +30,8 @@ export interface ServerOptions {
   uploadDir: string;
   /** Padrão: lido das variáveis de ambiente (ver turn.ts). */
   ice?: IceConfig;
+  /** Servidor de mídia das transmissões de tela (ver sfu.ts); `null` = só P2P. Padrão: lido do ambiente. */
+  sfu?: SfuConfig | null;
   /** Build do client (client/dist) para servir o site na mesma origem; sem ele, só a API. */
   clientDist?: string | null;
   /** Cria o bot de música (ver music/index.ts); sem ele, os comandos de música não existem. */
@@ -45,12 +48,14 @@ export interface RunningServer {
 /** Sobe o HTTP (saúde, login e anexos) + socket.io sobre um Store já carregado. */
 export async function startServer(
   store: Store,
-  { port, clientOrigins, uploadDir, ice = iceConfigFromEnv(), clientDist = null, music: createMusic }: ServerOptions,
+  { port, clientOrigins, uploadDir, ice = iceConfigFromEnv(), sfu = sfuConfigFromEnv(), clientDist = null, music: createMusic }: ServerOptions,
 ): Promise<RunningServer> {
   const throttle = new LoginThrottle();
   const uploads = new UploadDir(uploadDir);
   await uploads.ensure();
   const installer = new LatestInstaller();
+  // O site precisa poder falar com o servidor de mídia (ws → http, wss → https).
+  const connectOrigins = sfu ? [new URL(sfu.url.replace(/^ws/, 'http')).origin] : [];
 
   const httpServer = createServer((req, res) => {
     const path = (req.url ?? '').split('?')[0];
@@ -77,7 +82,7 @@ export async function startServer(
       });
     }
     if (clientDist) {
-      return void serveClient(req, res, clientDist).catch((err: unknown) => {
+      return void serveClient(req, res, clientDist, connectOrigins).catch((err: unknown) => {
         console.error('[site]', err);
         if (!res.headersSent) res.writeHead(500).end();
       });
@@ -112,7 +117,7 @@ export async function startServer(
     registerChat(io, socket, store, uploads, (message, channel) => music?.onMessage(message, channel));
     registerDirect(socket, store);
     registerManagement(io, socket, store);
-    registerVoice(io, socket, store, ice);
+    registerVoice(io, socket, store, ice, sfu);
     registerMusic(socket, () => music);
   });
 

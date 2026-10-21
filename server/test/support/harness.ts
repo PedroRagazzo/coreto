@@ -18,6 +18,7 @@ import type { MusicFactory } from '../../src/music/index.js';
 import { BOT_SOCKET_ID } from '../../src/music/bot.js';
 import { createDb, type Db } from '../../src/db/client.js';
 import { seedIfEmpty } from '../../src/seed.js';
+import type { SfuConfig } from '../../src/sfu.js';
 import { Store } from '../../src/store.js';
 import { iceConfigFromEnv } from '../../src/turn.js';
 import { assertTestDatabase, TEST_DATABASE_URL } from './database.js';
@@ -52,16 +53,18 @@ export class TestServer {
     readonly uploadDir: string,
     /** Bot de música, só nos testes que o usam. */
     private readonly music?: MusicFactory,
+    /** Servidor de mídia das transmissões, só nos testes dele. */
+    private readonly sfu: SfuConfig | null = null,
   ) {}
 
   /** Apaga o banco de teste, recria os dados de demonstração e sobe o servidor. */
-  static async start(options: { music?: MusicFactory } = {}): Promise<TestServer> {
+  static async start(options: { music?: MusicFactory; sfu?: SfuConfig } = {}): Promise<TestServer> {
     if (!TEST_DATABASE_URL) throw new Error('TEST_DATABASE_URL não definida.');
     assertTestDatabase(TEST_DATABASE_URL);
     const db = createDb(TEST_DATABASE_URL);
     await resetDatabase(db);
     await seedIfEmpty(db);
-    const harness = new TestServer(db, await mkdtemp(join(tmpdir(), 'coreto-uploads-')), options.music);
+    const harness = new TestServer(db, await mkdtemp(join(tmpdir(), 'coreto-uploads-')), options.music, options.sfu ?? null);
     await harness.boot();
     return harness;
   }
@@ -156,6 +159,7 @@ export class TestServer {
       clientOrigins: [],
       uploadDir: this.uploadDir,
       ice: iceConfigFromEnv({}),
+      sfu: this.sfu,
       music: this.music,
     });
   }

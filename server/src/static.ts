@@ -23,21 +23,28 @@ const TYPES: Record<string, string> = {
  * Política de conteúdo do site: só scripts próprios (e WebAssembly); imagens e mídia também de
  * `blob:` (prévias de anexos e vídeo da chamada); WebSocket para o socket.io.
  */
-const CONTENT_SECURITY_POLICY = [
-  "default-src 'self'",
-  // 'wasm-unsafe-eval': só WebAssembly (o RNNoise do cancelamento de ruído); não libera eval() de texto.
-  "script-src 'self' 'wasm-unsafe-eval'",
-  "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob:",
-  "media-src 'self' blob:",
-  "connect-src 'self' ws: wss:",
-  "frame-ancestors 'none'",
-  "base-uri 'self'",
-  "form-action 'self'",
-].join('; ');
+export const contentSecurityPolicy = (connectOrigins: string[] = []): string =>
+  [
+    "default-src 'self'",
+    // 'wasm-unsafe-eval': só WebAssembly (o RNNoise do cancelamento de ruído); não libera eval() de texto.
+    "script-src 'self' 'wasm-unsafe-eval'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob:",
+    "media-src 'self' blob:",
+    // `connectOrigins`: o servidor de mídia (LiveKit), que além do WebSocket faz um GET de diagnóstico por HTTP(S).
+    ['connect-src', "'self'", 'ws:', 'wss:', ...connectOrigins].join(' '),
+    "frame-ancestors 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+  ].join('; ');
 
 /** Entrega um arquivo do build; caminhos sem arquivo caem no index.html (app de página única). */
-export async function serveClient(req: IncomingMessage, res: ServerResponse, distDir: string): Promise<void> {
+export async function serveClient(
+  req: IncomingMessage,
+  res: ServerResponse,
+  distDir: string,
+  connectOrigins: string[] = [],
+): Promise<void> {
   if (req.method !== 'GET' && req.method !== 'HEAD') return void res.writeHead(405).end();
   const root = resolve(distDir);
   let path: string;
@@ -61,7 +68,7 @@ export async function serveClient(req: IncomingMessage, res: ServerResponse, dis
     'cache-control': path.startsWith('/assets/') ? 'public, max-age=31536000, immutable' : 'no-cache',
     'x-content-type-options': 'nosniff',
     'referrer-policy': 'no-referrer',
-    ...(isHtml && { 'content-security-policy': CONTENT_SECURITY_POLICY }),
+    ...(isHtml && { 'content-security-policy': contentSecurityPolicy(connectOrigins) }),
   });
   if (req.method === 'HEAD') return void res.end();
   createReadStream(target).pipe(res);

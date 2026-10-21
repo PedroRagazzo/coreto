@@ -1,0 +1,70 @@
+# Servidor de mídia (LiveKit, um SFU) para as transmissões de tela do Coreto. Com ele, quem transmite envia
+# UMA cópia do vídeo e o servidor a reparte entre os espectadores, em vez de uma cópia por espectador.
+# A voz continua direta entre os navegadores (P2P). Sem este serviço, o Coreto transmite como antes.
+#
+# No Dokploy: serviço Compose do tipo "Docker Compose" (não Stack) apontando para este arquivo, com a
+# variável LIVEKIT_NODE_IP = IP público da VPS. Na aba Domains do serviço, crie um domínio HTTPS
+# (por exemplo livekit.<IP>.nip.io) para o serviço "livekit", porta 7880: é por ele que o navegador fala
+# com o servidor (wss://). Não exponha a 7880 direto na VPS.
+#
+# O segredo é gerado aqui na primeira vez, num volume com nome fixo (coreto-livekit-secret). O app do
+# Coreto monta o mesmo volume e lê o arquivo (LIVEKIT_SECRET_FILE=/livekit/livekit-secret), então
+# ninguém precisa copiar o segredo.
+#
+# Portas na VPS: 7881 (TCP) e 7882 (UDP), por onde o vídeo passa. O sinal (7880) vai pelo domínio HTTPS.
+
+services:
+  # Gera o segredo uma vez; nas próximas subidas, só confere que os arquivos existem.
+  secret:
+    image: alpine:3.22
+    volumes:
+      - livekit-secret:/secret
+    command:
+      - sh
+      - -c
+      - |
+        if [ ! -s /secret/livekit-secret ]; then
+          head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' > /secret/livekit-secret
+          echo "segredo do LiveKit gerado"
+        fi
+        # O LiveKit exige que o arquivo de chaves só seja legível por quem o executa (600);
+        # o segredo puro, lido pelo app do Coreto, fica legível.
+        echo "coreto: $$(cat /secret/livekit-secret)" > /secret/livekit-keys
+        chmod 600 /secret/livekit-keys
+        chmod 755 /secret && chmod 644 /secret/livekit-secret
+
+  livekit:
+    image: livekit/livekit-server:v1.13.9
+    restart: unless-stopped
+    depends_on:
+      secret:
+        condition: service_completed_successfully
+    command: ["--key-file", "/secret/livekit-keys"]
+    ports:
+      - "7881:7881/tcp"
+      - "7882:7882/udp"
+    expose:
+      - "7880"
+    environment:
+      LIVEKIT_CONFIG: |
+        port: 7880
+        rtc:
+          tcp_port: 7881
+          udp_port: 7882
+          node_ip: ${LIVEKIT_NODE_IP:?defina LIVEKIT_NODE_IP com o IP público da VPS}
+          use_external_ip: false
+        room:
+          auto_create: true
+          empty_timeout: 60
+          departure_timeout: 20
+          max_participants: 60
+        turn:
+          enabled: false
+        logging:
+          level: info
+    volumes:
+      - livekit-secret:/secret:ro
+
+volumes:
+  livekit-secret:
+    name: coreto-livekit-secret

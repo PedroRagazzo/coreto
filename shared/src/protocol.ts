@@ -116,6 +116,15 @@ export interface VoiceJoinResult {
   iceServers: IceServer[];
   /** `relay` força o áudio a passar pelo TURN (útil para testar o TURN). */
   iceTransportPolicy: 'all' | 'relay';
+  /** O servidor tem um servidor de mídia (SFU) para as transmissões de tela; sem ele, a tela vai pela malha P2P. */
+  sfu: boolean;
+}
+
+/** Acesso à sala do servidor de mídia (LiveKit) da chamada em que você está. */
+export interface SfuAccess {
+  /** Endereço wss:// do servidor de mídia. */
+  url: string;
+  token: string;
 }
 
 /** Onde buscar: todos os canais de texto que você vê num espaço, ou uma conversa direta. */
@@ -223,6 +232,8 @@ export interface ClientToServerEvents {
   /** Começa a compartilhar a tela na sala em que está; exige STREAM. `title` é o que está sendo compartilhado. */
   'stream:start': (req: { title: string }, ack: (res: Ack<null>) => void) => void;
   'stream:stop': () => void;
+  /** Token para entrar na sala do servidor de mídia da chamada; quem tem STREAM pode enviar vídeo, os outros só recebem. */
+  'sfu:token': (ack: (res: Ack<SfuAccess>) => void) => void;
   /** Quem transmite manda, de tempos em tempos, uma miniatura da tela (JPEG em data URL) para a prévia da lista. */
   'stream:preview': (req: { image: string }) => void;
   /** A miniatura mais recente da transmissão de alguém da sala; `null` se ainda não chegou nenhuma. */

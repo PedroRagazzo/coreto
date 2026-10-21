@@ -90,7 +90,8 @@ export function ScreenQualityFields({ value, onChange }: { value: ScreenQuality;
           onSelect={(key) => onChange({ uploadMbps: Number(key) as ScreenShareOptions['uploadMbps'] })}
         />
         <p className="mt-1.5 text-xs text-faint">
-          Cada pessoa que assiste recebe uma cópia do vídeo, então este limite é dividido entre elas: quanto mais gente, menor a
+          Pelo servidor de mídia sai uma cópia só do vídeo, qualquer que seja o número de espectadores. Quando a imagem vai
+          direto (P2P), cada pessoa recebe uma cópia e este limite é dividido entre elas: quanto mais gente, menor a
           resolução, mas a imagem continua nítida. Se não souber, deixe em 10 Mbps.
         </p>
       </fieldset>

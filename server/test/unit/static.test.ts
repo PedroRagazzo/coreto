@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { serveClient } from '../../src/static.js';
+import { contentSecurityPolicy, serveClient } from '../../src/static.js';
 
 describe('serveClient', () => {
   let root: string;
@@ -35,6 +35,13 @@ describe('serveClient', () => {
     expect(res.headers.get('content-type')).toContain('text/html');
     expect(res.headers.get('content-security-policy')).toContain("script-src 'self'");
     expect(res.headers.get('cache-control')).toBe('no-cache');
+  });
+
+  it('libera o servidor de mídia na política de segurança só quando ele existe', () => {
+    expect(contentSecurityPolicy()).toContain("connect-src 'self' ws: wss:;");
+    expect(contentSecurityPolicy(['https://livekit.exemplo.com'])).toContain(
+      "connect-src 'self' ws: wss: https://livekit.exemplo.com;",
+    );
   });
 
   it('guarda os arquivos de /assets em cache para sempre', async () => {
