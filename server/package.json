@@ -17,6 +17,7 @@
   "dependencies": {
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
+    "@roamhq/wrtc": "0.10.0",
     "dotenv": "^16.4.7",
     "socket.io": "^4.8.1"
   },

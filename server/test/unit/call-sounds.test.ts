@@ -10,6 +10,7 @@ const person = (userId: string, patch: Partial<VoiceParticipant> = {}): VoicePar
   video: false,
   streaming: false,
   streamTitle: null,
+  activity: null,
   watching: null,
   ...patch,
 });

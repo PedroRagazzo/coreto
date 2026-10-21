@@ -123,6 +123,8 @@ export interface VoiceParticipant {
   streaming: boolean;
   /** O que está sendo compartilhado ("Tela 1", o nome da janela); `null` fora da transmissão. */
   streamTitle: string | null;
+  /** O que a pessoa está fazendo na sala, hoje só o que o bot de música está tocando; `null` quando nada. */
+  activity: string | null;
   /** De quem está assistindo a transmissão, na mesma sala. */
   watching: Id | null;
 }

@@ -14,6 +14,8 @@ import type {
   UploadResponse,
 } from '../../../shared/src/protocol.js';
 import { startServer, type RunningServer } from '../../src/app.js';
+import type { MusicFactory } from '../../src/music/index.js';
+import { BOT_SOCKET_ID } from '../../src/music/bot.js';
 import { createDb, type Db } from '../../src/db/client.js';
 import { seedIfEmpty } from '../../src/seed.js';
 import { Store } from '../../src/store.js';
@@ -48,16 +50,18 @@ export class TestServer {
     readonly db: Db,
     /** Pasta temporária dos anexos, apagada em `stop`. */
     readonly uploadDir: string,
+    /** Bot de música, só nos testes que o usam. */
+    private readonly music?: MusicFactory,
   ) {}
 
   /** Apaga o banco de teste, recria os dados de demonstração e sobe o servidor. */
-  static async start(): Promise<TestServer> {
+  static async start(options: { music?: MusicFactory } = {}): Promise<TestServer> {
     if (!TEST_DATABASE_URL) throw new Error('TEST_DATABASE_URL não definida.');
     assertTestDatabase(TEST_DATABASE_URL);
     const db = createDb(TEST_DATABASE_URL);
     await resetDatabase(db);
     await seedIfEmpty(db);
-    const harness = new TestServer(db, await mkdtemp(join(tmpdir(), 'coreto-uploads-')));
+    const harness = new TestServer(db, await mkdtemp(join(tmpdir(), 'coreto-uploads-')), options.music);
     await harness.boot();
     return harness;
   }
@@ -139,7 +143,8 @@ export class TestServer {
   async disconnectAll(): Promise<void> {
     for (const socket of this.clients.splice(0)) socket.disconnect();
     for (let tries = 0; tries < 50 && this.server; tries++) {
-      if ((await this.server.io.fetchSockets()).length === 0 && this.store?.voice.size === 0) return;
+      if ((await this.server.io.fetchSockets()).length === 0 &&
+        [...(this.store?.voice.values() ?? [])].every((session) => session.socketId === BOT_SOCKET_ID)) return;
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
   }
@@ -151,6 +156,7 @@ export class TestServer {
       clientOrigins: [],
       uploadDir: this.uploadDir,
       ice: iceConfigFromEnv({}),
+      music: this.music,
     });
   }
 }

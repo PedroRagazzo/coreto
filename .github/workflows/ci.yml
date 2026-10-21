@@ -97,6 +97,13 @@ jobs:
           curl -fs -X POST http://localhost:3000/login -H 'content-type: application/json' \
             -d '{"name":"CI","pin":"1234"}' | grep -q '"ok":true'
 
+      # O bot de música precisa do yt-dlp, do ffmpeg e do WebRTC nativo na imagem de produção.
+      - name: Bot de música (yt-dlp, ffmpeg e WebRTC)
+        run: |
+          docker exec coreto yt-dlp --version
+          docker exec coreto ffmpeg -version | head -1
+          docker logs coreto 2>&1 | grep -q "bot de música ligado"
+
       # O mesmo comando que o Dokploy agenda: gera a cópia e confere que ela pode ser restaurada.
       - name: Backup do banco
         run: |

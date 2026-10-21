@@ -231,6 +231,7 @@ function VoiceChannelItem({ channel, onEdit }: ChannelItemProps) {
                     {speaking && <span className="sr-only"> (falando)</span>}
                   </span>
                   {p.streaming && p.streamTitle && <span className="block truncate text-xs text-faint">{p.streamTitle}</span>}
+                  {p.activity && <span className="block truncate text-xs text-faint">{p.activity}</span>}
                 </span>
                 {p.streaming && <LiveBadge />}
                 {p.deafened ? (

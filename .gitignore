@@ -4,3 +4,6 @@ dist
 *.log
 server/src/generated
 server/uploads
+
+# Ferramentas baixadas só para testes locais (yt-dlp.exe).
+.tools

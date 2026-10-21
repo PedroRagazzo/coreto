@@ -1,6 +1,6 @@
 import { mentionedUserIds } from '../../../shared/src/markup.js';
 import { SEARCH_PAGE_SIZE, searchWords } from '../../../shared/src/search.js';
-import type { Channel, Id } from '../../../shared/src/models.js';
+import type { Channel, Id, Message } from '../../../shared/src/models.js';
 import { hasPermission, Permission } from '../../../shared/src/permissions.js';
 import {
   HISTORY_PAGE_SIZE,
@@ -62,7 +62,14 @@ const logError = (context: string) => (err: unknown) => console.error(`[${contex
 const audienceOf = (target: MessageTarget) =>
   target.kind === 'channel' ? rooms.channel(target.id) : participantRooms(target.conversation);
 
-export function registerChat(io: IO, socket: AppSocket, store: Store, uploads: UploadDir): void {
+export function registerChat(
+  io: IO,
+  socket: AppSocket,
+  store: Store,
+  uploads: UploadDir,
+  /** Chamado para cada mensagem nova de canal (o bot de música lê os comandos aqui). */
+  onChannelMessage: (message: Message, channel: Channel) => void = () => {},
+): void {
   const { userId } = socket.data;
 
   // Entrar em um espaço: troca as salas do socket e devolve o retrato completo.
@@ -118,8 +125,9 @@ export function registerChat(io: IO, socket: AppSocket, store: Store, uploads: U
     }
     io.to(audienceOf(target)).emit('message:new', message);
     ack({ ok: true, data: message });
-    if (target.kind === 'channel' && mentions.length > 0) {
-      notifyMentions(io, store, mentions, target.channel).catch(logError('mentions'));
+    if (target.kind === 'channel') {
+      onChannelMessage(message, target.channel);
+      if (mentions.length > 0) notifyMentions(io, store, mentions, target.channel).catch(logError('mentions'));
     }
   });
 

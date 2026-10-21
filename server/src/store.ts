@@ -26,7 +26,7 @@ import type {
   User,
   VoiceParticipant,
 } from '../../shared/src/models.js';
-import type { MessageContext } from '../../shared/src/protocol.js';
+import type { MessageContext, SignalPayload } from '../../shared/src/protocol.js';
 import { hashToken, type Db } from './db/client.js';
 import {
   messageInclude,
@@ -66,6 +66,7 @@ export const toParticipant = ({
   video,
   streaming,
   streamTitle,
+  activity,
   watching,
 }: VoiceSession): VoiceParticipant => ({
   userId,
@@ -75,8 +76,17 @@ export const toParticipant = ({
   video,
   streaming,
   streamTitle,
+  activity,
   watching,
 });
+
+/** Quem vive dentro do servidor (o bot de música) e precisa saber o que acontece nas salas de voz. */
+export interface VoiceObserver {
+  /** A sinalização é para um participante que vive no servidor; devolve `true` se foi tratada. */
+  signal?(from: Id, to: Id, signal: SignalPayload): boolean;
+  /** Alguém saiu da sala (por conta própria, desconexão ou porque o canal acabou). */
+  sessionEnded?(session: VoiceSession): void;
+}
 
 /** Um anexo do pedido não existe, é de outra pessoa ou já está em outra mensagem. */
 export class AttachmentUnavailableError extends Error {
@@ -119,6 +129,7 @@ export class Store {
   readonly directs = new Map<Id, DirectConversation>();
   /** userId → sessão de voz ativa */
   readonly voice = new Map<Id, VoiceSession>();
+  readonly voiceObservers = new Set<VoiceObserver>();
 
   private readonly categories = new Map<Id, Category>();
   private readonly roles = new Map<Id, Role>();
@@ -157,6 +168,20 @@ export class Store {
   async userForSession(token: string): Promise<User | null> {
     const session = await this.db.session.findUnique({ where: { tokenHash: hashToken(token) } });
     return session ? (this.users.get(session.userId) ?? null) : null;
+  }
+
+  /**
+   * A conta de um robô: criada na primeira vez e reaproveitada depois. Não tem PIN, então ninguém
+   * consegue entrar como ela (o nome fica reservado).
+   */
+  async ensureBot(name: string, avatarColor: string): Promise<User> {
+    const loginName = loginKey(name);
+    const row =
+      (await this.db.user.findUnique({ where: { loginName } })) ??
+      (await this.db.user.create({ data: { displayName: name, loginName, avatarColor, isBot: true } }));
+    const user = toUser(row);
+    this.users.set(user.id, user);
+    return user;
   }
 
   /**

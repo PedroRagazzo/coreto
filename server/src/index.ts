@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { startServer } from './app.js';
 import { createDb } from './db/client.js';
+import { createMusic, musicConfigFromEnv } from './music/index.js';
 import { seedIfEmpty } from './seed.js';
 import { Store } from './store.js';
 import { sweepUploads, UploadDir } from './uploads.js';
@@ -35,6 +36,7 @@ async function main() {
     clientOrigins: CLIENT_ORIGINS,
     uploadDir: UPLOAD_DIR,
     clientDist,
+    music: createMusic(musicConfigFromEnv()),
   });
   console.log(`Coreto: servidor em tempo real em http://localhost:${server.port}`);
   if (clientDist) console.log(`Coreto: site servido de ${clientDist}`);

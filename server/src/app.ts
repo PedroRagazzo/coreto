@@ -5,6 +5,7 @@ import { isValidPin, loginKey, normalizeDisplayName } from '../../shared/src/nam
 import { INVALID_SESSION, type LoginRequest, type LoginResponse } from '../../shared/src/protocol.js';
 import { LoginThrottle } from './auth.js';
 import { LatestInstaller } from './download.js';
+import type { MusicBot, MusicFactory } from './music/index.js';
 import { registerChat } from './realtime/chat.js';
 import { registerDirect } from './realtime/direct.js';
 import { registerManagement } from './realtime/manage.js';
@@ -29,6 +30,8 @@ export interface ServerOptions {
   ice?: IceConfig;
   /** Build do client (client/dist) para servir o site na mesma origem; sem ele, só a API. */
   clientDist?: string | null;
+  /** Cria o bot de música (ver music/index.ts); sem ele, os comandos de música não existem. */
+  music?: MusicFactory;
 }
 
 export interface RunningServer {
@@ -41,7 +44,7 @@ export interface RunningServer {
 /** Sobe o HTTP (saúde, login e anexos) + socket.io sobre um Store já carregado. */
 export async function startServer(
   store: Store,
-  { port, clientOrigins, uploadDir, ice = iceConfigFromEnv(), clientDist = null }: ServerOptions,
+  { port, clientOrigins, uploadDir, ice = iceConfigFromEnv(), clientDist = null, music: createMusic }: ServerOptions,
 ): Promise<RunningServer> {
   const throttle = new LoginThrottle();
   const uploads = new UploadDir(uploadDir);
@@ -102,20 +105,30 @@ export async function startServer(
       });
   });
 
+  let music: MusicBot | null = null;
   io.on('connection', (socket) => {
     registerPresence(io, socket, store);
-    registerChat(io, socket, store, uploads);
+    registerChat(io, socket, store, uploads, (message, channel) => music?.onMessage(message, channel));
     registerDirect(socket, store);
     registerManagement(io, socket, store);
     registerVoice(io, socket, store, ice);
   });
+
+  music = (await createMusic?.({ io, store, ice })) ?? null;
+  if (music) store.voiceObservers.add(music);
 
   await new Promise<void>((resolve) => httpServer.listen(port, resolve));
   return {
     io,
     port: (httpServer.address() as AddressInfo).port,
     // io.close() também fecha o servidor HTTP.
-    close: () => io.close(),
+    close: () => {
+      if (music) {
+        store.voiceObservers.delete(music);
+        music.shutdown();
+      }
+      return io.close();
+    },
   };
 }
 

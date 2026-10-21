@@ -22,6 +22,24 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 
+# yt-dlp, o programa que o bot de música usa para ler o áudio de links do YouTube: o binário único
+# oficial (sem Python), com versão e soma de verificação fixas. O YouTube muda com frequência e o
+# yt-dlp acompanha: para atualizar, troque a versão e as duas somas (arquivo SHA2-256SUMS da release).
+FROM base AS ytdlp
+ARG YTDLP_VERSION=2026.08.19
+ARG YTDLP_SHA256_AMD64=58162f9bfdc27458ea47bfcb311cf47028f17d8154a8bf7d689861d46399230a
+ARG YTDLP_SHA256_ARM64=b16e4dab368a816cd05d477d698a605a6ae87ccee1c8ffd38fa21d7254141fcc
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends curl \
+  && case "$(uname -m)" in \
+       x86_64) file=yt-dlp_linux; sha=$YTDLP_SHA256_AMD64 ;; \
+       aarch64) file=yt-dlp_linux_aarch64; sha=$YTDLP_SHA256_ARM64 ;; \
+       *) echo "sem yt-dlp para $(uname -m)" >&2; exit 1 ;; \
+     esac \
+  && curl -fsSL -o /yt-dlp "https://github.com/yt-dlp/yt-dlp/releases/download/${YTDLP_VERSION}/${file}" \
+  && echo "${sha}  /yt-dlp" | sha256sum -c - \
+  && chmod 755 /yt-dlp
+
 FROM base AS deps
 COPY package.json package-lock.json ./
 COPY server/package.json server/
@@ -34,6 +52,12 @@ COPY . .
 RUN npm run build -w client && npm run db:generate -w server
 
 FROM base
+# ffmpeg converte o áudio do bot de música (yt-dlp -> PCM). O WebRTC do bot vem pronto no npm
+# (@roamhq/wrtc) e pede a libasound2.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ffmpeg libasound2 \
+  && rm -rf /var/lib/apt/lists/*
+COPY --from=ytdlp /yt-dlp /usr/local/bin/yt-dlp
 ENV NODE_ENV=production \
     SERVER_PORT=3000 \
     UPLOAD_DIR=/data/uploads \

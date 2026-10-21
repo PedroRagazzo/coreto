@@ -197,6 +197,7 @@ coreto/
 │       ├── uploads.ts       POST/GET /uploads, pasta dos arquivos e limpeza
 │       ├── images.ts        Reconhece PNG/JPEG/GIF/WebP pelo conteúdo e lê as dimensões
 │       ├── turn.ts          Servidores ICE e credenciais TURN temporárias
+│       ├── music/           Bot de música: links, comandos, fila, yt-dlp/ffmpeg e o WebRTC do robô
 │       ├── static.ts        Entrega o build do site em produção (com política de segurança)
 │       ├── db/              Cliente Prisma e conversão linha ↔ modelo de domínio
 │       ├── generated/       Cliente gerado pelo `prisma generate` (fora do Git)
@@ -490,6 +491,59 @@ TURN_SECRET="um-segredo-longo"
 Para conferir se o TURN funciona, defina também `ICE_TRANSPORT_POLICY="relay"`: todo o áudio passa a ir pelo TURN, e
 se a chamada ficar muda o problema está nele (porta, segredo ou realm). Servidores fixos continuam aceitos em
 `ICE_SERVERS` (JSON). Veja `server/.env.example`.
+
+### Bot de música (Coreto Música)
+
+Um robô que entra na sua sala de voz e toca links do **YouTube** ou do **Spotify**, ou o que você digitar. Os
+comandos são mensagens de chat comuns; o robô responde no mesmo canal. Entre num canal de voz e escreva:
+
+| Comando | O que faz |
+|---|---|
+| `/play <link ou nome da música>` (`/tocar`, `/p`) | toca agora ou entra na fila |
+| `/skip` (`/pular`) · `/pause` · `/resume` | pula, pausa e continua |
+| `/queue` (`/fila`) · `/now` · `/clear` | mostra a fila, o que toca, esvazia a fila |
+| `/volume <0 a 150>` | volume do robô para todos (100 é o normal) |
+| `/stop` (`/parar`) · `/help` | para tudo e sai da chamada; lista os comandos |
+
+Só quem está num canal de voz usa os comandos, e só quem está na sala do robô controla (pular, pausar...). Ele toca
+numa sala por vez. Sem ninguém na sala por 1 minuto, ou com a fila vazia por 2 minutos (`MUSIC_IDLE_SECONDS`), ele sai.
+Na lista da sala ele aparece com o que está tocando embaixo do nome, e o botão direito nele ajusta o volume só para você,
+como com qualquer pessoa.
+
+**Como funciona.** A chamada é ponto a ponto, então o robô é um participante de verdade: o servidor mantém uma conexão
+WebRTC (`@roamhq/wrtc`) com cada pessoa da sala, negociada pelos mesmos sinais e pela mesma regra de colisão do navegador
+(`server/src/music/bot-voice.ts`). O áudio sai do `yt-dlp` pelo `ffmpeg` (PCM de 48 kHz, mono) e um relógio de 10 ms
+(`pacer.ts`) o entrega no ritmo certo; o download espera quando já há áudio de sobra. Os links são lidos em `links.ts`:
+só ids validados e buscas chegam ao `yt-dlp` (nunca o texto digitado), então outros sites e `file://` são recusados.
+O Spotify não entrega áudio (é protegido): o robô lê só o nome, o artista e a duração da página pública de
+incorporação (sem chave de API; músicas, álbuns e playlists de até 25 faixas por pedido) e procura a mesma música no
+YouTube. Se o Spotify mudar a página, o robô avisa que não conseguiu ler o link.
+
+**Instalação.** A imagem Docker já traz `ffmpeg`, `yt-dlp` (binário oficial, versão e soma de verificação fixas no
+`Dockerfile`) e o WebRTC nativo. Fora do Docker, instale `ffmpeg` e `yt-dlp` no PATH (ou aponte `FFMPEG_PATH` e
+`YTDLP_PATH`); sem eles, ou sem o WebRTC nativo, o Coreto sobe normalmente e só o robô fica desligado, com o motivo no
+log. O áudio do robô atravessa a rede como o de qualquer pessoa, então a chamada precisa funcionar (veja **TURN**).
+
+| Variável | Padrão |
+|---|---|
+| `MUSIC_ENABLED` | `true`; `false` desliga o robô |
+| `YTDLP_PATH`, `FFMPEG_PATH` | `yt-dlp` e `ffmpeg` no PATH |
+| `YTDLP_COOKIES_FILE` | nenhum. Arquivo `cookies.txt` de uma conta do YouTube (veja abaixo) |
+| `YTDLP_JS_RUNTIMES` | `node`. Runtime que o `yt-dlp` usa para decifrar o YouTube |
+| `MUSIC_MAX_QUEUE` / `MUSIC_MAX_PLAYLIST` / `MUSIC_MAX_MINUTES` | `50` músicas / `25` por pedido / `180` minutos |
+| `MUSIC_IDLE_SECONDS` | `120` |
+
+**Avisos importantes.**
+
+- **O YouTube costuma bloquear IPs de servidor** ("confirme que você não é um robô"). Quando isso acontece o robô
+  responde com o motivo. A saída é dar cookies de uma conta do YouTube ao `yt-dlp`: exporte um `cookies.txt` (por
+  exemplo com uma extensão de navegador), coloque-o num volume do container e defina `YTDLP_COOKIES_FILE` com o caminho.
+  Use uma conta secundária: o YouTube pode restringi-la.
+- Baixar áudio do YouTube viola os termos de uso dele (bots como Rythm e Groovy foram fechados por isso no Discord). Em
+  um servidor pequeno de amigos o risco é baixo, mas é seu.
+- O `yt-dlp` precisa acompanhar o YouTube: se de repente nada tocar, atualize a versão no `Dockerfile` (`YTDLP_VERSION`
+  e as duas somas, do arquivo `SHA2-256SUMS` da release).
+- Pausar por muito tempo pode derrubar a música: o link do YouTube expira e o download espera parado.
 
 ## Limitações do protótipo
 

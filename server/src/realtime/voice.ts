@@ -48,7 +48,7 @@ function isSignal(value: unknown): value is SignalPayload {
   return signal.kind === 'candidate' && typeof signal.candidate === 'object' && signal.candidate !== null;
 }
 
-function broadcastRoster(io: IO, store: Store, spaceId: Id, channelId: Id): void {
+export function broadcastRoster(io: IO, store: Store, spaceId: Id, channelId: Id): void {
   const participants = store.voiceIn(channelId).map(toParticipant);
   io.to(rooms.space(spaceId)).emit('voice:update', { channelId, participants });
 }
@@ -59,6 +59,7 @@ function broadcastRoster(io: IO, store: Store, spaceId: Id, channelId: Id): void
  */
 export function endVoiceSession(io: IO, store: Store, session: VoiceSession, reason?: string): void {
   store.voice.delete(session.userId);
+  for (const observer of store.voiceObservers) observer.sessionEnded?.(session);
   if (session.streaming) stopWatchersOf(store, session);
   if (reason) io.to(session.socketId).emit('voice:ended', { reason });
   io.in(session.socketId).socketsLeave(rooms.voice(session.channelId));
@@ -104,6 +105,7 @@ export function registerVoice(io: IO, socket: AppSocket, store: Store, ice: IceC
       video: false,
       streaming: false,
       streamTitle: null,
+      activity: null,
       watching: null,
       socketId: socket.id,
       streamPreview: null,
@@ -221,6 +223,10 @@ export function registerVoice(io: IO, socket: AppSocket, store: Store, ice: IceC
     const target = typeof req?.to === 'string' ? store.voice.get(req.to) : undefined;
     if (!me || me.socketId !== socket.id || !target || target.channelId !== me.channelId) return;
     if (!isSignal(req.signal)) return;
+    // Quem vive no servidor (o bot de música) recebe a sinalização direto, sem passar por um socket.
+    for (const observer of store.voiceObservers) {
+      if (observer.signal?.(userId, target.userId, req.signal)) return;
+    }
     io.to(target.socketId).emit('voice:signal', { from: userId, signal: req.signal });
   });
 }
