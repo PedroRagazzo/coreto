@@ -26,6 +26,7 @@ export interface ScreenPublishOptions {
   maxFramerate: number;
   /** Nitidez mantém a resolução e deixa cair os quadros; Fluidez, o contrário. */
   priority: 'sharp' | 'smooth';
+  codec: 'h264' | 'vp8';
 }
 
 const isScreenSource = (source: Track.Source) => source === Track.Source.ScreenShare || source === Track.Source.ScreenShareAudio;
@@ -100,6 +101,9 @@ export class SfuSession {
     await localParticipant.publishTrack(video, {
       source: Track.Source.ScreenShare,
       simulcast: false,
+      videoCodec: options.codec,
+      // Sem o codec de reserva: ele codificaria o vídeo duas vezes, o que é justamente o que se quer evitar.
+      backupCodec: false,
       // Para telas, o LiveKit lê `screenShareEncoding` e ignora `videoEncoding`.
       screenShareEncoding: encoding,
       videoEncoding: encoding,

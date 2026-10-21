@@ -11,7 +11,7 @@
 
 import type { Id } from '@shared/models';
 import type { IceServer, SignalPayload } from '@shared/protocol';
-import type { SfuSession } from './sfu';
+import type { ScreenPublishOptions, SfuSession } from './sfu';
 import { resolutionScale, viewerBitrate } from '@shared/stream-quality';
 import {
   DEFAULT_SETTINGS,
@@ -303,6 +303,20 @@ export interface ScreenShareOptions {
   priority: 'sharp' | 'smooth';
   /** Velocidade de envio (upload) da sua internet em Mbps, dividida entre quem assiste. */
   uploadMbps: 5 | 10 | 20 | 50;
+  /**
+   * Como o vídeo é codificado no servidor de mídia: H.264 costuma usar a placa de vídeo (60 fps estável em
+   * 1080p); VP8 usa o processador. Pela malha P2P o navegador escolhe sozinho.
+   */
+  codec: 'h264' | 'vp8';
+}
+
+/** Este navegador sabe codificar H.264 para transmissão? */
+export function supportsH264(): boolean {
+  try {
+    return (RTCRtpSender.getCapabilities?.('video')?.codecs ?? []).some((c) => c.mimeType.toLowerCase() === 'video/h264');
+  } catch {
+    return false;
+  }
 }
 
 
@@ -331,11 +345,21 @@ export interface StreamStats {
   viewers: number;
   /** Por onde a imagem passa: pelo servidor de mídia (uma cópia só) ou direto entre os navegadores (uma cópia por espectador). */
   via: 'sfu' | 'p2p';
+  /** Só ao transmitir: quem codifica o vídeo, a placa de vídeo ou o processador (`null` se o navegador não diz). */
+  encoder: 'hardware' | 'software' | null;
 }
 
 function codecName(report: RTCStatsReport, codecId: unknown): string | null {
   const codec = typeof codecId === 'string' ? (report.get(codecId) as { mimeType?: string } | undefined) : undefined;
   return codec?.mimeType?.replace(/^video\//, '') ?? null;
+}
+
+/** A placa de vídeo codifica? O navegador diz pelo nome do codificador ou pela marca de eficiência de energia. */
+function encoderKind(outbound: Record<string, unknown>): StreamStats['encoder'] {
+  if (outbound['powerEfficientEncoder'] === true) return 'hardware';
+  const impl = String(outbound['encoderImplementation'] ?? '');
+  if (!impl) return null;
+  return /MediaFoundation|VideoToolbox|Nvenc|NVENC|VAAPI|V4L2|Hardware|External/i.test(impl) ? 'hardware' : 'software';
 }
 
 /** Ida e volta (ms) do par de rede em uso. */
@@ -618,12 +642,7 @@ export class VoiceManager {
       const [video] = screen.stream.getVideoTracks();
       const [audio] = screen.stream.getAudioTracks();
       if (!session || !video || !stillMine()) throw new Error(session ? 'a transmissão acabou' : 'sem conexão com o servidor de mídia');
-      const bitrate = viewerBitrate(screen.options, 1);
-      await session.publishScreen(video, audio ?? null, {
-        maxBitrate: bitrate,
-        maxFramerate: screen.options.frameRate,
-        priority: screen.options.priority,
-      });
+      await session.publishScreen(video, audio ?? null, this.sfuPublishOptions(screen.options));
       if (!stillMine()) {
         void session.unpublishScreen();
         return;
@@ -635,6 +654,15 @@ export class VoiceManager {
       screen.transport = 'p2p';
     }
     this.applyScreenViewers();
+  }
+
+  private sfuPublishOptions(options: ScreenShareOptions): ScreenPublishOptions {
+    return {
+      maxBitrate: viewerBitrate(options, 1),
+      maxFramerate: options.frameRate,
+      priority: options.priority,
+      codec: options.codec === 'h264' && supportsH264() ? 'h264' : 'vp8',
+    };
   }
 
   /** Entra (uma vez por chamada) na sala do servidor de mídia; `null` se ele não responde. */
@@ -748,9 +776,12 @@ export class VoiceManager {
    * recalculado. Ninguém renegocia nem perde a imagem. Devolve as opções agora valendo, ou `null`
    * se a transmissão já acabou.
    */
-  async updateScreen(patch: Partial<Pick<ScreenShareOptions, 'height' | 'frameRate' | 'priority' | 'uploadMbps'>>): Promise<ScreenShareOptions | null> {
+  async updateScreen(
+    patch: Partial<Pick<ScreenShareOptions, 'height' | 'frameRate' | 'priority' | 'uploadMbps' | 'codec'>>,
+  ): Promise<ScreenShareOptions | null> {
     const screen = this.screen;
     if (!screen) return null;
+    const codecChanged = patch.codec !== undefined && patch.codec !== screen.options.codec;
     screen.options = { ...screen.options, ...patch };
     // Uma mudança de cada vez, sempre com as opções mais recentes: trocar várias coisas seguidas não pode
     // deixar a captura de uma e o envio de outra.
@@ -768,6 +799,14 @@ export class VoiceManager {
         })
         .catch((err: unknown) => console.warn('[voz] applyConstraints', err));
       if (this.screen !== screen) return null; // parou enquanto a captura mudava
+      // O codec é escolhido ao publicar: trocar no ar é publicar de novo (a imagem some um instante para quem assiste).
+      if (codecChanged && screen.transport === 'sfu' && this.sfuSession) {
+        const [audio] = screen.stream.getAudioTracks();
+        await this.sfuSession
+          .publishScreen(video, audio ?? null, this.sfuPublishOptions(options))
+          .catch((err: unknown) => console.warn('[voz] republicar com outro codec', err));
+        if (this.screen !== screen) return null;
+      }
       this.applyScreenViewers();
       return { ...screen.options };
     };
@@ -917,6 +956,7 @@ export class VoiceManager {
       limit: null,
       viewers: 0,
       via: sfuReceiver ? 'sfu' : 'p2p',
+      encoder: null,
     };
   }
 
@@ -929,6 +969,7 @@ export class VoiceManager {
     let loss = 0;
     let rtt: number | null = null;
     let codec: string | null = null;
+    let encoder: StreamStats['encoder'] = null;
     let worst = 0; // índice em `limits`: o pior limite entre os espectadores
     let viewers = 0;
     const limits = ['none', 'other', 'bandwidth', 'cpu'] as const;
@@ -962,6 +1003,7 @@ export class VoiceManager {
       width = Math.max(width, Number(outbound['frameWidth'] ?? 0));
       height = Math.max(height, Number(outbound['frameHeight'] ?? 0));
       codec ??= codecName(report, outbound['codecId']);
+      encoder ??= encoderKind(outbound);
       const reason = String(outbound['qualityLimitationReason'] ?? 'none');
       worst = Math.max(worst, reason === 'none' ? 0 : reason === 'cpu' ? 3 : reason === 'bandwidth' ? 2 : 1);
       if (remote) {
@@ -974,7 +1016,7 @@ export class VoiceManager {
     }
     // No servidor de mídia o emissor é um só, então quem assiste vem da lista da sala.
     if (via === 'sfu' && viewers > 0) viewers = [...this.screenViewers].filter((id) => id !== this.selfId).length;
-    return { role: 'sending', width, height, fps, kbps, lossPercent: loss, rttMs: rtt, codec, limit: limits[worst], viewers, via };
+    return { role: 'sending', width, height, fps, kbps, lossPercent: loss, rttMs: rtt, codec, limit: limits[worst], viewers, via, encoder };
   }
 
   // ── Câmera ─────────────────────────────────────────────────────────────────

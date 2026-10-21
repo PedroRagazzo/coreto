@@ -245,7 +245,11 @@ const mbps = (kbps: number) => `${(kbps / 1000).toLocaleString('pt-BR', { maximu
 /** O que fazer, em palavras, a partir dos números. */
 function advice(stats: StreamStats): string | null {
   if (stats.role === 'sending') {
-    if (stats.limit === 'cpu') return 'Seu computador está no limite: escolha uma resolução menor ou menos quadros por segundo.';
+    if (stats.limit === 'cpu') {
+      return stats.encoder === 'software' && stats.via === 'sfu'
+        ? 'O processador está codificando o vídeo e no limite: em Configurações da transmissão, escolha H.264 (placa de vídeo), ou uma resolução menor ou menos quadros por segundo.'
+        : 'Seu computador está no limite: escolha uma resolução menor ou menos quadros por segundo.';
+    }
     if (stats.limit === 'bandwidth') {
       return stats.via === 'sfu'
         ? 'A sua internet de envio está no limite: a imagem é reduzida para caber. Escolha uma resolução menor ou menos quadros por segundo.'
@@ -279,7 +283,8 @@ function StatsPanel({ stats }: { stats: StreamStats | null }) {
             {stats.role === 'sending' && stats.via === 'p2p' && stats.viewers > 1 ? ' no total' : ''}
           </p>
           <p>
-            {stats.codec ? `${stats.codec} · ` : ''}perda {stats.lossPercent.toFixed(1)}%
+            {stats.codec ? `${stats.codec} · ` : ''}
+            {stats.encoder ? `${stats.encoder === 'hardware' ? 'placa de vídeo' : 'processador'} · ` : ''}perda {stats.lossPercent.toFixed(1)}%
             {stats.rttMs !== null ? ` · ${Math.round(stats.rttMs)} ms` : ''}
           </p>
           {tip && <p className="mt-1 text-idle">{tip}</p>}

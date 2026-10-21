@@ -1,11 +1,19 @@
-import type { ScreenShareOptions } from '../lib/voice';
+import { supportsH264, type ScreenShareOptions } from '../lib/voice';
 import { labelClass } from './Modal';
 
 /** A parte da qualidade que dá para mudar com a transmissão no ar (o som só se escolhe ao começar). */
-export type ScreenQuality = Pick<ScreenShareOptions, 'height' | 'frameRate' | 'priority' | 'uploadMbps'>;
+export type ScreenQuality = Pick<ScreenShareOptions, 'height' | 'frameRate' | 'priority' | 'uploadMbps' | 'codec'>;
 
 const STORAGE_KEY = 'coreto.screenShare';
-export const DEFAULT_SCREEN_OPTIONS: ScreenShareOptions = { height: 720, frameRate: 30, audio: true, priority: 'sharp', uploadMbps: 10 };
+export const DEFAULT_SCREEN_OPTIONS: ScreenShareOptions = {
+  height: 720,
+  frameRate: 30,
+  audio: true,
+  priority: 'sharp',
+  uploadMbps: 10,
+  // H.264 usa a placa de vídeo para codificar; só vira padrão onde o navegador sabe fazer isso.
+  codec: supportsH264() ? 'h264' : 'vp8',
+};
 
 const RESOLUTIONS: { value: ScreenShareOptions['height']; label: string }[] = [
   { value: 720, label: '720p' },
@@ -18,6 +26,10 @@ const PRIORITIES: { value: ScreenShareOptions['priority']; label: string }[] = [
   { value: 'smooth', label: 'Fluidez' },
 ];
 const UPLOADS: ScreenShareOptions['uploadMbps'][] = [5, 10, 20, 50];
+const CODECS: { value: ScreenShareOptions['codec']; label: string }[] = [
+  { value: 'h264', label: 'H.264 (placa de vídeo)' },
+  { value: 'vp8', label: 'VP8 (processador)' },
+];
 
 /** A última escolha fica no navegador, como conveniência. */
 export function loadScreenOptions(): ScreenShareOptions {
@@ -30,6 +42,7 @@ export function loadScreenOptions(): ScreenShareOptions {
       audio: typeof saved?.audio === 'boolean' ? saved.audio : defaults.audio,
       priority: PRIORITIES.some((p) => p.value === saved?.priority) ? saved!.priority! : defaults.priority,
       uploadMbps: UPLOADS.includes(saved?.uploadMbps as never) ? saved!.uploadMbps! : defaults.uploadMbps,
+      codec: CODECS.some((c) => c.value === saved?.codec) ? saved!.codec! : defaults.codec,
     };
   } catch {
     return defaults;
@@ -79,6 +92,19 @@ export function ScreenQualityFields({ value, onChange }: { value: ScreenQuality;
         <p className="mt-1.5 text-xs text-faint">
           Nitidez mantém o texto legível e deixa cair quadros se a internet apertar. Fluidez mantém o movimento e deixa a imagem
           perder resolução (jogos e vídeos).
+        </p>
+      </fieldset>
+
+      <fieldset className="mt-4">
+        <legend className={labelClass}>Codificação</legend>
+        <Segmented
+          name="codec"
+          options={CODECS.map((c) => ({ key: c.value, label: c.label, selected: value.codec === c.value }))}
+          onSelect={(key) => onChange({ codec: key as ScreenShareOptions['codec'] })}
+        />
+        <p className="mt-1.5 text-xs text-faint">
+          H.264 deixa a placa de vídeo codificar, o que ajuda a manter 60 fps em 1080p sem pesar no processador. Mudar no meio
+          da transmissão faz a imagem sumir por um instante para quem assiste. Vale para o servidor de mídia.
         </p>
       </fieldset>
 

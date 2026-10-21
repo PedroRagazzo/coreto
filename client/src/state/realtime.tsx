@@ -593,7 +593,7 @@ export interface RealtimeActions {
   /** As opções da transmissão em andamento, ou `null` se você não está transmitindo. */
   screenOptions(): ScreenShareOptions | null;
   /** Muda a qualidade com a transmissão no ar; devolve as opções valendo, ou `null` se ela acabou. */
-  updateScreenOptions(patch: Partial<Pick<ScreenShareOptions, 'height' | 'frameRate' | 'priority' | 'uploadMbps'>>): Promise<ScreenShareOptions | null>;
+  updateScreenOptions(patch: Partial<Pick<ScreenShareOptions, 'height' | 'frameRate' | 'priority' | 'uploadMbps' | 'codec'>>): Promise<ScreenShareOptions | null>;
   /** Como a transmissão (sua ou a que você assiste) está indo agora; `null` se não há dados. */
   screenStats(userId: Id): Promise<StreamStats | null>;
   /** Miniatura da tela de quem está ao vivo (JPEG em data URL); `null` se ainda não há. */
