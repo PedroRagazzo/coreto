@@ -17,6 +17,7 @@
   },
   "include": [
     "src",
+    "scripts",
     "test",
     "vitest.config.ts",
     "../shared/src"

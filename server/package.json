@@ -11,6 +11,7 @@
     "db:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
     "backup": "sh scripts/backup.sh",
+    "check-cookies": "tsx scripts/check-cookies.ts",
     "test": "prisma generate && vitest run",
     "test:watch": "prisma generate && vitest"
   },

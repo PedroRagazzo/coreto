@@ -546,6 +546,12 @@ log. O áudio do robô atravessa a rede como o de qualquer pessoa, então a cham
      caminho de montagem (por exemplo `/app/cookies.txt`).
   4. Em **Environment**, defina `YTDLP_COOKIES_FILE=/app/cookies.txt` e faça o deploy de novo.
 
+  Antes de montar, confira o arquivo no seu PC (nunca mostra valores de cookie):
+  `npm run check-cookies -w server -- "C:\caminho\cookies.txt" --limpar "C:\caminho\cookies-limpo.txt" --testar`.
+  Ele checa o formato e a sessão, grava (`--limpar`) uma cópia só com YouTube e Google, sem os cookies de outros sites, e
+  confirma com o YouTube (`--testar`, precisa do `yt-dlp` no PATH ou `--yt-dlp "C:\caminho\yt-dlp.exe"`) que a conta
+  realmente entra. Monte no servidor a cópia limpa.
+
   O arquivo é um segredo (quem o tem entra na conta): nunca o publique nem o ponha no repositório. O servidor trabalha
   numa cópia dele na pasta temporária, porque o `yt-dlp` regrava o arquivo e a montagem pode ser somente leitura. Se o
   robô disser que o YouTube "recusou os cookies", exporte de novo. Outra saída, sem conta: `YTDLP_EXTRA_ARGS` com um
