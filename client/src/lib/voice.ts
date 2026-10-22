@@ -9,6 +9,7 @@
 // cada conexão, os dois lados anunciam os ids deles (sinal `media`), e é assim
 // que quem recebe sabe qual vídeo é a câmera e qual é a tela.
 
+import { assess, type ConnectionQuality, ownLevel, type QualitySample } from '@shared/connection-quality';
 import type { Id } from '@shared/models';
 import { withStereoOpus } from '@shared/opus-sdp';
 import type { IceServer, SignalPayload } from '@shared/protocol';
@@ -32,6 +33,8 @@ const SPEAKING_THRESHOLD = 0.02;
 /** Depois do último som alto, continua "falando" por este tempo, para o anel não piscar entre palavras. */
 const SPEAKING_HOLD_MS = 300;
 const SPEAKING_POLL_MS = 100;
+/** De quanto em quanto tempo se mede a qualidade da conexão com cada pessoa. */
+const QUALITY_POLL_MS = 2000;
 
 interface Meter {
   source: MediaStreamAudioSourceNode;
@@ -374,9 +377,32 @@ function currentRoundTrip(report: RTCStatsReport): number | null {
   return rtt;
 }
 
+/** O áudio que chega de uma conexão, somado (microfone e som da tela), e a ida e volta da rede; `null` se ainda não há. */
+function audioSample(report: RTCStatsReport): QualitySample | null {
+  let received = 0;
+  let lost = 0;
+  let jitter: number | null = null;
+  let seen = false;
+  report.forEach((stat) => {
+    if (stat.type !== 'inbound-rtp' || stat.kind !== 'audio') return;
+    seen = true;
+    received += Number(stat.packetsReceived ?? 0);
+    // Pode vir negativo (pacotes duplicados): não conta como "ganho".
+    lost += Math.max(0, Number(stat.packetsLost ?? 0));
+    if (Number.isFinite(stat.jitter)) jitter = Math.max(jitter ?? 0, stat.jitter * 1000);
+  });
+  const rttMs = currentRoundTrip(report);
+  return seen || rttMs !== null ? { received, lost, rttMs, jitterMs: jitter } : null;
+}
+
 export interface VoiceEvents {
   /** Quem está falando agora (incluindo você), a cada mudança. */
   onSpeaking?: (speaking: Set<Id>) => void;
+  /**
+   * A qualidade da conexão com cada pessoa da chamada (e a sua, quando dá para saber), a cada mudança.
+   * Vazio quando você sai da chamada.
+   */
+  onQuality?: (quality: Record<Id, ConnectionQuality>) => void;
   /** A tela de alguém começou a chegar (ou parou de existir, com `null`). */
   onRemoteScreen?: (userId: Id, stream: MediaStream | null) => void;
   /** A câmera de alguém começou a chegar (ou parou de existir, com `null`). */
@@ -431,6 +457,11 @@ export class VoiceManager {
   private deafened = false;
   private selfId: Id | null = null;
   private readonly detector: SpeakingDetector;
+  /** As últimas leituras de rede de cada pessoa, para medir a qualidade da conexão. */
+  private readonly qualitySamples = new Map<Id, QualitySample[]>();
+  private published: Record<Id, ConnectionQuality> = {};
+  private qualityTimer: ReturnType<typeof setInterval> | null = null;
+  private measuring = false;
   /**
    * `transport` diz por onde a tela sai: `pending` enquanto tenta o servidor de mídia (ninguém recebe
    * pela malha nesse meio-tempo, para a imagem não chegar duas vezes), `sfu` quando já está lá, `p2p`
@@ -507,6 +538,7 @@ export class VoiceManager {
     this.detector.watch(selfId, stream);
     // Quem chega liga para quem já estava: adicionar o microfone dispara a primeira oferta.
     for (const peerId of res.data.peers) this.addLocalAudio(this.createPeer(peerId));
+    this.qualityTimer = setInterval(() => void this.measureQuality(), QUALITY_POLL_MS);
   }
 
   leave(): void {
@@ -529,6 +561,10 @@ export class VoiceManager {
     this.watchedScreens = [];
     if (this.selfId) this.detector.unwatch(this.selfId);
     this.detector.stop();
+    if (this.qualityTimer) clearInterval(this.qualityTimer);
+    this.qualityTimer = null;
+    this.qualitySamples.clear();
+    this.publishQuality({});
     this.mic?.close();
     this.mic = null;
     void this.playback?.close();
@@ -1110,6 +1146,51 @@ export class VoiceManager {
     return peer;
   }
 
+  // ── Qualidade da conexão ──────────────────────────────────────────────────
+
+  /** Lê as estatísticas de cada conexão de voz e avisa a qualidade, quando ela muda. */
+  private async measureQuality(): Promise<void> {
+    const selfId = this.selfId;
+    if (this.measuring || !selfId) return;
+    this.measuring = true;
+    try {
+      const quality: Record<Id, ConnectionQuality> = {};
+      for (const [peerId, peer] of [...this.peers]) {
+        // O bot de música é um programa no servidor: a conexão dele não diz nada sobre a internet de ninguém.
+        if (this.events.isBot?.(peerId)) continue;
+        const state = peer.pc.connectionState;
+        if (state === 'disconnected' || state === 'failed') {
+          quality[peerId] = { level: 'poor', rttMs: null, lossPercent: null, jitterMs: null };
+          continue;
+        }
+        if (state !== 'connected') continue;
+        const sample = audioSample(await peer.pc.getStats());
+        if (!sample || !this.peers.has(peerId)) continue;
+        const history = this.qualitySamples.get(peerId) ?? [];
+        history.push(sample);
+        history.splice(0, history.length - 10);
+        this.qualitySamples.set(peerId, history);
+        const assessed = assess(history);
+        if (assessed) quality[peerId] = assessed;
+      }
+      const own = ownLevel(Object.values(quality).map((q) => q.level));
+      if (own) quality[selfId] = { level: own, rttMs: null, lossPercent: null, jitterMs: null };
+      // Se você saiu da chamada enquanto lia as estatísticas, esta leitura já não vale.
+      if (this.selfId === selfId) this.publishQuality(quality);
+    } catch (err) {
+      console.warn('[voz] falha ao medir a conexão', err);
+    } finally {
+      this.measuring = false;
+    }
+  }
+
+  private publishQuality(quality: Record<Id, ConnectionQuality>): void {
+    // Só avisa quando algo muda (a tela não precisa refazer-se a cada leitura igual).
+    if (JSON.stringify(quality) === JSON.stringify(this.published)) return;
+    this.published = quality;
+    this.events.onQuality?.(quality);
+  }
+
   /** Avisa os vídeos recebidos cuja origem (câmera ou tela) já é conhecida. */
   private announceVideo(peerId: Id, peer: Peer): void {
     const media = peer.remoteMedia;
@@ -1192,6 +1273,7 @@ export class VoiceManager {
     peer.voice?.close();
     this.detector.unwatch(peerId);
     this.peers.delete(peerId);
+    this.qualitySamples.delete(peerId);
     this.setRemoteScreen('p2p', peerId, null);
     this.events.onRemoteCamera?.(peerId, null);
   }

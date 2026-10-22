@@ -6,6 +6,7 @@ import { displayNameOf } from '../state/selectors';
 import { Avatar } from './Avatar';
 import { MusicDialog, useMusic } from './MusicDialog';
 import { ScreenShareDialog } from './ScreenShareDialog';
+import { ConnectionIndicator } from './ConnectionIndicator';
 import { StreamSettingsDialog } from './StreamSettingsDialog';
 import { LiveBadge } from './StreamStage';
 import { useUserVolumeMenu } from './UserVolumeMenu';
@@ -121,6 +122,7 @@ function ParticipantTile({ participant, isMe }: { participant: VoiceParticipant;
   const stream = participant.video ? (isMe ? state.myCamera : (state.cameras[userId] ?? null)) : null;
   const ref = useVideo(stream);
   const speaking = Boolean(state.speaking[userId]) && !participant.muted;
+  const quality = state.quality[userId];
   const volumeMenu = useUserVolumeMenu();
 
   return (
@@ -152,6 +154,7 @@ function ParticipantTile({ participant, isMe }: { participant: VoiceParticipant;
         )}
         <span className="truncate">{isMe ? `${name} (você)` : name}</span>
         {speaking && <span className="sr-only">(falando)</span>}
+        {quality && <ConnectionIndicator quality={quality} own={isMe} />}
       </span>
       {volumeMenu.menu}
     </li>

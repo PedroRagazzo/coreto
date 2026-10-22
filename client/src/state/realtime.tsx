@@ -17,6 +17,7 @@ import type {
   User,
   VoiceParticipant,
 } from '@shared/models';
+import type { ConnectionQuality } from '@shared/connection-quality';
 import { firstLink } from '@shared/links';
 import { toastFor } from '@shared/notify';
 import { hasPermission, Permission } from '@shared/permissions';
@@ -103,6 +104,8 @@ export interface RealtimeState {
   mentions: Record<Id, MentionCount>;
   /** Quem está falando agora na sua chamada (medido localmente). */
   speaking: Record<Id, true>;
+  /** A qualidade da conexão com cada pessoa da sua chamada, e a sua quando dá para saber (medido localmente). */
+  quality: Record<Id, ConnectionQuality>;
   /** O bot de música na sua sala de voz, com a hora local em que o estado chegou (para andar a barra de progresso). */
   music: { state: MusicState; receivedAt: number } | null;
   /** Sua tela, enquanto você transmite (para a prévia). */
@@ -164,6 +167,7 @@ const initialState: RealtimeState = {
   myVoice: IDLE_VOICE,
   mentions: {},
   speaking: {},
+  quality: {},
   music: null,
   myScreen: null,
   screens: {},
@@ -228,6 +232,7 @@ type Action =
   | { type: 'voice:self'; patch: Partial<MyVoiceState> }
   | { type: 'mentions:update'; mention: MentionCount }
   | { type: 'speaking'; userIds: Id[] }
+  | { type: 'quality'; quality: Record<Id, ConnectionQuality> }
   | { type: 'music:state'; state: MusicState | null }
   | { type: 'screen:mine'; stream: MediaStream | null }
   | { type: 'screen:remote'; userId: Id; stream: MediaStream | null }
@@ -608,6 +613,9 @@ function reducer(state: RealtimeState, action: Action): RealtimeState {
 
     case 'speaking':
       return { ...state, speaking: Object.fromEntries(action.userIds.map((id) => [id, true as const])) };
+
+    case 'quality':
+      return { ...state, quality: action.quality };
 
     case 'music:state':
       return { ...state, music: action.state ? { state: action.state, receivedAt: Date.now() } : null };
@@ -1323,6 +1331,7 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
 
     const voice = new VoiceManager(socket, {
       onSpeaking: (speaking) => dispatch({ type: 'speaking', userIds: [...speaking] }),
+      onQuality: (quality) => dispatch({ type: 'quality', quality }),
       onRemoteScreen: (userId, stream) => dispatch({ type: 'screen:remote', userId, stream }),
       onRemoteCamera: (userId, stream) => dispatch({ type: 'camera:remote', userId, stream }),
       onScreenEnded: () => actions.stopScreenShare(),

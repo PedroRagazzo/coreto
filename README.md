@@ -507,6 +507,14 @@ Microfone e som desativados aparecem para todos ao lado do nome, na lista da sal
 verde em quem está falando: cada navegador mede o volume do áudio que recebe (e do próprio microfone), sem passar
 nada pelo servidor.
 
+**Qualidade da conexão:** ao lado de cada pessoa da sua chamada aparecem três barrinhas (verde, amarela ou vermelha); passar o
+mouse mostra o ping, a perda de pacotes e a oscilação. Também é medido no seu navegador, a cada 2 s, pelas estatísticas do
+WebRTC (`shared/src/connection-quality.ts`): a perda e a oscilação vêm do áudio que chega daquela pessoa, nos últimos ~8 s, e o
+ping do caminho entre vocês dois. Passa a "oscilando" com ping de 200 ms, perda de 2% ou oscilação de 30 ms, e a "ruim" com 400
+ms, 5% ou 60 ms. Na lista lateral só aparece quando não está boa. Para saber de quem é o problema: se só uma pessoa está
+ruim, é dela (ou do caminho até ela); no seu próprio nome a barrinha só aparece com duas ou mais pessoas na chamada, e só fica
+ruim quando metade ou mais delas está ruim para você, aí o problema provavelmente é a sua conexão. O bot de música não entra.
+
 A malha funciona bem até umas 5 a 8 pessoas por sala, porque cada participante envia o áudio para todos os outros.
 Para salas maiores, e para impor `SPEAK` no servidor, troque por um SFU (mediasoup, LiveKit ou Janus):
 o protocolo de `voice:join` / `voice:signal` já isola essa troca em `server/src/realtime/voice.ts` e `client/src/lib/voice.ts`.

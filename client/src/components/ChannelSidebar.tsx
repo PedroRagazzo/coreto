@@ -7,6 +7,7 @@ import { can, displayNameOf, groupChannels } from '../state/selectors';
 import { Avatar } from './Avatar';
 import { LiveBadge } from './StreamStage';
 import { CreateChannelDialog } from './CreateChannelDialog';
+import { ConnectionIndicator } from './ConnectionIndicator';
 import { EditChannelDialog } from './EditChannelDialog';
 import { EditSpaceDialog } from './EditSpaceDialog';
 import { StreamPreviewCard } from './StreamPreviewCard';
@@ -229,6 +230,8 @@ function VoiceChannelItem({ channel, onEdit }: ChannelItemProps) {
             const name = displayNameOf(state.snapshot, state.users, p.userId);
             // Só dá para medir quem fala na chamada em que você está.
             const speaking = isMine && Boolean(state.speaking[p.userId]) && !p.muted;
+            // Na lista, só aparece quando a conexão não está boa (na chamada em si, aparece sempre).
+            const quality = isMine ? state.quality[p.userId] : undefined;
             const row = (
               <>
                 <Avatar name={name} color={user?.avatarColor ?? '#555'} size="xs" speaking={speaking} />
@@ -241,6 +244,7 @@ function VoiceChannelItem({ channel, onEdit }: ChannelItemProps) {
                   {p.activity && <span className="block truncate text-xs text-faint">{p.activity}</span>}
                 </span>
                 {p.streaming && <LiveBadge />}
+                {quality && quality.level !== 'good' && <ConnectionIndicator quality={quality} own={p.userId === state.me?.id} />}
                 {p.deafened ? (
                   <HeadphoneOff size={14} aria-label="Som desativado" className="shrink-0 text-dnd" />
                 ) : (
