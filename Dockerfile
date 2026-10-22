@@ -60,7 +60,8 @@ RUN apt-get update \
 COPY --from=ytdlp /yt-dlp /usr/local/bin/yt-dlp
 ENV NODE_ENV=production \
     SERVER_PORT=3000 \
-    UPLOAD_DIR=/data/uploads \n    BACKUP_DIR=/data/backups \
+    UPLOAD_DIR=/data/uploads \
+    BACKUP_DIR=/data/backups \
     CLIENT_DIST=/app/client/dist
 COPY --from=build --chown=node:node /app /app
 RUN mkdir -p /data/uploads /data/backups && chown -R node:node /data
