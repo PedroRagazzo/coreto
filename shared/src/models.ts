@@ -109,6 +109,18 @@ export interface Message {
   reactions: Reaction[];
 }
 
+/** O cartão de pré-visualização de um link (título, descrição e imagem da página, ou a própria imagem do link). */
+export interface LinkPreview {
+  url: string;
+  /** `page`: uma página com título e talvez imagem; `image`: o link é uma imagem (ou GIF) e aparece como ela. */
+  kind: 'page' | 'image';
+  title: string | null;
+  description: string | null;
+  siteName: string | null;
+  /** A imagem, entregue pelo servidor em /embed-image/<id> (o navegador nunca visita o site de origem). */
+  image: { id: string; width: number | null; height: number | null } | null;
+}
+
 /** O que se mostra da mensagem respondida, acima da resposta. */
 export interface ReplyPreview {
   id: Id;

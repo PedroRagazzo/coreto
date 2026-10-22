@@ -8,7 +8,7 @@ import { SettingsGroup, Toggle } from './SettingsModal';
 export function AppearanceSettings() {
   const { settings, update } = useSettings();
   const { state } = useRealtime();
-  const { messageFontSize, compact } = settings.appearance;
+  const { messageFontSize, compact, linkPreviews } = settings.appearance;
   const setAppearance = (patch: Partial<typeof settings.appearance>) =>
     update((s) => ({ ...s, appearance: { ...s.appearance, ...patch } }));
   const name = state.me?.displayName ?? 'Você';
@@ -51,6 +51,14 @@ export function AppearanceSettings() {
           checked={compact}
           onChange={(v) => setAppearance({ compact: v })}
         />
+        <div className="mt-3">
+          <Toggle
+            label="Pré-visualização de links"
+            description="Mostra, embaixo da mensagem, o título, a descrição e a imagem do primeiro link, e links de imagens e GIFs aparecem como a própria imagem. As páginas são buscadas pelo servidor do Coreto, que não passa o seu endereço para os sites."
+            checked={linkPreviews}
+            onChange={(v) => setAppearance({ linkPreviews: v })}
+          />
+        </div>
       </SettingsGroup>
     </>
   );

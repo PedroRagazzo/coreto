@@ -355,6 +355,29 @@ Passando o mouse numa mensagem aparecem os botões **Reagir** e **Responder**.
   notificações já vêm liberadas; no navegador é preciso permitir uma vez. Menções em outro espaço, cujas mensagens o
   site não recebe, geram um aviso genérico ("Você foi mencionado").
 
+## Pré-visualização de links
+
+Embaixo de uma mensagem com link aparece um cartão do **primeiro** link (o mesmo que a mensagem mostra como clicável;
+links dentro de código não contam): site, título, descrição e imagem de destaque da página (tags Open Graph, com
+`<title>` e a descrição comum como reserva). Link do YouTube usa o oEmbed deles (título, canal e capa). Um link que é uma
+imagem ou **GIF** (`.png`, `.jpg`, `.gif`, `.webp`, inclusive de Giphy e similares) aparece como a própria imagem. Dá para
+desligar em Configurações → Aparência. O site pede o cartão com `link:preview` (só uma vez por link) e o servidor
+guarda o resultado na memória por 1 hora (10 minutos quando não há o que mostrar).
+
+Como o servidor visita endereços que estranhos escrevem, as defesas ficam em `server/src/embeds/`:
+- **Só a internet pública.** O nome do site é resolvido no servidor e todos os endereços precisam ser públicos
+  (`address.ts` recusa a própria máquina, a rede interna da VPS, o endereço de metadados da nuvem, IPv4 escondido em
+  IPv6, NAT64, 6to4 etc.); a conexão vai para o IP já conferido (sem "DNS rebinding"). Só `http`/`https`, portas 80 e 443,
+  sem usuário e senha no endereço; cada redirecionamento (no máximo 3) passa pelas mesmas conferências.
+- **Só links que estão numa mensagem que a pessoa lê.** O pedido leva o id da mensagem; o servidor confere a permissão
+  de leitura e que o link é exatamente o primeiro dela, então não serve de "visitador" de endereços à escolha.
+- **Limites.** 8 segundos por busca, 512 KB de HTML, 4 MB por imagem (também depois de descomprimir), 6 buscas ao mesmo
+  tempo e 40 pedidos a cada 10 segundos por conexão.
+- **Imagens pelo servidor.** O navegador nunca visita o site de origem (que veria o IP de quem lê, e a política de
+  segurança do Coreto não permitiria): a imagem sai em `/embed-image/<id>`, com o tipo conferido pelos bytes (só PNG,
+  JPEG, GIF e WebP, nunca SVG nem HTML), `nosniff` e uma política que não executa nada.
+- **Só texto.** O título e a descrição são mostrados como texto puro, nunca como HTML.
+
 ## Formatação, menções e imagens
 
 - **Formatação:** `**negrito**`, `*itálico*` ou `_itálico_`, `~~riscado~~`, `` `código` `` e blocos com três crases

@@ -114,7 +114,8 @@ export function MessageList({ conversationId, welcome, messages }: MessageListPr
       if (!complete) loadOlder();
       else if (detached) actions.loadNewer(conversationId);
     }
-  }, [messages, conversationId, complete, loadingOlder, detached]);
+    // Um cartão de link que chega muda a altura da mensagem: se você estava no fim, continua no fim.
+  }, [messages, conversationId, complete, loadingOlder, detached, state.linkPreviews]);
 
   // Pulo pela busca: rola até a mensagem e destaca por um instante.
   const focusId = state.focus?.channelId === conversationId ? state.focus.messageId : null;

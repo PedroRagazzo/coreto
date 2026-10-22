@@ -4,6 +4,7 @@ import { ExternalLink, X } from 'lucide-react';
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { formatMessageTime } from '../lib/format';
 import { attachmentUrl } from '../lib/uploads';
+import { LinkPreviewCard } from './LinkPreviewCard';
 import { useRealtime } from '../state/realtime';
 import { displayNameOf } from '../state/selectors';
 
@@ -26,6 +27,7 @@ export function MessageContent({ message, prefix }: { message: Message; prefix?:
         </div>
       )}
       {message.attachments.length > 0 && <AttachmentGallery attachments={message.attachments} />}
+      <LinkPreviewCard message={message} />
     </>
   );
 }

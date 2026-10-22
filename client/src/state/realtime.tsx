@@ -7,6 +7,7 @@ import type {
   Id,
   Member,
   MentionCount,
+  LinkPreview,
   Message,
   PresenceStatus,
   Reaction,
@@ -16,6 +17,7 @@ import type {
   User,
   VoiceParticipant,
 } from '@shared/models';
+import { firstLink } from '@shared/links';
 import { toastFor } from '@shared/notify';
 import { hasPermission, Permission } from '@shared/permissions';
 import { deletedReply, replyPreviewOf } from '@shared/reply';
@@ -82,6 +84,8 @@ export interface RealtimeState {
   snapshot: SpaceSnapshot | null;
   directs: Record<Id, DirectConversation>;
   activeDirectId: Id | null;
+  /** link → o cartão de pré-visualização (`null` se a página não tem o que mostrar); ausente = ainda não pedido */
+  linkPreviews: Record<string, LinkPreview | null>;
   /** canal de texto ou conversa direta → mensagens de outras pessoas ainda não lidas (some o que está zerado) */
   unread: Record<Id, UnreadCount>;
   users: Record<Id, User>;
@@ -149,6 +153,7 @@ const initialState: RealtimeState = {
   snapshot: null,
   directs: {},
   activeDirectId: null,
+  linkPreviews: {},
   unread: {},
   users: {},
   messages: {},
@@ -213,6 +218,7 @@ type Action =
   | { type: 'message:updated'; message: Message }
   | { type: 'message:deleted'; channelId: Id; messageId: Id }
   | { type: 'message:reactions'; channelId: Id; messageId: Id; reactions: Reaction[] }
+  | { type: 'link:preview'; url: string; preview: LinkPreview | null }
   | { type: 'reply:start'; message: Message }
   | { type: 'reply:cancel' }
   | { type: 'typing'; channelId: Id; userId: Id; until: number }
@@ -516,6 +522,9 @@ function reducer(state: RealtimeState, action: Action): RealtimeState {
       };
     }
 
+    case 'link:preview':
+      return { ...state, linkPreviews: { ...state.linkPreviews, [action.url]: action.preview } };
+
     case 'reply:start':
       return { ...state, replyingTo: action.message };
 
@@ -672,6 +681,8 @@ export interface RealtimeActions {
   selectDirect(conversationId: Id): void;
   /** Envia para um canal de texto ou conversa direta, com anexos já enviados. Resolve com erro ou `null`. */
   sendMessage(targetId: Id, content: string, attachmentIds?: Id[], replyToId?: Id): Promise<string | null>;
+  /** Pede ao servidor o cartão do primeiro link da mensagem (uma vez por link); o resultado vai para `state.linkPreviews`. */
+  requestLinkPreview(message: Message): void;
   /** Começa a responder a uma mensagem: o campo de texto mostra a quem e o envio leva a resposta. */
   startReply(message: Message): void;
   cancelReply(): void;
@@ -757,6 +768,8 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
   const socketRef = useRef<AppSocket | null>(null);
   const voiceRef = useRef<VoiceManager | null>(null);
   const lastTypingRef = useRef<{ channelId: Id | null; at: number }>({ channelId: null, at: 0 });
+  /** Links cujo cartão já foi pedido (um pedido por link, mesmo que ele apareça em várias mensagens). */
+  const previewsAskedRef = useRef(new Set<string>());
   /** As preferências de notificação valem na hora, sem refazer a conexão com o servidor. */
   const notificationPrefsRef = useRef(DEFAULT_SETTINGS.notifications);
   const firstSessionRef = useRef(true);
@@ -987,6 +1000,18 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
         // O estado é atualizado pelo evento `message:deleted`, que chega para todos que veem a conversa.
         const res = await socket.emitWithAck('message:delete', { messageId });
         return res.ok ? null : res.error;
+      },
+
+      requestLinkPreview(message) {
+        const url = firstLink(message.content);
+        const socket = socketRef.current;
+        if (!url || !socket || previewsAskedRef.current.has(url)) return;
+        previewsAskedRef.current.add(url);
+        void socket
+          .timeout(15_000)
+          .emitWithAck('link:preview', { messageId: message.id, url })
+          .then((res) => dispatch({ type: 'link:preview', url, preview: res.ok ? res.data : null }))
+          .catch(() => previewsAskedRef.current.delete(url)); // sem resposta: tenta de novo quando a mensagem reaparecer
       },
 
       startReply(message) {

@@ -7,6 +7,7 @@ import type {
   DirectConversation,
   Id,
   Member,
+  LinkPreview,
   MentionCount,
   Message,
   PresenceStatus,
@@ -219,6 +220,11 @@ export interface ClientToServerEvents {
   ) => void;
   /** Reage à mensagem com um emoji, ou tira a reação se já tinha reagido com ele. */
   'reaction:toggle': (req: { messageId: Id; emoji: string }, ack: (res: Ack<null>) => void) => void;
+  /**
+   * A pré-visualização do primeiro link de uma mensagem que você pode ler; `null` se a página não tem o que mostrar.
+   * O servidor só busca o link que de fato está na mensagem.
+   */
+  'link:preview': (req: { messageId: Id; url: string }, ack: (res: Ack<LinkPreview | null>) => void) => void;
   /** Só o autor edita; os anexos não mudam. */
   'message:edit': (req: { messageId: Id; content: string }, ack: (res: Ack<Message>) => void) => void;
   /** O autor apaga; em canais, quem tem MANAGE_MESSAGES também. */

@@ -9,6 +9,9 @@ export interface UploadHandle {
 
 export const attachmentUrl = (attachment: Attachment) => `${SERVER_URL}/uploads/${attachment.id}`;
 
+/** A imagem de uma pré-visualização de link, entregue pelo servidor do Coreto (nunca direto do site de origem). */
+export const embedImageUrl = (imageId: string) => `${SERVER_URL}/embed-image/${imageId}`;
+
 /** Motivo para recusar o arquivo antes de enviar, ou `null` se ele puder ir. */
 export function checkImageFile(file: File): string | null {
   if (!(ATTACHMENT_TYPES as readonly string[]).includes(file.type)) {

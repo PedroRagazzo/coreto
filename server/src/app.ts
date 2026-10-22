@@ -7,10 +7,12 @@ import { LoginThrottle } from './auth.js';
 import { LatestInstaller } from './download.js';
 import type { MusicBot, MusicFactory } from './music/index.js';
 import { registerMusic } from './music/socket.js';
+import { createEmbeds, type EmbedService } from './embeds/service.js';
 import { registerChat } from './realtime/chat.js';
 import { registerDirect } from './realtime/direct.js';
 import { registerManagement } from './realtime/manage.js';
 import { joinPublicSpaces } from './realtime/membership.js';
+import { registerEmbeds } from './realtime/embeds.js';
 import { registerPresence } from './realtime/presence.js';
 import type { IO } from './realtime/types.js';
 import { registerVoice } from './realtime/voice.js';
@@ -30,6 +32,8 @@ export interface ServerOptions {
   uploadDir: string;
   /** Padrão: lido das variáveis de ambiente (ver turn.ts). */
   ice?: IceConfig;
+  /** Pré-visualização de links (ver embeds/service.ts); sem ele, o servidor cria o padrão. */
+  embeds?: EmbedService;
   /** Servidor de mídia das transmissões de tela (ver sfu.ts); `null` = só P2P. Padrão: lido do ambiente. */
   sfu?: SfuConfig | null;
   /** Build do client (client/dist) para servir o site na mesma origem; sem ele, só a API. */
@@ -48,7 +52,7 @@ export interface RunningServer {
 /** Sobe o HTTP (saúde, login e anexos) + socket.io sobre um Store já carregado. */
 export async function startServer(
   store: Store,
-  { port, clientOrigins, uploadDir, ice = iceConfigFromEnv(), sfu = sfuConfigFromEnv(), clientDist = null, music: createMusic }: ServerOptions,
+  { port, clientOrigins, uploadDir, ice = iceConfigFromEnv(), sfu = sfuConfigFromEnv(), clientDist = null, music: createMusic, embeds = createEmbeds() }: ServerOptions,
 ): Promise<RunningServer> {
   const throttle = new LoginThrottle();
   const uploads = new UploadDir(uploadDir);
@@ -72,6 +76,23 @@ export async function startServer(
       return void handleUpload(req, res, store, uploads).catch((err: unknown) => {
         console.error('[upload]', err);
         if (!res.headersSent) sendJson(res, 500, { ok: false, error: 'Não foi possível guardar a imagem.' });
+      });
+    }
+    const embedImage = /^\/embed-image\/([0-9a-f-]{36})$/.exec(path);
+    if (embedImage && req.method === 'GET') {
+      return void embeds.image(embedImage[1]).then((image) => {
+        if (!image) return void res.writeHead(404).end();
+        res
+          .writeHead(200, {
+            'content-type': image.type,
+            'content-length': image.body.length,
+            'cache-control': 'public, max-age=3600',
+            // Só pode ser exibido como imagem: nada de executar o que veio de fora.
+            'x-content-type-options': 'nosniff',
+            'content-security-policy': "default-src 'none'; sandbox",
+            'cross-origin-resource-policy': 'same-site',
+          })
+          .end(image.body);
       });
     }
     const file = /^\/uploads\/([^/]+)$/.exec(path);
@@ -115,6 +136,7 @@ export async function startServer(
   io.on('connection', (socket) => {
     registerPresence(io, socket, store);
     registerChat(io, socket, store, uploads, (message, channel) => music?.onMessage(message, channel));
+    registerEmbeds(socket, store, embeds);
     registerDirect(socket, store);
     registerManagement(io, socket, store);
     registerVoice(io, socket, store, ice, sfu);

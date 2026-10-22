@@ -45,6 +45,8 @@ export interface AppearancePrefs {
   messageFontSize: number;
   /** Mensagens em uma linha, sem avatar (como o modo compacto do Discord). */
   compact: boolean;
+  /** Mostra o cartão de pré-visualização dos links (título, descrição e imagem da página, ou a imagem do link). */
+  linkPreviews: boolean;
 }
 
 /** Sons da chamada (entrar, sair, mutar...). */
@@ -95,7 +97,7 @@ export const DEFAULT_SETTINGS: Settings = {
     inputSensitivity: -50,
     userVolumes: {},
   },
-  appearance: { messageFontSize: 15, compact: false },
+  appearance: { messageFontSize: 15, compact: false, linkPreviews: true },
   sounds: { enabled: true, volume: 0.5 },
   notifications: { enabled: true, preview: true },
   keybinds: { mute: null, deafen: null },
@@ -172,6 +174,7 @@ export function loadSettings(): Settings {
         clamp(a.messageFontSize, MESSAGE_FONT_SIZES.min, MESSAGE_FONT_SIZES.max, d.appearance.messageFontSize),
       ),
       compact: bool(a.compact, d.appearance.compact),
+      linkPreviews: bool(a.linkPreviews, d.appearance.linkPreviews),
     },
     sounds: { enabled: bool(so.enabled, d.sounds.enabled), volume: clamp(so.volume, 0, 1, d.sounds.volume) },
     notifications: { enabled: bool(n.enabled, d.notifications.enabled), preview: bool(n.preview, d.notifications.preview) },
