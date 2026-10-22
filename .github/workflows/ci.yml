@@ -104,11 +104,13 @@ jobs:
           docker exec coreto ffmpeg -version | head -1
           docker logs coreto 2>&1 | grep -q "bot de música ligado"
 
-      # O mesmo comando que o Dokploy agenda: gera a cópia e confere que ela pode ser restaurada.
+      # O servidor liga o backup diário sozinho; `npm run backup` faz uma rodada na hora. Confere que a cópia sai e
+      # pode ser lida pelo pg_restore.
       - name: Backup do banco
         run: |
+          docker logs coreto 2>&1 | grep -q "backup automático ligado"
           docker exec coreto npm run backup -w server
-          docker exec coreto sh -c 'pg_restore --list /data/backups/coreto-*.dump | grep -q "TABLE public Message"'
+          docker exec coreto sh -c 'pg_restore --list "$(ls -1t /data/backups/coreto-*.dump | head -1)" | grep -q "TABLE public Message"'
 
       # O TURN do deploy (deploy/coturn): sobe pelo mesmo compose e responde STUN e TURN com autenticação.
       - name: TURN (coturn)

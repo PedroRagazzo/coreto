@@ -123,17 +123,24 @@ de NAT restrito chega ao servidor de mídia pelo TURN do Coreto. Variáveis: `LI
 
 ### Backup do banco
 
-A imagem traz o `pg_dump` 17. `npm run backup -w server` grava uma cópia compactada em `/data/backups` e guarda as
-14 mais recentes (`BACKUP_KEEP`). No Dokploy:
+O servidor faz o backup sozinho: todo dia às 06:00 UTC (03:00 em Brasília) ele grava uma cópia compactada do banco
+(`pg_dump` 17, que vem na imagem) em `/data/backups` e guarda as 14 mais recentes. Junto, espelha as imagens enviadas
+em `/data/backups/uploads`, que o banco não guarda. Se ele sobe e a última cópia tem mais de um dia (ou não há
+nenhuma), faz uma logo depois; um deploy no mesmo dia não gera cópia à toa. Se a cópia falha, o erro aparece nos logs
+(`[backup] falha: ...`) e ele tenta de novo em uma hora.
 
-1. monte um volume (por exemplo, `coreto-backups`) em `/data/backups`;
-2. crie um agendamento na aba **Schedules** do app com o comando `npm run backup -w server`, uma vez por dia.
+No Dokploy, só falta um volume (por exemplo, `coreto-backups`) montado em `/data/backups`; sem ele as cópias somem a
+cada deploy. Não precisa criar agendamento. Para conferir, procure `backup automático ligado` nos logs do app.
+Variáveis (todas opcionais): `BACKUP_DIR` (a imagem já define `/data/backups`; sem ela o backup automático fica
+desligado, como no desenvolvimento), `BACKUP_KEEP` (14), `BACKUP_HOUR_UTC` (6) e `BACKUP_AUTO=false` para desligar.
 
-As cópias ficam na própria VPS: protegem contra erro humano e banco corrompido, não contra perder a VPS. Para
-restaurar, no terminal do app:
+`npm run backup -w server` faz uma rodada na hora, no terminal do app. As cópias ficam na própria VPS: protegem contra
+erro humano e banco corrompido, não contra perder a VPS; de vez em quando, baixe uma para outro lugar. Para restaurar,
+no terminal do app (isto apaga e recria as tabelas a partir da cópia):
 
 ```bash
-pg_restore --clean --if-exists --no-owner --dbname="$DATABASE_URL" /data/backups/coreto-AAAAMMDD-HHMMSS.dump
+pg_restore --clean --if-exists --no-owner --dbname="${DATABASE_URL%%\?*}" /data/backups/coreto-AAAAMMDD-HHMMSS.dump
+cp -n /data/backups/uploads/* /data/uploads/   # só se perdeu também as imagens
 ```
 
 ## App de desktop (Windows)

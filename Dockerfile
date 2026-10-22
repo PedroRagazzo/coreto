@@ -4,7 +4,7 @@
 #   docker build -t coreto .
 #   docker run -p 3000:3000 -e DATABASE_URL=postgresql://... -v coreto-uploads:/data/uploads coreto
 #
-# Backup: `npm run backup -w server` grava uma cópia do banco em /data/backups (ver server/scripts/backup.sh).
+# Backup: o servidor copia o banco para /data/backups todo dia (server/src/backup.ts); `npm run backup -w server` faz uma agora.
 
 FROM node:24-bookworm-slim AS base
 # OpenSSL: o motor de migrations do Prisma precisa dele.
@@ -60,7 +60,7 @@ RUN apt-get update \
 COPY --from=ytdlp /yt-dlp /usr/local/bin/yt-dlp
 ENV NODE_ENV=production \
     SERVER_PORT=3000 \
-    UPLOAD_DIR=/data/uploads \
+    UPLOAD_DIR=/data/uploads \n    BACKUP_DIR=/data/backups \
     CLIENT_DIST=/app/client/dist
 COPY --from=build --chown=node:node /app /app
 RUN mkdir -p /data/uploads /data/backups && chown -R node:node /data

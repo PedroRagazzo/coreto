@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { startServer } from './app.js';
+import { backupConfigFromEnv, startBackups } from './backup.js';
 import { createDb } from './db/client.js';
 import { createMusic, musicConfigFromEnv } from './music/index.js';
 import { seedIfEmpty } from './seed.js';
@@ -49,8 +50,19 @@ async function main() {
   const sweeper = setInterval(sweep, SWEEP_INTERVAL_MS);
   sweeper.unref();
 
+  // Cópia diária do banco e das imagens (só se BACKUP_DIR está definida, como na imagem Docker).
+  const backupConfig = backupConfigFromEnv(process.env, UPLOAD_DIR);
+  const backups = backupConfig
+    ? startBackups(backupConfig, {
+        info: (message) => console.log(`[backup] ${message}`),
+        error: (message) => console.error(`[backup] ${message}`),
+      })
+    : null;
+  if (backups) console.log(`Coreto: backup automático ligado (${backupConfig!.keep} cópias em ${backupConfig!.dir}).`);
+
   const shutdown = async () => {
     clearInterval(sweeper);
+    backups?.stop();
     await server.close();
     await db.$disconnect();
     process.exit(0);
