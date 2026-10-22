@@ -67,6 +67,9 @@ export function makeHuman(
         await pc.setLocalDescription({ type: 'offer', sdp: munged(offer.sdp) });
         const d = pc.localDescription!;
         toBot({ kind: 'description', description: { type: d.type as 'offer', sdp: d.sdp } });
+      } catch (err) {
+        // O teste pode fechar a conexão no meio da negociação (a limpeza roda assim que ele acaba); isso não é falha.
+        if (pc.signalingState !== 'closed') console.warn('[teste] a negociação do navegador de mentira falhou', err);
       } finally {
         makingOffer = false;
       }
@@ -97,6 +100,9 @@ export function makeHuman(
           const d = pc.localDescription!;
           toBot({ kind: 'description', description: { type: d.type as 'answer', sdp: d.sdp } });
         }
+      }).catch((err: unknown) => {
+        // Mesmo caso: depois que o teste fecha a conexão, a fila de sinais pendentes pode falhar sem importar.
+        if (pc.signalingState !== 'closed') console.warn('[teste] sinal recusado pelo navegador de mentira', err);
       });
     },
     callBot() {
