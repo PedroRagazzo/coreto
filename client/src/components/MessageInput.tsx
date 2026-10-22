@@ -1,11 +1,12 @@
 import { encodeMentions } from '@shared/markup';
 import type { Attachment, Id } from '@shared/models';
 import { ATTACHMENT_TYPES, MAX_ATTACHMENTS_PER_MESSAGE, MAX_MESSAGE_LENGTH } from '@shared/protocol';
-import { ImagePlus, LoaderCircle, SendHorizontal, TriangleAlert, X } from 'lucide-react';
+import { CornerUpRight, ImagePlus, LoaderCircle, SendHorizontal, TriangleAlert, X } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { checkImageFile, type UploadHandle } from '../lib/uploads';
 import { useRealtime } from '../state/realtime';
-import { mentionCandidates } from '../state/selectors';
+import { displayNameOf, mentionCandidates } from '../state/selectors';
+import { Markup } from './MessageContent';
 import { useMentionAutocomplete } from './MentionAutocomplete';
 
 const MAX_HEIGHT_PX = 192;
@@ -42,6 +43,8 @@ export function MessageInput({ targetId, label, canSend }: MessageInputProps) {
   const imagesRef = useRef(images);
   imagesRef.current = images;
 
+  // Só vale a resposta que começou neste canal ou conversa.
+  const replyingTo = state.replyingTo?.channelId === targetId ? state.replyingTo : null;
   const candidates = mentionCandidates(state, targetId);
   const autocomplete = useMentionAutocomplete(textareaRef, draft, setDraft, candidates);
 
@@ -55,6 +58,11 @@ export function MessageInput({ targetId, label, canSend }: MessageInputProps) {
       setImages([]);
     };
   }, [targetId]);
+
+  // Começar a responder leva o cursor para o campo de texto.
+  useEffect(() => {
+    if (replyingTo) textareaRef.current?.focus();
+  }, [replyingTo?.id]);
 
   // Cresce com o texto até um limite; depois rola.
   useLayoutEffect(() => {
@@ -150,10 +158,12 @@ export function MessageInput({ targetId, label, canSend }: MessageInputProps) {
       targetId,
       content,
       ready.map((i) => i.attachment!.id),
+      replyingTo?.id,
     );
     setSending(false);
     setError(err);
     if (!err) {
+      actions.cancelReply();
       setDraft('');
       for (const image of images) URL.revokeObjectURL(image.previewUrl);
       setImages([]);
@@ -180,6 +190,31 @@ export function MessageInput({ targetId, label, canSend }: MessageInputProps) {
       {autocomplete.popup}
 
       <div className="rounded-lg bg-elevated focus-within:ring-1 focus-within:ring-accent/60">
+        {replyingTo && (
+          <div className="flex items-center gap-2 border-b border-line px-4 py-1.5 text-sm text-muted">
+            <CornerUpRight size={14} className="shrink-0" aria-hidden />
+            <span className="min-w-0 flex-1 truncate">
+              Respondendo a{' '}
+              <span className="font-medium text-fg">{displayNameOf(state.snapshot, state.users, replyingTo.authorId)}</span>
+              {replyingTo.content ? (
+                <>
+                  : <Markup content={replyingTo.content.replace(/\s+/g, ' ').slice(0, 120)} />
+                </>
+              ) : (
+                ' (imagem)'
+              )}
+            </span>
+            <button
+              type="button"
+              onClick={actions.cancelReply}
+              aria-label="Cancelar resposta"
+              title="Cancelar resposta (Esc)"
+              className="shrink-0 rounded p-1 text-faint hover:bg-hover hover:text-fg"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )}
         {images.length > 0 && (
           <ul aria-label="Imagens anexadas" className="flex gap-3 overflow-x-auto border-b border-line px-4 pt-3 pb-2">
             {images.map((image) => (
@@ -233,6 +268,11 @@ export function MessageInput({ targetId, label, canSend }: MessageInputProps) {
             }}
             onKeyDown={(e) => {
               if (autocomplete.handleKeyDown(e)) return;
+              if (e.key === 'Escape' && replyingTo) {
+                e.preventDefault();
+                actions.cancelReply();
+                return;
+              }
               // Enter envia; Shift+Enter quebra linha; não interfere na composição de acentos (IME).
               if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault();

@@ -38,6 +38,7 @@ model User {
   directsAsB    DirectConversation[] @relation("DirectUserB")
   mentions      Mention[]
   uploads       Attachment[]
+  reactions     Reaction[]
 }
 
 /// Sessão de login sem expiração: o navegador fica sempre logado. O banco guarda só o hash SHA-256 do token.
@@ -175,13 +176,32 @@ model Message {
   searchText  String              @default("")
   createdAt   DateTime            @default(now())
   editedAt    DateTime?
+  /// A mensagem a que esta responde. Sem chave estrangeira de propósito: apagar a original não apaga as respostas,
+  /// e o servidor mostra "mensagem apagada" quando não a encontra.
+  replyToId   String?
   mentions    Mention[]
   attachments Attachment[]
+  reactions   Reaction[]
 
   @@index([channelId, createdAt(sort: Desc)])
   @@index([directId, createdAt(sort: Desc)])
   /// Busca por trecho (`LIKE '%palavra%'`) com a extensão pg_trgm.
   @@index([searchText(ops: raw("gin_trgm_ops"))], type: Gin)
+}
+
+/// Uma pessoa reagiu a uma mensagem com um emoji. Some junto com a mensagem.
+model Reaction {
+  messageId String
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Um único emoji (shared/src/emoji.ts confere).
+  emoji     String   @db.VarChar(32)
+  createdAt DateTime @default(now())
+
+  @@id([messageId, userId, emoji])
+  /// Mostra as reações de uma mensagem na ordem em que cada emoji apareceu.
+  @@index([messageId, createdAt])
 }
 
 /// Menção ainda não vista: `<@id>` numa mensagem de canal. Some quando a pessoa abre o canal.

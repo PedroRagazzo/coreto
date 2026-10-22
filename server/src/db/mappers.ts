@@ -8,10 +8,12 @@ import type {
   Member,
   Message,
   PermissionOverwrite,
+  Reaction,
   Role,
   Space,
   User,
 } from '../../../shared/src/models.js';
+import { deletedReply, replyPreviewOf } from '../../../shared/src/reply.js';
 import type * as Db from '../generated/prisma/client.js';
 
 const iso = (date: Date | null): string | null => date?.toISOString() ?? null;
@@ -91,9 +93,38 @@ export const toAttachment = (row: Db.Attachment): Attachment => ({
 });
 
 /** Use com `include: messageInclude` nas consultas de mensagens. */
-export const messageInclude = { attachments: { orderBy: { position: 'asc' } } } as const;
+export const messageInclude = {
+  attachments: { orderBy: { position: 'asc' } },
+  // Em ordem de criação: o primeiro a reagir com cada emoji define a posição dele na lista.
+  reactions: { orderBy: { createdAt: 'asc' } },
+} as const;
 
-export const toMessage = (row: Db.Message & { attachments: Db.Attachment[] }): Message => ({
+type MessageRow = Db.Message & { attachments: Db.Attachment[]; reactions: Db.Reaction[] };
+
+/** O que se lê da mensagem respondida, para o resumo acima da resposta. */
+export interface ReplyParentRow {
+  id: string;
+  authorId: string;
+  content: string;
+  _count: { attachments: number };
+}
+
+/** O que buscar das mensagens respondidas (ver `ReplyParentRow`). */
+export const replyParentSelect = { id: true, authorId: true, content: true, _count: { select: { attachments: true } } } as const;
+
+/** Agrupa as linhas por emoji, na ordem em que cada emoji apareceu pela primeira vez. */
+export function toReactions(rows: Pick<Db.Reaction, 'emoji' | 'userId'>[]): Reaction[] {
+  const byEmoji = new Map<string, string[]>();
+  for (const { emoji, userId } of rows) {
+    const users = byEmoji.get(emoji);
+    if (users) users.push(userId);
+    else byEmoji.set(emoji, [userId]);
+  }
+  return [...byEmoji].map(([emoji, userIds]) => ({ emoji, userIds }));
+}
+
+/** `parents` traz as mensagens respondidas; as que não estão lá foram apagadas. */
+export const toMessage = (row: MessageRow, parents: ReadonlyMap<string, ReplyParentRow> = new Map()): Message => ({
   id: row.id,
   // A restrição Message_target_check garante que exatamente um dos dois existe.
   channelId: (row.channelId ?? row.directId)!,
@@ -102,4 +133,12 @@ export const toMessage = (row: Db.Message & { attachments: Db.Attachment[] }): M
   attachments: row.attachments.map(toAttachment),
   createdAt: row.createdAt.toISOString(),
   editedAt: iso(row.editedAt),
+  replyTo: row.replyToId ? replyPreviewFor(row.replyToId, parents.get(row.replyToId)) : null,
+  reactions: toReactions(row.reactions),
 });
+
+function replyPreviewFor(id: string, parent: ReplyParentRow | undefined) {
+  return parent
+    ? replyPreviewOf({ id: parent.id, authorId: parent.authorId, content: parent.content, attachments: new Array(parent._count.attachments) })
+    : deletedReply(id);
+}

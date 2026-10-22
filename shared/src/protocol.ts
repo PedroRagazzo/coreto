@@ -10,6 +10,7 @@ import type {
   MentionCount,
   Message,
   PresenceStatus,
+  Reaction,
   Space,
   SpaceSnapshot,
   User,
@@ -212,9 +213,11 @@ export interface ClientToServerEvents {
   'message:search': (req: SearchRequest, ack: (res: Ack<SearchResult>) => void) => void;
   /** `attachmentIds`: anexos enviados antes por POST /uploads, na ordem em que aparecem. */
   'message:send': (
-    req: { channelId: Id; content: string; attachmentIds?: Id[] },
+    req: { channelId: Id; content: string; attachmentIds?: Id[]; replyToId?: Id },
     ack: (res: Ack<Message>) => void,
   ) => void;
+  /** Reage à mensagem com um emoji, ou tira a reação se já tinha reagido com ele. */
+  'reaction:toggle': (req: { messageId: Id; emoji: string }, ack: (res: Ack<null>) => void) => void;
   /** Só o autor edita; os anexos não mudam. */
   'message:edit': (req: { messageId: Id; content: string }, ack: (res: Ack<Message>) => void) => void;
   /** O autor apaga; em canais, quem tem MANAGE_MESSAGES também. */
@@ -271,6 +274,8 @@ export interface ServerToClientEvents {
   'dm:upsert': (payload: DirectConversationPayload) => void;
   'message:new': (message: Message) => void;
   'message:updated': (message: Message) => void;
+  /** As reações de uma mensagem mudaram (a lista inteira, já atualizada). */
+  'message:reactions': (payload: { channelId: Id; messageId: Id; reactions: Reaction[] }) => void;
   'message:deleted': (payload: { channelId: Id; messageId: Id }) => void;
   typing: (payload: { channelId: Id; userId: Id }) => void;
   /** O número de menções não vistas do usuário num canal mudou (0 = todas vistas). */

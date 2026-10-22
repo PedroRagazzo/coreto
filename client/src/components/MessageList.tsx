@@ -1,8 +1,8 @@
 import { decodeMentions, encodeMentions, mentionedUserIds } from '@shared/markup';
-import type { Id, Message } from '@shared/models';
+import type { Id, Message, ReplyPreview } from '@shared/models';
 import { Permission } from '@shared/permissions';
 import { MAX_MESSAGE_LENGTH } from '@shared/protocol';
-import { ArrowDown, Pencil, Trash2 } from 'lucide-react';
+import { ArrowDown, CornerUpRight, Image as ImageIcon, Pencil, Reply, SmilePlus, Trash2 } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { formatMessageTime, formatShortTime } from '../lib/format';
 import { useRealtime } from '../state/realtime';
@@ -11,6 +11,7 @@ import { can, displayNameOf, mentionCandidates, roleColorOf } from '../state/sel
 import { Avatar } from './Avatar';
 import { Markup, MessageContent } from './MessageContent';
 import { useMentionAutocomplete } from './MentionAutocomplete';
+import { ReactionChips, ReactionPicker } from './MessageReactions';
 import { DialogActions, Modal } from './Modal';
 
 /** Mensagens seguidas do mesmo autor dentro desta janela viram um bloco só. */
@@ -68,6 +69,20 @@ export function MessageList({ conversationId, welcome, messages }: MessageListPr
   const detached = Boolean(state.detached[conversationId]);
   const loadingOlder = Boolean(state.loadingOlder[conversationId]);
   const moderates = can(state.snapshot, conversationId, Permission.MANAGE_MESSAGES);
+  // Numa conversa direta sempre dá para escrever; num canal, depende da permissão.
+  const canSend = state.activeSpaceId === null || can(state.snapshot, conversationId, Permission.SEND_MESSAGES);
+
+  /** Vai até a mensagem respondida: rola até ela se já está na tela; senão carrega o trecho do histórico onde ela está. */
+  const goToOriginal = (id: Id) => {
+    const target = scrollRef.current?.querySelector<HTMLElement>(`[data-message-id="${id}"]`);
+    if (target) {
+      stickToBottom.current = false;
+      target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      setFlashId(id);
+    } else {
+      void actions.jumpToMessage({ id });
+    }
+  };
 
   const loadOlder = () => {
     const el = scrollRef.current;
@@ -157,7 +172,12 @@ export function MessageList({ conversationId, welcome, messages }: MessageListPr
                     key={message.id}
                     message={message}
                     flash={flashId === message.id}
-                    mentionsMe={Boolean(state.me && mentionedUserIds(message.content).includes(state.me.id))}
+                    // Responder a você também chama a atenção, como uma menção.
+                    mentionsMe={Boolean(
+                      state.me && (mentionedUserIds(message.content).includes(state.me.id) || message.replyTo?.authorId === state.me.id),
+                    )}
+                    canSend={canSend}
+                    onGoToOriginal={goToOriginal}
                     editing={editingId === message.id}
                     onEdit={mine ? () => setEditingId(message.id) : undefined}
                     onDelete={mine || moderates ? () => setDeleting(message) : undefined}
@@ -249,6 +269,9 @@ interface MessageRowProps {
   leading: ReactNode;
   header: ReactNode;
   editing: boolean;
+  /** Pode escrever aqui: liga o botão de responder. */
+  canSend: boolean;
+  onGoToOriginal: (messageId: Id) => void;
   /** Ausente quando a mensagem não é sua. */
   onEdit?: () => void;
   /** Ausente quando você não pode apagar. */
@@ -265,10 +288,14 @@ function MessageRow({
   leading,
   header,
   editing,
+  canSend,
+  onGoToOriginal,
   onEdit,
   onDelete,
   onEditDone,
 }: MessageRowProps) {
+  const { actions } = useRealtime();
+  const [picking, setPicking] = useState(false);
   const background = flash
     ? 'bg-accent/20'
     : editing
@@ -283,16 +310,40 @@ function MessageRow({
     >
       {leading}
       <div className="min-w-0 flex-1">
+        {message.replyTo && <ReplyReference reply={message.replyTo} onJump={() => onGoToOriginal(message.replyTo!.id)} />}
         {header}
         {editing ? (
           <MessageEditor message={message} onDone={onEditDone} />
         ) : (
           <MessageContent message={message} prefix={prefix} />
         )}
+        {!editing && <ReactionChips message={message} onPick={() => setPicking(true)} />}
       </div>
 
-      {!editing && (onEdit || onDelete) && (
+      {picking && <ReactionPicker message={message} onClose={() => setPicking(false)} />}
+
+      {!editing && (
         <div className="absolute -top-3 right-4 flex gap-0.5 rounded-md border border-line bg-elevated p-0.5 opacity-0 shadow-lg group-hover:opacity-100 focus-within:opacity-100">
+          <button
+            type="button"
+            title="Reagir"
+            aria-label="Reagir"
+            onClick={() => setPicking((open) => !open)}
+            className="rounded p-1 text-muted hover:bg-hover hover:text-fg"
+          >
+            <SmilePlus size={15} />
+          </button>
+          {canSend && (
+            <button
+              type="button"
+              title="Responder"
+              aria-label="Responder"
+              onClick={() => actions.startReply(message)}
+              className="rounded p-1 text-muted hover:bg-hover hover:text-fg"
+            >
+              <Reply size={15} />
+            </button>
+          )}
           {onEdit && (
             <button
               type="button"
@@ -318,6 +369,37 @@ function MessageRow({
         </div>
       )}
     </div>
+  );
+}
+
+/** A linha acima de uma resposta: de quem e o começo do texto da original; clicar leva até ela. */
+function ReplyReference({ reply, onJump }: { reply: ReplyPreview; onJump: () => void }) {
+  const { state } = useRealtime();
+  if (reply.deleted) {
+    return (
+      <p className="mb-0.5 flex items-center gap-1.5 text-xs text-faint italic">
+        <CornerUpRight size={12} aria-hidden />
+        Mensagem original apagada
+      </p>
+    );
+  }
+  const name = reply.authorId ? displayNameOf(state.snapshot, state.users, reply.authorId) : '';
+  return (
+    <button
+      type="button"
+      onClick={onJump}
+      title="Ir para a mensagem respondida"
+      className="mb-0.5 flex max-w-full items-center gap-1.5 text-left text-xs text-muted hover:text-fg"
+    >
+      <CornerUpRight size={12} className="shrink-0" aria-hidden />
+      <span className="shrink-0 font-medium" style={{ color: (reply.authorId && roleColorOf(state.snapshot, reply.authorId)) || undefined }}>
+        {name}
+      </span>
+      <span className="min-w-0 truncate">
+        {reply.excerpt ? <Markup content={reply.excerpt} /> : reply.hasAttachments ? 'Imagem' : ''}
+      </span>
+      {reply.hasAttachments && <ImageIcon size={12} className="shrink-0" aria-label="com imagem" />}
+    </button>
   );
 }
 

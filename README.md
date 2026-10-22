@@ -318,6 +318,24 @@ Depois disso o navegador guarda um token de sessão que **não expira**, e a pes
   espaço, por exemplo) também apaga as dos outros; em conversas diretas, cada um só apaga as suas
   (`message:delete` → `message:deleted`).
 
+## Respostas e reações
+
+Passando o mouse numa mensagem aparecem os botões **Reagir** e **Responder**.
+
+- **Responder:** o campo de texto mostra "Respondendo a Fulana: ..." (Esc ou o X cancelam) e a mensagem enviada leva
+  um resumo da original acima do texto; clicar nele rola até a original (ou carrega o trecho do histórico onde ela
+  está) e a destaca. Quem foi respondido é avisado como numa menção (a bolinha de menções do canal, e a linha fica
+  destacada). Se a original é apagada, a resposta continua e mostra "Mensagem original apagada"; se é editada, o
+  resumo acompanha. Só se responde a mensagens do mesmo canal ou conversa. No banco é `Message.replyToId`, sem chave
+  estrangeira de propósito (apagar a original não apaga as respostas); o servidor busca os resumos de uma página
+  inteira de uma vez.
+- **Reações:** um emoji por clique (o seletor traz 24; `shared/src/emoji.ts` aceita qualquer emoji único, com tom de
+  pele, bandeira ou junção). Cada emoji vira um botão com a contagem, destacado se você reagiu, e clicar de novo tira a
+  sua. Até 20 emojis diferentes por mensagem e 20 reações a cada 5 segundos por conexão. Vale em qualquer lugar onde
+  você pode ler (como no Discord, dá para reagir em canais só de leitura, como #avisos). A tabela é `Reaction`
+  (mensagem, pessoa, emoji), e some junto com a mensagem. Os eventos são `reaction:toggle` (pedido) e
+  `message:reactions` (a lista inteira da mensagem, para todos que veem o canal).
+
 ## Formatação, menções e imagens
 
 - **Formatação:** `**negrito**`, `*itálico*` ou `_itálico_`, `~~riscado~~`, `` `código` `` e blocos com três crases

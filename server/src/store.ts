@@ -20,6 +20,7 @@ import type {
   Member,
   MentionCount,
   Message,
+  Reaction,
   Role,
   Space,
   SpaceSnapshot,
@@ -30,6 +31,8 @@ import type { MessageContext, SignalPayload } from '../../shared/src/protocol.js
 import { hashToken, type Db } from './db/client.js';
 import {
   messageInclude,
+  replyParentSelect,
+  toReactions,
   toAttachment,
   toCategory,
   toChannel,
@@ -499,7 +502,15 @@ export class Store {
       take,
       include: messageInclude,
     });
-    return (direction === 'older' ? rows.reverse() : rows).map(toMessage);
+    return this.toMessages(direction === 'older' ? rows.reverse() : rows);
+  }
+
+  /** Converte as linhas em mensagens, buscando de uma vez só as mensagens respondidas. */
+  private async toMessages(rows: Parameters<typeof toMessage>[0][]): Promise<Message[]> {
+    const ids = [...new Set(rows.flatMap((row) => (row.replyToId ? [row.replyToId] : [])))];
+    const parents = ids.length > 0 ? await this.db.message.findMany({ where: { id: { in: ids } }, select: replyParentSelect }) : [];
+    const byId = new Map(parents.map((parent) => [parent.id, parent]));
+    return rows.map((row) => toMessage(row, byId));
   }
 
   private async cursorOf(messageId: Id): Promise<Cursor | null> {
@@ -566,7 +577,7 @@ export class Store {
         include: messageInclude,
       }),
     ]);
-    return { total, messages: rows.map(toMessage) };
+    return { total, messages: await this.toMessages(rows) };
   }
 
   /**
@@ -588,7 +599,7 @@ export class Store {
     targetId: Id,
     authorId: Id,
     content: string,
-    { attachmentIds = [], mentions = [] }: { attachmentIds?: Id[]; mentions?: Id[] } = {},
+    { attachmentIds = [], mentions = [], replyToId = null }: { attachmentIds?: Id[]; mentions?: Id[]; replyToId?: Id | null } = {},
   ): Promise<Message> {
     const createdAt = this.nextMessageTime();
     const direct = this.directs.get(targetId);
@@ -600,6 +611,7 @@ export class Store {
           content,
           searchText: searchKey(content),
           createdAt,
+          replyToId,
         },
       });
       for (const [position, id] of attachmentIds.entries()) {
@@ -616,12 +628,46 @@ export class Store {
       return tx.message.findUniqueOrThrow({ where: { id: message.id }, include: messageInclude });
     });
     if (direct) direct.lastMessageAt = createdAt.toISOString();
-    return toMessage(row);
+    return (await this.toMessages([row]))[0];
   }
 
   async findMessage(messageId: Id): Promise<Message | null> {
     const row = await this.db.message.findUnique({ where: { id: messageId }, include: messageInclude });
-    return row ? toMessage(row) : null;
+    return row ? (await this.toMessages([row]))[0] : null;
+  }
+
+  /** Quem escreveu a mensagem `messageId`, se ela está neste canal ou conversa (só dá para responder a algo do mesmo lugar). */
+  async authorOfMessageIn(targetId: Id, messageId: Id): Promise<Id | null> {
+    const row = await this.db.message.findFirst({ where: { id: messageId, ...this.targetWhere(targetId) }, select: { authorId: true } });
+    return row?.authorId ?? null;
+  }
+
+  // ── Reações ────────────────────────────────────────────────────────────────
+
+  /** As reações de uma mensagem, agrupadas por emoji. */
+  async reactionsOf(messageId: Id): Promise<Reaction[]> {
+    return toReactions(await this.db.reaction.findMany({ where: { messageId }, orderBy: { createdAt: 'asc' }, select: { emoji: true, userId: true } }));
+  }
+
+  /**
+   * Reage com o emoji, ou tira a reação se já existia. Um emoji novo não entra se a mensagem já tem `maxKinds`
+   * emojis diferentes (`full`).
+   */
+  async toggleReaction(messageId: Id, userId: Id, emoji: string, maxKinds: number): Promise<'added' | 'removed' | 'full'> {
+    return this.db.$transaction(async (tx) => {
+      const key = { messageId_userId_emoji: { messageId, userId, emoji } };
+      if (await tx.reaction.findUnique({ where: key })) {
+        await tx.reaction.delete({ where: key });
+        return 'removed';
+      }
+      const known = await tx.reaction.findFirst({ where: { messageId, emoji }, select: { emoji: true } });
+      if (!known) {
+        const kinds = await tx.reaction.findMany({ where: { messageId }, distinct: ['emoji'], select: { emoji: true } });
+        if (kinds.length >= maxKinds) return 'full';
+      }
+      await tx.reaction.create({ data: { messageId, userId, emoji } });
+      return 'added';
+    });
   }
 
   async editMessage(messageId: Id, content: string, mentions?: MentionChanges): Promise<Message> {
@@ -637,7 +683,7 @@ export class Store {
         skipDuplicates: true,
       }),
     ]);
-    return toMessage(row);
+    return (await this.toMessages([row]))[0];
   }
 
   /** Apaga a mensagem; anexos e menções vão junto (os arquivos dos anexos ficam com quem chamou). */

@@ -103,6 +103,29 @@ export interface Message {
   attachments: Attachment[];
   createdAt: string;
   editedAt: string | null;
+  /** A mensagem a que esta responde; `null` se não é uma resposta. */
+  replyTo: ReplyPreview | null;
+  /** Reações, na ordem em que cada emoji apareceu pela primeira vez. */
+  reactions: Reaction[];
+}
+
+/** O que se mostra da mensagem respondida, acima da resposta. */
+export interface ReplyPreview {
+  id: Id;
+  /** A original foi apagada (ou não existe mais). */
+  deleted: boolean;
+  /** `null` quando a original foi apagada. */
+  authorId: Id | null;
+  /** Começo do texto da original (sem quebras de linha); vazio se ela só tinha imagens ou foi apagada. */
+  excerpt: string;
+  /** A original tinha imagens. */
+  hasAttachments: boolean;
+}
+
+/** Quem reagiu a uma mensagem com um emoji. */
+export interface Reaction {
+  emoji: string;
+  userIds: Id[];
 }
 
 /** Menções ainda não vistas de um usuário num canal. */

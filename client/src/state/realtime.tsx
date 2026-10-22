@@ -9,12 +9,14 @@ import type {
   MentionCount,
   Message,
   PresenceStatus,
+  Reaction,
   Space,
   SpaceSnapshot,
   User,
   VoiceParticipant,
 } from '@shared/models';
 import { hasPermission, Permission } from '@shared/permissions';
+import { deletedReply, replyPreviewOf } from '@shared/reply';
 import {
   HISTORY_PAGE_SIZE,
   INVALID_SESSION,
@@ -97,6 +99,8 @@ export interface RealtimeState {
   myScreen: MediaStream | null;
   /** Telas que chegam de outras pessoas da chamada, por quem transmite. */
   screens: Record<Id, MediaStream>;
+  /** A mensagem que a pessoa está respondendo no campo de texto; `null` se não está respondendo nenhuma. */
+  replyingTo: Message | null;
   /** Transmissões abertas no painel central (a sua, para a prévia, e as de quem você assiste), na ordem em que abriram. */
   stages: Id[];
   /** A transmissão em destaque (a maior, e a que toca som); sempre uma das abertas, ou `null` se não há nenhuma. */
@@ -152,6 +156,7 @@ const initialState: RealtimeState = {
   music: null,
   myScreen: null,
   screens: {},
+  replyingTo: null,
   stages: [],
   focusedStage: null,
   stageLayout: 'focus',
@@ -198,6 +203,9 @@ type Action =
   | { type: 'message:new'; message: Message }
   | { type: 'message:updated'; message: Message }
   | { type: 'message:deleted'; channelId: Id; messageId: Id }
+  | { type: 'message:reactions'; channelId: Id; messageId: Id; reactions: Reaction[] }
+  | { type: 'reply:start'; message: Message }
+  | { type: 'reply:cancel' }
   | { type: 'typing'; channelId: Id; userId: Id; until: number }
   | { type: 'presence'; userId: Id; status: PresenceStatus }
   | { type: 'member:joined'; member: Member; user: User }
@@ -336,6 +344,7 @@ function reducer(state: RealtimeState, action: Action): RealtimeState {
     case 'dm:select':
       return {
         ...state,
+        replyingTo: null,
         stages: [],
         focusedStage: null,
         callView: false,
@@ -347,6 +356,7 @@ function reducer(state: RealtimeState, action: Action): RealtimeState {
     case 'space:select':
       return {
         ...state,
+        replyingTo: null,
         stages: [],
         focusedStage: null,
         callView: false,
@@ -366,6 +376,7 @@ function reducer(state: RealtimeState, action: Action): RealtimeState {
     case 'channel:select':
       return {
         ...state,
+        replyingTo: null,
         stages: [],
         focusedStage: null,
         callView: false,
@@ -441,7 +452,14 @@ function reducer(state: RealtimeState, action: Action): RealtimeState {
       if (!list?.some((m) => m.id === id)) return state;
       return {
         ...state,
-        messages: { ...state.messages, [channelId]: list.map((m) => (m.id === id ? action.message : m)) },
+        // As respostas a esta mensagem mostram o texto novo dela.
+        messages: {
+          ...state.messages,
+          [channelId]: list.map((m) =>
+            m.id === id ? action.message : m.replyTo?.id === id && !m.replyTo.deleted ? { ...m, replyTo: replyPreviewOf(action.message) } : m,
+          ),
+        },
+        replyingTo: state.replyingTo?.id === id ? action.message : state.replyingTo,
       };
     }
 
@@ -450,9 +468,34 @@ function reducer(state: RealtimeState, action: Action): RealtimeState {
       if (!list) return state;
       return {
         ...state,
-        messages: { ...state.messages, [action.channelId]: list.filter((m) => m.id !== action.messageId) },
+        // As respostas continuam, mostrando que a original sumiu.
+        messages: {
+          ...state.messages,
+          [action.channelId]: list
+            .filter((m) => m.id !== action.messageId)
+            .map((m) => (m.replyTo?.id === action.messageId ? { ...m, replyTo: deletedReply(action.messageId) } : m)),
+        },
+        replyingTo: state.replyingTo?.id === action.messageId ? null : state.replyingTo,
       };
     }
+
+    case 'message:reactions': {
+      const list = state.messages[action.channelId];
+      if (!list?.some((m) => m.id === action.messageId)) return state;
+      return {
+        ...state,
+        messages: {
+          ...state.messages,
+          [action.channelId]: list.map((m) => (m.id === action.messageId ? { ...m, reactions: action.reactions } : m)),
+        },
+      };
+    }
+
+    case 'reply:start':
+      return { ...state, replyingTo: action.message };
+
+    case 'reply:cancel':
+      return state.replyingTo ? { ...state, replyingTo: null } : state;
 
     case 'message:new': {
       const { channelId, authorId, id } = action.message;
@@ -607,7 +650,12 @@ export interface RealtimeActions {
   openDirect(userId: Id): Promise<string | null>;
   selectDirect(conversationId: Id): void;
   /** Envia para um canal de texto ou conversa direta, com anexos já enviados. Resolve com erro ou `null`. */
-  sendMessage(targetId: Id, content: string, attachmentIds?: Id[]): Promise<string | null>;
+  sendMessage(targetId: Id, content: string, attachmentIds?: Id[], replyToId?: Id): Promise<string | null>;
+  /** Começa a responder a uma mensagem: o campo de texto mostra a quem e o envio leva a resposta. */
+  startReply(message: Message): void;
+  cancelReply(): void;
+  /** Reage à mensagem com o emoji, ou tira a reação se já tinha. Resolve com erro ou `null`. */
+  toggleReaction(messageId: Id, emoji: string): Promise<string | null>;
   /** Envia uma imagem para anexar depois em `sendMessage`. */
   uploadImage(file: File, onProgress: (fraction: number) => void): UploadHandle;
   /** Busca a página anterior à mensagem mais antiga carregada. */
@@ -650,7 +698,7 @@ export interface RealtimeActions {
   openCall(channelId: Id): void;
   closeCall(): void;
   /** Abre a conversa da mensagem e rola até ela, carregando o histórico em volta. */
-  jumpToMessage(message: Message): Promise<string | null>;
+  jumpToMessage(message: Pick<Message, 'id'>): Promise<string | null>;
   /** Carrega as mensagens seguintes de uma lista parada no passado. */
   loadNewer(targetId: Id): void;
   /** Volta para as mensagens mais recentes (descarta a janela do passado). */
@@ -918,12 +966,31 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
         return res.ok ? null : res.error;
       },
 
-      async sendMessage(channelId, content, attachmentIds = []) {
+      startReply(message) {
+        dispatch({ type: 'reply:start', message });
+      },
+
+      cancelReply() {
+        dispatch({ type: 'reply:cancel' });
+      },
+
+      async toggleReaction(messageId, emoji) {
+        const socket = socketRef.current;
+        if (!socket) return 'Sem conexão com o servidor.';
+        try {
+          const res = await socket.timeout(10_000).emitWithAck('reaction:toggle', { messageId, emoji });
+          return res.ok ? null : res.error;
+        } catch {
+          return 'O servidor não respondeu. Tente de novo.';
+        }
+      },
+
+      async sendMessage(channelId, content, attachmentIds = [], replyToId) {
         const socket = socketRef.current;
         if (!socket) return 'Sem conexão com o servidor.';
         lastTypingRef.current = { channelId: null, at: 0 };
         try {
-          const res = await socket.timeout(10_000).emitWithAck('message:send', { channelId, content, attachmentIds });
+          const res = await socket.timeout(10_000).emitWithAck('message:send', { channelId, content, attachmentIds, replyToId });
           if (!res.ok) return res.error;
           // Lista parada no passado: a mensagem enviada só aparece voltando ao presente.
           if (stateRef.current.detached[channelId]) void loadHistory(channelId);
@@ -1212,6 +1279,9 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
     socket.on('dm:upsert', (payload) => dispatch({ type: 'dm:upsert', payload }));
     socket.on('message:new', (message) => dispatch({ type: 'message:new', message }));
     socket.on('message:updated', (message) => dispatch({ type: 'message:updated', message }));
+    socket.on('message:reactions', ({ channelId, messageId, reactions }) =>
+      dispatch({ type: 'message:reactions', channelId, messageId, reactions }),
+    );
     socket.on('message:deleted', ({ channelId, messageId }) => dispatch({ type: 'message:deleted', channelId, messageId }));
     socket.on('typing', ({ channelId, userId }) =>
       dispatch({ type: 'typing', channelId, userId, until: Date.now() + TYPING_TTL_MS }),

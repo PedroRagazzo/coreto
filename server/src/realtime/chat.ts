@@ -1,3 +1,4 @@
+import { MAX_REACTION_KINDS, isReactionEmoji } from '../../../shared/src/emoji.js';
 import { mentionedUserIds } from '../../../shared/src/markup.js';
 import { SEARCH_PAGE_SIZE, searchWords } from '../../../shared/src/search.js';
 import type { Channel, Id, Message } from '../../../shared/src/models.js';
@@ -14,6 +15,9 @@ import { isFunction, messageTarget, storageError, type MessageTarget } from './g
 import { rooms, type AppSocket, type IO } from './types.js';
 
 const MAX_HISTORY_PAGE = 100;
+/** No máximo isto de reações por socket nesta janela: um clique nervoso passa, uma enxurrada não. */
+const REACTION_BURST = 20;
+const REACTION_WINDOW_MS = 5000;
 
 /** Conteúdo pronto para gravar, ou o motivo da recusa. Vazio só vale para mensagem com anexos. */
 function validateContent(raw: unknown, allowEmpty = false): { ok: true; content: string } | { ok: false; error: string } {
@@ -35,9 +39,9 @@ function readAttachmentIds(raw: unknown): Id[] | null {
  * Quem a mensagem menciona de verdade: só em canais (numa conversa direta a
  * outra pessoa já é avisada), sem o autor, sem robôs e só quem enxerga o canal.
  */
-function mentionTargets(store: Store, target: MessageTarget, content: string, authorId: Id): Id[] {
+function mentionTargets(store: Store, target: MessageTarget, content: string, authorId: Id, alsoNotify: Id[] = []): Id[] {
   if (target.kind !== 'channel') return [];
-  return mentionedUserIds(content).filter((id) => {
+  return [...new Set([...mentionedUserIds(content), ...alsoNotify])].filter((id) => {
     const user = store.users.get(id);
     return (
       user !== undefined &&
@@ -111,11 +115,22 @@ export function registerChat(
     if (!attachmentIds) return ack({ ok: false, error: `Até ${MAX_ATTACHMENTS_PER_MESSAGE} imagens por mensagem.` });
     const valid = validateContent(req.content, attachmentIds.length > 0);
     if (!valid.ok) return ack(valid);
-    const mentions = mentionTargets(store, target, valid.content, userId);
+    // Responder: a original precisa estar neste mesmo canal ou conversa; quem escreveu a original é avisado como numa menção.
+    const replyToId = typeof req.replyToId === 'string' ? req.replyToId : null;
+    let repliedAuthor: Id | null = null;
+    if (replyToId) {
+      try {
+        repliedAuthor = await store.authorOfMessageIn(target.id, replyToId);
+      } catch (err) {
+        return ack(storageError('message:send', err));
+      }
+      if (!repliedAuthor) return ack({ ok: false, error: 'A mensagem que você quer responder não existe mais.' });
+    }
+    const mentions = mentionTargets(store, target, valid.content, userId, repliedAuthor ? [repliedAuthor] : []);
 
     let message;
     try {
-      message = await store.addMessage(target.id, userId, valid.content, { attachmentIds, mentions });
+      message = await store.addMessage(target.id, userId, valid.content, { attachmentIds, mentions, replyToId });
     } catch (err) {
       if (err instanceof AttachmentUnavailableError) return ack({ ok: false, error: err.message });
       return ack(storageError('message:send', err));
@@ -137,6 +152,29 @@ export function registerChat(
     const target = message ? messageTarget(store, userId, message.channelId, 'read') : null;
     return message && target ? { message, target } : null;
   };
+
+  // Reagir vale onde a pessoa pode ler (como no Discord, dá para reagir em canais só de leitura).
+  const recentReactions: number[] = [];
+  socket.on('reaction:toggle', async (req, ack) => {
+    if (!isFunction(ack)) return;
+    const now = Date.now();
+    while (recentReactions.length > 0 && now - recentReactions[0] > REACTION_WINDOW_MS) recentReactions.shift();
+    recentReactions.push(now);
+    if (recentReactions.length > REACTION_BURST) return ack({ ok: false, error: 'Devagar: muitas reações seguidas.' });
+    if (!isReactionEmoji(req?.emoji)) return ack({ ok: false, error: 'Esse emoji não vale como reação.' });
+    try {
+      const found = await locate(req?.messageId);
+      if (!found) return ack({ ok: false, error: 'Mensagem não encontrada.' });
+      const { message, target } = found;
+      const result = await store.toggleReaction(message.id, userId, req.emoji, MAX_REACTION_KINDS);
+      if (result === 'full') return ack({ ok: false, error: `Esta mensagem já tem ${MAX_REACTION_KINDS} emojis diferentes.` });
+      const reactions = await store.reactionsOf(message.id);
+      io.to(audienceOf(target)).emit('message:reactions', { channelId: message.channelId, messageId: message.id, reactions });
+      ack({ ok: true, data: null });
+    } catch (err) {
+      ack(storageError('reaction:toggle', err));
+    }
+  });
 
   socket.on('message:edit', async (req, ack) => {
     if (!isFunction(ack)) return;
