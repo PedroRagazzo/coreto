@@ -5,7 +5,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { io as connectSocket, type Socket } from 'socket.io-client';
-import type { Channel, DirectConversation, MentionCount, Space, SpaceSnapshot, User } from '../../../shared/src/models.js';
+import type { Channel, DirectConversation, MentionCount, Space, SpaceSnapshot, UnreadCount, User } from '../../../shared/src/models.js';
 import type {
   Ack,
   ClientToServerEvents,
@@ -37,6 +37,7 @@ export interface TestClient {
   directs: DirectConversation[];
   directUsers: User[];
   mentions: MentionCount[];
+  unread: UnreadCount[];
 }
 
 type EventName = keyof ServerToClientEvents;

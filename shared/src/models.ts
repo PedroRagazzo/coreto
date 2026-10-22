@@ -128,6 +128,13 @@ export interface Reaction {
   userIds: Id[];
 }
 
+/** Mensagens de outras pessoas ainda não lidas num canal (ou, com `spaceId` nulo, numa conversa direta). */
+export interface UnreadCount {
+  channelId: Id;
+  spaceId: Id | null;
+  count: number;
+}
+
 /** Menções ainda não vistas de um usuário num canal. */
 export interface MentionCount {
   channelId: Id;

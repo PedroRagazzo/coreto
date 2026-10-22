@@ -1,16 +1,18 @@
-import { Keyboard, Monitor, Palette, Settings2, Volume2, X } from 'lucide-react';
+import { Bell, Keyboard, Monitor, Palette, Settings2, Volume2, X } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { AppearanceSettings } from './AppearanceSettings';
 import { DesktopSettings } from './DesktopSettings';
+import { NotificationSettings } from './NotificationSettings';
 import { ShortcutSettings } from './ShortcutSettings';
 import { SoundSettings } from './SoundSettings';
 import { VoiceVideoSettings } from './VoiceVideoSettings';
 
-export type SettingsSection = 'voice' | 'sounds' | 'keybinds' | 'appearance' | 'desktop';
+export type SettingsSection = 'voice' | 'sounds' | 'notifications' | 'keybinds' | 'appearance' | 'desktop';
 
 const SECTIONS: { id: SettingsSection; label: string; icon: ReactNode; group: string }[] = [
   { id: 'voice', label: 'Voz e vídeo', icon: <Settings2 size={16} />, group: 'Configurações do app' },
   { id: 'sounds', label: 'Sons', icon: <Volume2 size={16} />, group: 'Configurações do app' },
+  { id: 'notifications', label: 'Notificações', icon: <Bell size={16} />, group: 'Configurações do app' },
   { id: 'keybinds', label: 'Atalhos', icon: <Keyboard size={16} />, group: 'Configurações do app' },
   { id: 'appearance', label: 'Aparência', icon: <Palette size={16} />, group: 'Configurações do app' },
   { id: 'desktop', label: 'App de desktop', icon: <Monitor size={16} />, group: 'Windows' },
@@ -69,6 +71,7 @@ export function SettingsModal({ initial = 'voice', onClose }: { initial?: Settin
             <h2 className="mb-6 text-xl font-bold">{current.label}</h2>
             {current.id === 'voice' && <VoiceVideoSettings />}
             {current.id === 'sounds' && <SoundSettings />}
+            {current.id === 'notifications' && <NotificationSettings />}
             {current.id === 'keybinds' && <ShortcutSettings />}
             {current.id === 'appearance' && <AppearanceSettings />}
             {current.id === 'desktop' && <DesktopSettings />}

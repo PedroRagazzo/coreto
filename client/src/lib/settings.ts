@@ -63,10 +63,18 @@ export interface Keybinds {
   deafen: string[] | null;
 }
 
+/** Notificações do sistema para mensagens diretas, menções e respostas (ver shared/src/notify.ts). */
+export interface NotificationPrefs {
+  enabled: boolean;
+  /** Mostra o texto da mensagem na notificação. */
+  preview: boolean;
+}
+
 export interface Settings {
   voice: VoicePrefs;
   appearance: AppearancePrefs;
   sounds: SoundPrefs;
+  notifications: NotificationPrefs;
   keybinds: Keybinds;
 }
 
@@ -89,6 +97,7 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   appearance: { messageFontSize: 15, compact: false },
   sounds: { enabled: true, volume: 0.5 },
+  notifications: { enabled: true, preview: true },
   keybinds: { mute: null, deafen: null },
 };
 
@@ -127,6 +136,7 @@ export function loadSettings(): Settings {
     voice: Partial<VoicePrefs>;
     appearance: Partial<AppearancePrefs>;
     sounds: Partial<SoundPrefs>;
+    notifications: Partial<NotificationPrefs>;
     keybinds: Partial<Keybinds>;
   }> = {};
   try {
@@ -137,6 +147,7 @@ export function loadSettings(): Settings {
   const v = raw.voice ?? {};
   const a = raw.appearance ?? {};
   const so = raw.sounds ?? {};
+  const n = raw.notifications ?? {};
   const k = raw.keybinds ?? {};
   const d = DEFAULT_SETTINGS;
   return {
@@ -163,6 +174,7 @@ export function loadSettings(): Settings {
       compact: bool(a.compact, d.appearance.compact),
     },
     sounds: { enabled: bool(so.enabled, d.sounds.enabled), volume: clamp(so.volume, 0, 1, d.sounds.volume) },
+    notifications: { enabled: bool(n.enabled, d.notifications.enabled), preview: bool(n.preview, d.notifications.preview) },
     keybinds: { mute: sanitizeKeybind(k.mute), deafen: sanitizeKeybind(k.deafen) },
   };
 }

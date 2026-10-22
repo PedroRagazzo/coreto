@@ -48,6 +48,8 @@ contextBridge.exposeInMainWorld('coretoDesktop', {
   getCloseToTray: () => ipcRenderer.invoke('desktop:get-close-to-tray'),
   setCloseToTray: (/** @type {boolean} */ enabled) => ipcRenderer.invoke('desktop:set-close-to-tray', Boolean(enabled)),
   setGlobalShortcuts: (/** @type {unknown} */ accelerators) => ipcRenderer.invoke('desktop:set-global-shortcuts', accelerators),
+  // Clicar numa notificação traz a janela de volta, mesmo escondida na bandeja ou minimizada.
+  focusWindow: () => ipcRenderer.send('desktop:focus-window'),
   onShortcut: (/** @type {(action: unknown) => void} */ listener) => {
     const handler = (/** @type {unknown} */ _event, /** @type {unknown} */ action) => listener(action);
     ipcRenderer.on('desktop:shortcut', handler);

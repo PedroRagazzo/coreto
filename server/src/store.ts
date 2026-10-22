@@ -24,6 +24,7 @@ import type {
   Role,
   Space,
   SpaceSnapshot,
+  UnreadCount,
   User,
   VoiceParticipant,
 } from '../../shared/src/models.js';
@@ -44,7 +45,7 @@ import {
   toUser,
 } from './db/mappers.js';
 import { loginKey, normalizeDisplayName } from '../../shared/src/names.js';
-import { ALL_PERMISSIONS, DEFAULT_EVERYONE_PERMISSIONS } from '../../shared/src/permissions.js';
+import { ALL_PERMISSIONS, DEFAULT_EVERYONE_PERMISSIONS, hasPermission, Permission } from '../../shared/src/permissions.js';
 import { searchKey } from '../../shared/src/search.js';
 import { hashPin, newSessionToken, verifyPin } from './auth.js';
 import { computeChannelPermissions, computeSpacePermissions } from './permissions.js';
@@ -706,6 +707,74 @@ export class Store {
   async publishedAttachment(id: Id): Promise<Attachment | null> {
     const row = await this.db.attachment.findFirst({ where: { id, messageId: { not: null } } });
     return row ? toAttachment(row) : null;
+  }
+
+  // ── Mensagens não lidas ────────────────────────────────────────────────────
+
+  /** Canais de texto que a pessoa enxerga, nos espaços dela, e as conversas diretas de que participa. */
+  private readablePlaces(userId: Id): { channels: Channel[]; directIds: Id[] } {
+    const spaceIds = new Set(this.spacesForUser(userId).map((space) => space.id));
+    const channels = [...this.channels.values()].filter(
+      (channel) =>
+        channel.kind === 'text' &&
+        spaceIds.has(channel.spaceId) &&
+        hasPermission(this.permissionsFor(userId, channel), Permission.VIEW_CHANNEL),
+    );
+    const directIds = [...this.directs.values()].filter((c) => c.participantIds.includes(userId)).map((c) => c.id);
+    return { channels, directIds };
+  }
+
+  /**
+   * Quantas mensagens de outras pessoas há depois do ponto em que a pessoa leu cada lugar. Um lugar que ela
+   * ainda nunca marcou como lido (canal criado depois, conversa nova) conta a partir de quando ela entrou no
+   * espaço ou de quando a conversa começou; os lugares que já existiam na migração começam com tudo lido.
+   */
+  async unreadCounts(userId: Id): Promise<UnreadCount[]> {
+    const { channels, directIds } = this.readablePlaces(userId);
+    const channelIds = channels.map((c) => c.id);
+    if (channelIds.length + directIds.length === 0) return [];
+    const spaceOf = new Map<Id, Id | null>([...channels.map((c): [Id, Id | null] => [c.id, c.spaceId]), ...directIds.map((id): [Id, null] => [id, null])]);
+    const rows = await this.db.$queryRaw<{ id: string; count: number }[]>`
+      SELECT p.id, COUNT(*)::int AS count
+      FROM (
+        SELECT c."id" AS id, mem."joinedAt" AS since
+        FROM "Channel" c
+        JOIN "Member" mem ON mem."spaceId" = c."spaceId" AND mem."userId" = ${userId}
+        WHERE c."id" = ANY(${channelIds}::text[])
+        UNION ALL
+        SELECT d."id" AS id, d."createdAt" AS since
+        FROM "DirectConversation" d
+        WHERE d."id" = ANY(${directIds}::text[])
+      ) p
+      LEFT JOIN "ReadState" r ON r."userId" = ${userId} AND r."channelId" = p.id
+      JOIN "Message" m ON COALESCE(m."channelId", m."directId") = p.id
+      WHERE m."createdAt" > COALESCE(r."lastReadAt", p.since)
+        AND m."authorId" <> ${userId}
+      GROUP BY p.id`;
+    return rows.map(({ id, count }) => ({ channelId: id, spaceId: spaceOf.get(id) ?? null, count }));
+  }
+
+  /** A pessoa leu o lugar até agora. */
+  async markRead(userId: Id, channelId: Id): Promise<void> {
+    const lastReadAt = new Date();
+    await this.db.readState.upsert({
+      where: { userId_channelId: { userId, channelId } },
+      create: { userId, channelId, lastReadAt },
+      update: { lastReadAt },
+    });
+  }
+
+  /** Quem recebe um aviso de não lida quando `authorId` escreve neste canal (quem o enxerga) ou conversa. */
+  unreadRecipients(targetId: Id, authorId: Id): Id[] {
+    const direct = this.directs.get(targetId);
+    if (direct) return direct.participantIds.filter((id) => id !== authorId);
+    const channel = this.channels.get(targetId);
+    if (!channel) return [];
+    return [...this.members.values()]
+      .filter((member) => member.spaceId === channel.spaceId && member.userId !== authorId)
+      .filter((member) => !this.users.get(member.userId)?.isBot)
+      .filter((member) => hasPermission(this.permissionsFor(member.userId, channel), Permission.VIEW_CHANNEL))
+      .map((member) => member.userId);
   }
 
   // ── Menções ────────────────────────────────────────────────────────────────

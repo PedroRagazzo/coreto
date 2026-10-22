@@ -1,6 +1,7 @@
-import type { Id, MentionCount, PresenceStatus } from '../../../shared/src/models.js';
+import type { Id, MentionCount, PresenceStatus, UnreadCount } from '../../../shared/src/models.js';
 import type { Store } from '../store.js';
 import { otherParticipant } from './direct.js';
+import { messageTarget } from './guards.js';
 import { rooms, type AppSocket, type IO } from './types.js';
 
 /** Conexões abertas por usuário: várias abas contam como uma presença só. */
@@ -18,11 +19,22 @@ export function registerPresence(io: IO, socket: AppSocket, store: Store): void 
 
   const directs = store.directsFor(userId);
   const directUsers = directs.flatMap((c) => store.users.get(otherParticipant(c, userId)) ?? []);
-  const ready = (mentions: MentionCount[]) =>
-    socket.emit('session:ready', { user, spaces: store.spacesForUser(userId), directs, directUsers, mentions });
-  store.mentionCounts(userId).then(ready, (err: unknown) => {
-    console.error('[session:ready]', err);
-    ready([]); // sem os contadores de menção, mas a sessão funciona
+  const ready = (mentions: MentionCount[], unread: UnreadCount[]) =>
+    socket.emit('session:ready', { user, spaces: store.spacesForUser(userId), directs, directUsers, mentions, unread });
+  // Cada contador falha sozinho: sem ele a sessão funciona do mesmo jeito, só sem o número.
+  const counted = <T>(what: string, promise: Promise<T[]>): Promise<T[]> =>
+    promise.catch((err: unknown) => {
+      console.error(`[session:ready] ${what}`, err);
+      return [];
+    });
+  void Promise.all([counted('menções', store.mentionCounts(userId)), counted('não lidas', store.unreadCounts(userId))]).then(([mentions, unread]) =>
+    ready(mentions, unread),
+  );
+
+  // A pessoa leu o canal ou a conversa até agora (só vale onde ela pode ler).
+  socket.on('read:mark', (req) => {
+    const target = messageTarget(store, userId, req?.channelId, 'read');
+    if (target) store.markRead(userId, target.id).catch((err: unknown) => console.error('[read:mark]', err));
   });
 
   socket.on('presence:set', (status) => {

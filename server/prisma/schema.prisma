@@ -39,6 +39,7 @@ model User {
   mentions      Mention[]
   uploads       Attachment[]
   reactions     Reaction[]
+  readStates    ReadState[]
 }
 
 /// Sessão de login sem expiração: o navegador fica sempre logado. O banco guarda só o hash SHA-256 do token.
@@ -187,6 +188,17 @@ model Message {
   @@index([directId, createdAt(sort: Desc)])
   /// Busca por trecho (`LIKE '%palavra%'`) com a extensão pg_trgm.
   @@index([searchText(ops: raw("gin_trgm_ops"))], type: Gin)
+}
+
+/// Até onde a pessoa já leu um canal de texto ou uma conversa direta: o que outras pessoas escreveram depois
+/// disso é "não lido". Sem chave estrangeira em `channelId` porque o lugar pode ser um canal ou uma conversa.
+model ReadState {
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  channelId  String
+  lastReadAt DateTime
+
+  @@id([userId, channelId])
 }
 
 /// Uma pessoa reagiu a uma mensagem com um emoji. Some junto com a mensagem.

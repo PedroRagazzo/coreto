@@ -12,6 +12,7 @@ import type {
   PresenceStatus,
   Reaction,
   Space,
+  UnreadCount,
   SpaceSnapshot,
   User,
   VoiceParticipant,
@@ -226,6 +227,8 @@ export interface ClientToServerEvents {
   /** O usuário viu o canal: zera as menções dele ali. */
   'mentions:ack': (req: { channelId: Id }) => void;
   'presence:set': (status: SelectableStatus) => void;
+  /** A pessoa leu este canal ou conversa até agora: zera as mensagens não lidas dele. */
+  'read:mark': (req: { channelId: Id }) => void;
   'voice:join': (req: { channelId: Id }, ack: (res: Ack<VoiceJoinResult>) => void) => void;
   'voice:leave': () => void;
   'voice:state': (req: { muted: boolean; deafened: boolean }) => void;
@@ -260,6 +263,8 @@ export interface ServerToClientEvents {
     directUsers: User[];
     /** Menções ainda não vistas, por canal (de todos os espaços). */
     mentions: MentionCount[];
+    /** Mensagens não lidas por canal e conversa (de todos os espaços); o que não está na lista tem zero. */
+    unread: UnreadCount[];
   }) => void;
   /** Um espaço novo foi criado; todos os usuários já são membros dele. */
   'space:created': (space: Space) => void;
@@ -274,6 +279,8 @@ export interface ServerToClientEvents {
   'dm:upsert': (payload: DirectConversationPayload) => void;
   'message:new': (message: Message) => void;
   'message:updated': (message: Message) => void;
+  /** Chegou uma mensagem de outra pessoa num lugar que você lê: mais uma não lida (ou lida, se você está olhando). */
+  'unread:bump': (payload: { channelId: Id; spaceId: Id | null }) => void;
   /** As reações de uma mensagem mudaram (a lista inteira, já atualizada). */
   'message:reactions': (payload: { channelId: Id; messageId: Id; reactions: Reaction[] }) => void;
   'message:deleted': (payload: { channelId: Id; messageId: Id }) => void;

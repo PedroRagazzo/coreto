@@ -60,6 +60,8 @@ export interface DesktopBridge {
   setGlobalShortcuts?(accelerators: Record<KeybindAction, string | null>): Promise<Record<KeybindAction, boolean> | null>;
   /** Um atalho global foi apertado. */
   onShortcut?(listener: (action: KeybindAction) => void): () => void;
+  /** Traz o Coreto para a frente (da bandeja ou minimizado), ao clicar numa notificação. Ausente antes da 0.6.0. */
+  focusWindow?(): void;
 }
 
 export const desktop: DesktopBridge | null =

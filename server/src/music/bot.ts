@@ -9,6 +9,7 @@ import { hasPermission, Permission } from '../../../shared/src/permissions.js';
 import { MAX_MESSAGE_LENGTH, type MusicControl, type MusicState, type MusicTrackInfo, type SignalPayload } from '../../../shared/src/protocol.js';
 import { joinPublicSpaces } from '../realtime/membership.js';
 import { rooms, type IO } from '../realtime/types.js';
+import { bumpUnread } from '../realtime/unread.js';
 import { broadcastRoster, endVoiceSession } from '../realtime/voice.js';
 import type { Store, VoiceObserver, VoiceSession } from '../store.js';
 import type { IceConfig } from '../turn.js';
@@ -526,6 +527,7 @@ export class MusicBot implements VoiceObserver {
       if (!hasPermission(store.permissionsFor(userId, channel), Permission.SEND_MESSAGES)) return;
       const message = await store.addMessage(channel.id, userId, text.slice(0, MAX_MESSAGE_LENGTH));
       io.to(rooms.channel(channel.id)).emit('message:new', message);
+      bumpUnread(io, store, channel.id, userId);
     } catch (err) {
       console.error('[música] não consegui responder no chat', err);
     }

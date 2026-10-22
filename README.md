@@ -336,6 +336,25 @@ Passando o mouse numa mensagem aparecem os botões **Reagir** e **Responder**.
   (mensagem, pessoa, emoji), e some junto com a mensagem. Os eventos são `reaction:toggle` (pedido) e
   `message:reactions` (a lista inteira da mensagem, para todos que veem o canal).
 
+## Mensagens não lidas e notificações
+
+- **Não lidas.** Cada canal e cada conversa direta mostra quantas mensagens de outras pessoas chegaram depois da
+  última vez que você leu: o nome fica em negrito com um contador cinza (as menções continuam no contador vermelho),
+  o ícone do espaço ganha um indicador à esquerda e o das mensagens diretas, o contador vermelho. O título da janela
+  mostra o total, "(3) Coreto". Conta como lido quando o canal está aberto, o chat à vista (sem transmissão nem chamada
+  por cima) e a janela em primeiro plano; fora disso, as mensagens que chegam ficam não lidas.
+- **Onde fica guardado.** A tabela `ReadState` (pessoa, canal ou conversa, até quando leu) vale em qualquer aparelho e
+  sobrevive a reinícios. O servidor conta no banco quando a pessoa entra (`session:ready.unread`) e avisa cada mensagem
+  nova na sala pessoal de quem a lê (`unread:bump`), por isso o contador também anda nos outros espaços; o site avisa
+  que leu com `read:mark`. A migração deixa tudo que já existe como lido; canais e conversas criados depois contam a
+  partir de quando a pessoa entrou no espaço ou a conversa começou.
+- **Notificações do sistema.** Com o Coreto fora de vista (outro programa, minimizado ou na bandeja), chega um aviso
+  do Windows para mensagem direta de outra pessoa e para menção ou resposta a você num canal (`shared/src/notify.ts`
+  decide). Não vale para robôs, para as suas mensagens nem com o status em Não perturbe. Clicar traz a janela de volta
+  e abre a conversa. Em Configurações → Notificações dá para desligar ou esconder o texto. No app de desktop as
+  notificações já vêm liberadas; no navegador é preciso permitir uma vez. Menções em outro espaço, cujas mensagens o
+  site não recebe, geram um aviso genérico ("Você foi mencionado").
+
 ## Formatação, menções e imagens
 
 - **Formatação:** `**negrito**`, `*itálico*` ou `_itálico_`, `~~riscado~~`, `` `código` `` e blocos com três crases

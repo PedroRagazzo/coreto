@@ -7,7 +7,9 @@ import { CreateSpaceDialog } from './CreateSpaceDialog';
 export function SpaceRail() {
   const { state, actions } = useRealtime();
   const [creating, setCreating] = useState(false);
-  const unreadDirects = Object.values(state.unread).reduce((sum, n) => sum + n, 0);
+  const unreadDirects = Object.values(state.unread).reduce((sum, u) => sum + (u.spaceId === null ? u.count : 0), 0);
+  // Espaços com mensagens não lidas (sem número: o que vale é saber que há algo novo lá dentro).
+  const spacesWithUnread = new Set(Object.values(state.unread).flatMap((u) => (u.spaceId && u.count > 0 ? [u.spaceId] : [])));
   const mentionsBySpace: Record<string, number> = {};
   for (const { spaceId, count } of Object.values(state.mentions)) {
     mentionsBySpace[spaceId] = (mentionsBySpace[spaceId] ?? 0) + count;
@@ -35,6 +37,7 @@ export function SpaceRail() {
             active={state.activeSpaceId === space.id}
             onClick={() => actions.selectSpace(space.id)}
             badge={mentions}
+            unread={spacesWithUnread.has(space.id)}
           >
             {space.iconUrl ? (
               <img src={space.iconUrl} alt="" className="h-full w-full rounded-full object-cover" />
@@ -59,17 +62,19 @@ interface RailButtonProps {
   onClick: () => void;
   /** Contador no canto inferior direito; 0 esconde. */
   badge?: number;
+  /** Há mensagens não lidas: o indicador da esquerda fica visível, como no Discord. */
+  unread?: boolean;
   children: ReactNode;
 }
 
-function RailButton({ label, active, onClick, badge = 0, children }: RailButtonProps) {
+function RailButton({ label, active, onClick, badge = 0, unread = false, children }: RailButtonProps) {
   return (
     <div className="group relative flex w-full justify-center">
       {/* Indicador à esquerda: cresce no hover e fica alto no item ativo. */}
       <span
         aria-hidden
         className={`absolute top-1/2 left-0 w-1 -translate-y-1/2 rounded-r-full bg-fg transition-all ${
-          active ? 'h-9' : 'h-0 group-hover:h-4'
+          active ? 'h-9' : unread ? 'h-2 group-hover:h-4' : 'h-0 group-hover:h-4'
         }`}
       />
       <button

@@ -11,6 +11,7 @@ import {
 import { AttachmentUnavailableError, type Store } from '../store.js';
 import type { UploadDir } from '../uploads.js';
 import { directPayload, otherParticipant, participantRooms } from './direct.js';
+import { bumpUnread } from './unread.js';
 import { isFunction, messageTarget, storageError, type MessageTarget } from './guards.js';
 import { rooms, type AppSocket, type IO } from './types.js';
 
@@ -139,6 +140,7 @@ export function registerChat(
       io.to(audienceOf(target)).emit('dm:upsert', directPayload(store, target.conversation));
     }
     io.to(audienceOf(target)).emit('message:new', message);
+    bumpUnread(io, store, target.id, userId);
     ack({ ok: true, data: message });
     if (target.kind === 'channel') {
       onChannelMessage(message, target.channel);

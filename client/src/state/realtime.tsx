@@ -12,9 +12,11 @@ import type {
   Reaction,
   Space,
   SpaceSnapshot,
+  UnreadCount,
   User,
   VoiceParticipant,
 } from '@shared/models';
+import { toastFor } from '@shared/notify';
 import { hasPermission, Permission } from '@shared/permissions';
 import { deletedReply, replyPreviewOf } from '@shared/reply';
 import {
@@ -34,7 +36,11 @@ import {
 import { createContext, useContext, useEffect, useMemo, useReducer, useRef, type ReactNode } from 'react';
 import type { Identity } from '../lib/identity';
 import { createSocket, type AppSocket } from '../lib/socket';
+import { useWindowActive, isWindowActive } from '../lib/focus';
+import { bringWindowToFront, showToast } from '../lib/notifications';
 import { uploadImage, type UploadHandle } from '../lib/uploads';
+import { DEFAULT_SETTINGS } from '../lib/settings';
+import { displayNameOf } from './selectors';
 import { useSettings } from './settings';
 import {
   describeCameraError,
@@ -76,8 +82,8 @@ export interface RealtimeState {
   snapshot: SpaceSnapshot | null;
   directs: Record<Id, DirectConversation>;
   activeDirectId: Id | null;
-  /** conversa direta → mensagens recebidas e ainda não vistas */
-  unread: Record<Id, number>;
+  /** canal de texto ou conversa direta → mensagens de outras pessoas ainda não lidas (some o que está zerado) */
+  unread: Record<Id, UnreadCount>;
   users: Record<Id, User>;
   /** canal de texto ou conversa direta → mensagens */
   messages: Record<Id, Message[]>;
@@ -176,7 +182,10 @@ type Action =
       directs: DirectConversation[];
       directUsers: User[];
       mentions: MentionCount[];
+      unread: UnreadCount[];
     }
+  | { type: 'unread:bump'; channelId: Id; spaceId: Id | null }
+  | { type: 'unread:clear'; channelId: Id }
   | { type: 'space:created'; space: Space }
   | { type: 'space:updated'; space: Space }
   | { type: 'space:deleted'; spaceId: Id }
@@ -250,8 +259,11 @@ function reducer(state: RealtimeState, action: Action): RealtimeState {
       for (const conversation of action.directs) directs[conversation.id] = conversation;
       const mentions: Record<Id, MentionCount> = {};
       for (const mention of action.mentions) mentions[mention.channelId] = mention;
+      const unread: Record<Id, UnreadCount> = {};
+      for (const entry of action.unread) unread[entry.channelId] = entry;
       return {
         ...state,
+        unread,
         connection: 'ready',
         connectionError: null,
         me: action.user,
@@ -350,8 +362,21 @@ function reducer(state: RealtimeState, action: Action): RealtimeState {
         callView: false,
         activeSpaceId: null,
         activeDirectId: action.conversationId,
-        unread: withoutKey(state.unread, action.conversationId),
       };
+
+    case 'unread:bump': {
+      const current = state.unread[action.channelId];
+      return {
+        ...state,
+        unread: {
+          ...state.unread,
+          [action.channelId]: { channelId: action.channelId, spaceId: action.spaceId, count: (current?.count ?? 0) + 1 },
+        },
+      };
+    }
+
+    case 'unread:clear':
+      return state.unread[action.channelId] ? { ...state, unread: withoutKey(state.unread, action.channelId) } : state;
 
     case 'space:select':
       return {
@@ -503,14 +528,10 @@ function reducer(state: RealtimeState, action: Action): RealtimeState {
       if (list.some((m) => m.id === id)) return state;
       // Lista parada no passado: a mensagem nova chega quando ela voltar ao presente.
       if (state.detached[channelId]) return state;
-      // Conta como não lida a mensagem direta de outra pessoa numa conversa que não está aberta.
-      const isOpen = state.activeSpaceId === null && state.activeDirectId === channelId;
-      const countsAsUnread = channelId in state.directs && authorId !== state.me?.id && !isOpen;
       return {
         ...state,
         messages: { ...state.messages, [channelId]: [...list, action.message] },
         typing: { ...state.typing, [channelId]: withoutKey(state.typing[channelId], authorId) },
-        unread: countsAsUnread ? { ...state.unread, [channelId]: (state.unread[channelId] ?? 0) + 1 } : state.unread,
       };
     }
 
@@ -736,6 +757,8 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
   const socketRef = useRef<AppSocket | null>(null);
   const voiceRef = useRef<VoiceManager | null>(null);
   const lastTypingRef = useRef<{ channelId: Id | null; at: number }>({ channelId: null, at: 0 });
+  /** As preferências de notificação valem na hora, sem refazer a conexão com o servidor. */
+  const notificationPrefsRef = useRef(DEFAULT_SETTINGS.notifications);
   const firstSessionRef = useRef(true);
   const identityRef = useRef(identity);
   identityRef.current = identity;
@@ -1237,6 +1260,42 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
 
   useEffect(() => {
     const socket = createSocket(identity.token);
+
+    /** Notificação do sistema para uma mensagem que merece uma, com a janela fora de vista. */
+    const notifyMessage = (message: Message) => {
+      const s = stateRef.current;
+      const prefs = notificationPrefsRef.current;
+      if (!prefs.enabled || !s.me || s.me.status === 'dnd' || isWindowActive()) return;
+      const direct = s.directs[message.channelId];
+      const channel = direct ? null : s.snapshot?.channels.find((c) => c.id === message.channelId);
+      if (!direct && !channel) return;
+      const toast = toastFor({
+        me: s.me.id,
+        message,
+        nameOf: (id) => (s.users[id] ? displayNameOf(s.snapshot, s.users, id) : null),
+        channelName: channel?.name ?? null,
+        authorIsBot: s.users[message.authorId]?.isBot === true,
+        preview: prefs.preview,
+      });
+      if (!toast) return;
+      showToast(toast, () => {
+        if (direct) actions.selectDirect(message.channelId);
+        else void actions.jumpToMessage(message);
+      });
+    };
+
+    /** Menção num espaço que não está aberto: as mensagens de lá não chegam, só o contador, então o aviso é genérico. */
+    const notifyMentionElsewhere = (mention: MentionCount) => {
+      const s = stateRef.current;
+      const prefs = notificationPrefsRef.current;
+      if (!prefs.enabled || !s.me || s.me.status === 'dnd' || isWindowActive()) return;
+      if (mention.spaceId === s.activeSpaceId || mention.count <= (s.mentions[mention.channelId]?.count ?? 0)) return;
+      const space = s.spaces.find((sp) => sp.id === mention.spaceId);
+      showToast({ title: space?.name ?? 'Coreto', body: 'Você foi mencionado', tag: mention.channelId }, () => {
+        actions.selectSpace(mention.spaceId);
+      });
+    };
+
     const voice = new VoiceManager(socket, {
       onSpeaking: (speaking) => dispatch({ type: 'speaking', userIds: [...speaking] }),
       onRemoteScreen: (userId, stream) => dispatch({ type: 'screen:remote', userId, stream }),
@@ -1248,8 +1307,9 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
     voiceRef.current = voice;
     firstSessionRef.current = true;
 
-    socket.on('session:ready', ({ user, spaces, directs, directUsers, mentions }) => {
-      dispatch({ type: 'session', user, spaces, directs, directUsers, mentions });
+    socket.on('unread:bump', ({ channelId, spaceId }) => dispatch({ type: 'unread:bump', channelId, spaceId }));
+    socket.on('session:ready', ({ user, spaces, directs, directUsers, mentions, unread }) => {
+      dispatch({ type: 'session', user, spaces, directs, directUsers, mentions, unread });
       // Na primeira conexão abre o primeiro espaço; nas reconexões, reabre o atual.
       const target = firstSessionRef.current ? (spaces[0]?.id ?? null) : stateRef.current.activeSpaceId;
       firstSessionRef.current = false;
@@ -1277,7 +1337,10 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
       }
     });
     socket.on('dm:upsert', (payload) => dispatch({ type: 'dm:upsert', payload }));
-    socket.on('message:new', (message) => dispatch({ type: 'message:new', message }));
+    socket.on('message:new', (message) => {
+      dispatch({ type: 'message:new', message });
+      notifyMessage(message);
+    });
     socket.on('message:updated', (message) => dispatch({ type: 'message:updated', message }));
     socket.on('message:reactions', ({ channelId, messageId, reactions }) =>
       dispatch({ type: 'message:reactions', channelId, messageId, reactions }),
@@ -1286,7 +1349,10 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
     socket.on('typing', ({ channelId, userId }) =>
       dispatch({ type: 'typing', channelId, userId, until: Date.now() + TYPING_TTL_MS }),
     );
-    socket.on('mentions:update', (mention) => dispatch({ type: 'mentions:update', mention }));
+    socket.on('mentions:update', (mention) => {
+      notifyMentionElsewhere(mention);
+      dispatch({ type: 'mentions:update', mention });
+    });
     socket.on('presence:update', ({ userId, status }) => dispatch({ type: 'presence', userId, status }));
     socket.on('member:joined', ({ member, user }) => dispatch({ type: 'member:joined', member, user }));
     socket.on('voice:update', ({ channelId, participants }) =>
@@ -1332,8 +1398,27 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
     dispatch({ type: 'mentions:update', mention: { ...stateRef.current.mentions[openChannelId], count: 0 } });
   }, [openChannelId, openChannelMentions]);
 
+  // Lendo o canal ou a conversa (aberto, com o chat à vista e a janela em primeiro plano), o que chega e o que
+  // estava pendente já foi lido: zera o contador aqui e avisa o servidor, que guarda até onde você leu.
+  const windowActive = useWindowActive();
+  const openPlaceId = state.activeSpaceId === null ? state.activeDirectId : openChannelId;
+  const openPlaceUnread = openPlaceId ? (state.unread[openPlaceId]?.count ?? 0) : 0;
+  const chatVisible = state.stages.length === 0 && !(state.callView && state.myVoice.channelId);
+  useEffect(() => {
+    if (!openPlaceId || openPlaceUnread === 0 || !windowActive || !chatVisible) return;
+    socketRef.current?.emit('read:mark', { channelId: openPlaceId });
+    dispatch({ type: 'unread:clear', channelId: openPlaceId });
+  }, [openPlaceId, openPlaceUnread, windowActive, chatVisible]);
+
   // Configurações de voz e vídeo valem na hora, inclusive no meio da chamada.
   const { settings } = useSettings();
+  notificationPrefsRef.current = settings.notifications;
+
+  // O título da janela (e da barra de tarefas) mostra quantas mensagens não lidas há.
+  const totalUnread = Object.values(state.unread).reduce((sum, entry) => sum + entry.count, 0);
+  useEffect(() => {
+    document.title = totalUnread > 0 ? `(${totalUnread > 99 ? '99+' : totalUnread}) Coreto` : 'Coreto';
+  }, [totalUnread]);
   useEffect(() => {
     voiceRef.current
       ?.applyPrefs(settings.voice)

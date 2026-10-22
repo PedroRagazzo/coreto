@@ -49,7 +49,7 @@ export function DirectMessagesSidebar() {
               const partner = partnerOf(state, conversation);
               if (!partner) return null;
               const active = conversation.id === state.activeDirectId;
-              const unread = state.unread[conversation.id] ?? 0;
+              const unread = state.unread[conversation.id]?.count ?? 0;
               return (
                 <li key={conversation.id}>
                   <button

@@ -156,25 +156,32 @@ interface ChannelItemProps {
 function TextChannelItem({ channel, active, onEdit }: ChannelItemProps & { active: boolean }) {
   const { state, actions } = useRealtime();
   const mentions = state.mentions[channel.id]?.count ?? 0;
+  const unread = state.unread[channel.id]?.count ?? 0;
+  const label = [
+    mentions ? `${mentions} ${mentions === 1 ? 'menção' : 'menções'}` : '',
+    unread ? `${unread} ${unread === 1 ? 'mensagem não lida' : 'mensagens não lidas'}` : '',
+  ]
+    .filter(Boolean)
+    .join(', ');
   return (
     <li>
       <ChannelRow channel={channel} onEdit={onEdit}>
         <button
           type="button"
           aria-current={active ? 'page' : undefined}
-          aria-label={mentions ? `${channel.name} (${mentions} ${mentions === 1 ? 'menção' : 'menções'})` : undefined}
+          aria-label={label ? `${channel.name} (${label})` : undefined}
           onClick={() => actions.selectChannel(channel.id)}
           className={`flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-[15px] ${onEdit ? 'pr-7' : ''} ${
             active
               ? 'bg-hover text-fg'
-              : mentions
+              : mentions || unread
                 ? 'font-semibold text-fg hover:bg-hover/60'
                 : 'text-muted hover:bg-hover/60 hover:text-fg'
           }`}
         >
           <Hash size={18} className="shrink-0 text-faint" />
           <span className="flex-1 truncate text-left">{channel.name}</span>
-          {mentions > 0 && <CountBadge count={mentions} />}
+          {mentions > 0 ? <CountBadge count={mentions} /> : unread > 0 && !active && <UnreadPill count={unread} />}
         </button>
       </ChannelRow>
     </li>
@@ -314,6 +321,18 @@ function LiveRow({
       </button>
       {anchor && <StreamPreviewCard anchor={anchor} userId={userId} name={name} title={title} watchers={watchers} />}
     </>
+  );
+}
+
+/** Contador discreto de mensagens não lidas (as menções, que chamam mais atenção, têm o vermelho). */
+export function UnreadPill({ count }: { count: number }) {
+  return (
+    <span
+      aria-hidden
+      className="min-w-[18px] shrink-0 rounded-full bg-elevated px-1.5 text-center text-[11px] leading-[18px] font-bold text-fg"
+    >
+      {count > 99 ? '99+' : count}
+    </span>
   );
 }
 

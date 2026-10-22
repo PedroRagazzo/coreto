@@ -209,6 +209,9 @@ function registerBridge() {
     if (fromCoreto(event) && typeof id === 'number') stopAppAudio(id);
   });
   ipcMain.handle('desktop:capture-name', (event) => (fromCoreto(event) && captureName ? captureName : null));
+  ipcMain.on('desktop:focus-window', (event) => {
+    if (fromCoreto(event)) showWindow();
+  });
   ipcMain.handle('desktop:get-close-to-tray', (event) => (fromCoreto(event) ? prefs.closeToTray : null));
   ipcMain.handle('desktop:set-close-to-tray', (event, enabled) => {
     if (!fromCoreto(event)) return null;
