@@ -350,8 +350,8 @@ Passando o mouse numa mensagem aparecem os botões **Reagir** e **Responder**.
   partir de quando a pessoa entrou no espaço ou a conversa começou.
 - **Notificações do sistema.** Com o Coreto fora de vista (outro programa, minimizado ou na bandeja), chega um aviso
   do Windows para mensagem direta de outra pessoa e para menção ou resposta a você num canal (`shared/src/notify.ts`
-  decide). Não vale para robôs, para as suas mensagens nem com o status em Não perturbe. Clicar traz a janela de volta
-  e abre a conversa. Em Configurações → Notificações dá para desligar ou esconder o texto. No app de desktop as
+  decide). Não vale para robôs, para as suas mensagens nem com o status em Não perturbe. Clicar abre a conversa e, no app
+  de desktop a partir da 0.6.0, também traz a janela de volta da bandeja ou da barra de tarefas (`focusWindow`). Em Configurações → Notificações dá para desligar ou esconder o texto. No app de desktop as
   notificações já vêm liberadas; no navegador é preciso permitir uma vez. Menções em outro espaço, cujas mensagens o
   site não recebe, geram um aviso genérico ("Você foi mencionado").
 

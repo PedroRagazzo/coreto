@@ -9,7 +9,9 @@
     "strict": true,
     "noEmit": true,
     "skipLibCheck": true,
-    "types": ["node"]
+    "types": ["node"],
+    // O pacote "events" (usado pelo site, na raiz do repositório) não pode tomar o lugar do módulo embutido do Node.
+    "paths": { "events": ["./node_modules/@types/node/events.d.ts"] }
   },
   "include": ["src", "scripts"]
 }
