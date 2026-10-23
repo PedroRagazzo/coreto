@@ -93,6 +93,32 @@ export interface Attachment {
   height: number;
 }
 
+/** Uma opção de enquete e quem votou nela. */
+export interface PollOption {
+  id: Id;
+  text: string;
+  /** Quem votou, na ordem dos votos. */
+  userIds: Id[];
+}
+
+/** A enquete de uma mensagem. A pergunta é o texto (`content`) da própria mensagem. */
+export interface Poll {
+  /** Cada pessoa pode votar em mais de uma opção. */
+  multiple: boolean;
+  /** Encerrada: não aceita mais votos. */
+  closed: boolean;
+  options: PollOption[];
+}
+
+/** A roleta de uma mensagem: as opções e, depois que alguém gira, a sorteada. O título é o texto da mensagem. */
+export interface Roulette {
+  options: string[];
+  /** Posição da opção sorteada em `options`; `null` enquanto ninguém girou. */
+  result: number | null;
+  spunAt: string | null;
+  spunById: Id | null;
+}
+
 export interface Message {
   id: Id;
   /** Id de um canal de texto ou de uma conversa direta. */
@@ -107,6 +133,10 @@ export interface Message {
   replyTo: ReplyPreview | null;
   /** Reações, na ordem em que cada emoji apareceu pela primeira vez. */
   reactions: Reaction[];
+  /** Presente quando a mensagem é uma enquete (o `content` é a pergunta). */
+  poll: Poll | null;
+  /** Presente quando a mensagem é uma roleta (o `content` é o título, ou "Roleta"). */
+  roulette: Roulette | null;
 }
 
 /** O cartão de pré-visualização de um link (título, descrição e imagem da página, ou a própria imagem do link). */

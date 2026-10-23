@@ -8,8 +8,10 @@ import type {
   Member,
   Message,
   PermissionOverwrite,
+  Poll,
   Reaction,
   Role,
+  Roulette,
   Space,
   User,
 } from '../../../shared/src/models.js';
@@ -92,14 +94,42 @@ export const toAttachment = (row: Db.Attachment): Attachment => ({
   height: row.height,
 });
 
+/** As opções de uma enquete em ordem, cada uma com quem votou (na ordem dos votos). */
+export const pollOptionInclude = {
+  orderBy: { position: 'asc' },
+  include: { votes: { orderBy: { createdAt: 'asc' }, select: { userId: true } } },
+} as const;
+
 /** Use com `include: messageInclude` nas consultas de mensagens. */
 export const messageInclude = {
   attachments: { orderBy: { position: 'asc' } },
   // Em ordem de criação: o primeiro a reagir com cada emoji define a posição dele na lista.
   reactions: { orderBy: { createdAt: 'asc' } },
+  poll: { include: { options: pollOptionInclude } },
+  roulette: true,
 } as const;
 
-type MessageRow = Db.Message & { attachments: Db.Attachment[]; reactions: Db.Reaction[] };
+type PollRow = Db.Poll & { options: (Db.PollOption & { votes: Pick<Db.PollVote, 'userId'>[] })[] };
+
+type MessageRow = Db.Message & {
+  attachments: Db.Attachment[];
+  reactions: Db.Reaction[];
+  poll: PollRow | null;
+  roulette: Db.Roulette | null;
+};
+
+export const toPoll = (row: PollRow): Poll => ({
+  multiple: row.multiple,
+  closed: row.closedAt !== null,
+  options: row.options.map((o) => ({ id: o.id, text: o.text, userIds: o.votes.map((v) => v.userId) })),
+});
+
+export const toRoulette = (row: Db.Roulette): Roulette => ({
+  options: row.options,
+  result: row.resultIndex,
+  spunAt: iso(row.spunAt),
+  spunById: row.spunById,
+});
 
 /** O que se lê da mensagem respondida, para o resumo acima da resposta. */
 export interface ReplyParentRow {
@@ -135,6 +165,8 @@ export const toMessage = (row: MessageRow, parents: ReadonlyMap<string, ReplyPar
   editedAt: iso(row.editedAt),
   replyTo: row.replyToId ? replyPreviewFor(row.replyToId, parents.get(row.replyToId)) : null,
   reactions: toReactions(row.reactions),
+  poll: row.poll ? toPoll(row.poll) : null,
+  roulette: row.roulette ? toRoulette(row.roulette) : null,
 });
 
 function replyPreviewFor(id: string, parent: ReplyParentRow | undefined) {

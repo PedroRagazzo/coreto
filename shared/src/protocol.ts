@@ -10,8 +10,10 @@ import type {
   LinkPreview,
   MentionCount,
   Message,
+  Poll,
   PresenceStatus,
   Reaction,
+  Roulette,
   Space,
   UnreadCount,
   SpaceSnapshot,
@@ -218,6 +220,19 @@ export interface ClientToServerEvents {
     req: { channelId: Id; content: string; attachmentIds?: Id[]; replyToId?: Id },
     ack: (res: Ack<Message>) => void,
   ) => void;
+  /** Cria uma enquete (mensagem com opções para votar). Limites em shared/src/polls.ts. */
+  'poll:create': (
+    req: { channelId: Id; question: string; options: string[]; multiple?: boolean },
+    ack: (res: Ack<Message>) => void,
+  ) => void;
+  /** Vota na opção, ou tira o voto se já tinha votado nela. Em enquete de uma resposta só, o voto anterior sai. */
+  'poll:vote': (req: { messageId: Id; optionId: Id }, ack: (res: Ack<null>) => void) => void;
+  /** Encerra a enquete: o autor, ou quem tem MANAGE_MESSAGES no canal. */
+  'poll:close': (req: { messageId: Id }, ack: (res: Ack<null>) => void) => void;
+  /** Cria uma roleta (mensagem com opções que alguém gira). */
+  'roulette:create': (req: { channelId: Id; title?: string; options: string[] }, ack: (res: Ack<Message>) => void) => void;
+  /** Gira a roleta: o servidor sorteia a opção, uma vez só, e avisa todo mundo com `roulette:spun`. */
+  'roulette:spin': (req: { messageId: Id }, ack: (res: Ack<null>) => void) => void;
   /** Reage à mensagem com um emoji, ou tira a reação se já tinha reagido com ele. */
   'reaction:toggle': (req: { messageId: Id; emoji: string }, ack: (res: Ack<null>) => void) => void;
   /**
@@ -289,6 +304,10 @@ export interface ServerToClientEvents {
   'unread:bump': (payload: { channelId: Id; spaceId: Id | null }) => void;
   /** As reações de uma mensagem mudaram (a lista inteira, já atualizada). */
   'message:reactions': (payload: { channelId: Id; messageId: Id; reactions: Reaction[] }) => void;
+  /** Os votos (ou o encerramento) de uma enquete mudaram (a enquete inteira, já atualizada). */
+  'poll:updated': (payload: { channelId: Id; messageId: Id; poll: Poll }) => void;
+  /** Alguém girou a roleta e a opção sorteada já está decidida; todo mundo anima até ela. */
+  'roulette:spun': (payload: { channelId: Id; messageId: Id; roulette: Roulette }) => void;
   'message:deleted': (payload: { channelId: Id; messageId: Id }) => void;
   typing: (payload: { channelId: Id; userId: Id }) => void;
   /** O número de menções não vistas do usuário num canal mudou (0 = todas vistas). */

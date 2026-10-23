@@ -39,6 +39,7 @@ model User {
   mentions      Mention[]
   uploads       Attachment[]
   reactions     Reaction[]
+  pollVotes     PollVote[]
   readStates    ReadState[]
 }
 
@@ -183,6 +184,9 @@ model Message {
   mentions    Mention[]
   attachments Attachment[]
   reactions   Reaction[]
+  /// Preenchido quando a mensagem é uma enquete (o `content` é a pergunta) ou uma roleta (o `content` é o título).
+  poll        Poll?
+  roulette    Roulette?
 
   @@index([channelId, createdAt(sort: Desc)])
   @@index([directId, createdAt(sort: Desc)])
@@ -202,6 +206,52 @@ model ReadState {
 }
 
 /// Uma pessoa reagiu a uma mensagem com um emoji. Some junto com a mensagem.
+/// A enquete de uma mensagem. Apagar a mensagem apaga a enquete, as opções e os votos.
+model Poll {
+  messageId String       @id
+  message   Message      @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  /// Cada pessoa pode votar em mais de uma opção.
+  multiple  Boolean      @default(false)
+  /// Quando foi encerrada; encerrada não aceita votos.
+  closedAt  DateTime?
+  options   PollOption[]
+}
+
+model PollOption {
+  id       String     @id @default(uuid())
+  pollId   String
+  poll     Poll       @relation(fields: [pollId], references: [messageId], onDelete: Cascade)
+  position Int
+  text     String     @db.VarChar(100)
+  votes    PollVote[]
+
+  @@index([pollId, position])
+}
+
+model PollVote {
+  optionId  String
+  option    PollOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime   @default(now())
+
+  @@id([optionId, userId])
+  /// Os votos de uma pessoa, para tirar o anterior numa enquete de uma resposta só.
+  @@index([userId])
+}
+
+/// A roleta de uma mensagem. O servidor sorteia a opção, uma vez só.
+model Roulette {
+  messageId   String    @id
+  message     Message   @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  options     String[]
+  /// Posição da opção sorteada em `options`; nulo enquanto ninguém girou.
+  resultIndex Int?
+  spunAt      DateTime?
+  /// Quem girou. Sem chave estrangeira de propósito: só serve para mostrar o nome.
+  spunById    String?
+}
+
 model Reaction {
   messageId String
   message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)

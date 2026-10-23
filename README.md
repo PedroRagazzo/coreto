@@ -343,6 +343,31 @@ Passando o mouse numa mensagem aparecem os botões **Reagir** e **Responder**.
   (mensagem, pessoa, emoji), e some junto com a mensagem. Os eventos são `reaction:toggle` (pedido) e
   `message:reactions` (a lista inteira da mensagem, para todos que veem o canal).
 
+## Enquetes e roletas
+
+O botão de gráfico, ao lado do clipe no campo de texto, cria uma **enquete** ou uma **roleta** num canal ou numa
+conversa direta. As duas são mensagens comuns (aparecem no histórico, contam como não lidas, dá para responder e
+reagir, e apagar quem criou ou quem modera); o texto da mensagem é a pergunta da enquete ou o título da roleta, então
+a busca e as respostas funcionam como sempre. Não dá para editar: apague e crie de novo.
+
+- **Enquete:** uma pergunta (até 200 letras) e de 2 a 10 opções (até 100 letras cada, sem repetir). Cada opção é um
+  botão com a barra de votos; um clique vota, outro tira o voto, e passar o mouse mostra quem votou. Por padrão vale
+  uma resposta só (votar em outra opção troca o voto); com "Permitir marcar várias respostas", cada opção marcada é um
+  voto. Quem criou (ou quem tem MANAGE_MESSAGES) encerra a enquete: os votos ficam, mas não entram mais. Vota quem pode
+  ler o canal, como nas reações. Eventos: `poll:create`, `poll:vote`, `poll:close` e `poll:updated` (a enquete inteira,
+  para todos que veem o canal). Tabelas `Poll`, `PollOption` e `PollVote`; o voto é gravado travando a enquete, para
+  duas abas da mesma pessoa não deixarem duas respostas numa enquete de uma só.
+- **Roleta:** um título opcional e de 2 a 50 opções, escritas uma por linha (até 60 letras cada; repetir uma opção dá
+  mais fatias, e mais chance, a ela). Qualquer pessoa do canal gira, **uma vez só**: o servidor sorteia a opção com
+  `crypto.randomInt` e grava o resultado (`Roulette.resultIndex`), então ninguém escolhe nem prevê, e dois giros ao
+  mesmo tempo dão um resultado só. Todo mundo que está vendo recebe `roulette:spun` e anima a roda por 5 segundos até
+  a mesma opção (onde o ponteiro cai dentro da fatia varia por pessoa, só por estética); quem abre o canal depois vê a
+  roda já parada no resultado. "Nova roleta com essas opções" abre o formulário com os mesmos textos. Com mais de 30
+  opções a roda fica só com as cores, e a lista "N opções" embaixo dela diz quais são.
+- Os limites e a conferência do que a pessoa escreveu ficam em `shared/src/polls.ts`, usados pelo formulário e pelo
+  servidor; a conta do ângulo da roda (`wheelAngle`, `sliceAt`) também. Votos, encerramentos e giros têm limite de 30
+  a cada 5 segundos por conexão.
+
 ## Mensagens não lidas e notificações
 
 - **Não lidas.** Cada canal e cada conversa direta mostra quantas mensagens de outras pessoas chegaram depois da

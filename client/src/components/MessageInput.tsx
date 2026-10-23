@@ -1,11 +1,22 @@
 import { encodeMentions } from '@shared/markup';
 import type { Attachment, Id } from '@shared/models';
 import { ATTACHMENT_TYPES, MAX_ATTACHMENTS_PER_MESSAGE, MAX_MESSAGE_LENGTH } from '@shared/protocol';
-import { CornerUpRight, ImagePlus, LoaderCircle, SendHorizontal, TriangleAlert, X } from 'lucide-react';
+import {
+  ChartNoAxesColumn,
+  CornerUpRight,
+  ImagePlus,
+  LoaderCircle,
+  LoaderPinwheel,
+  SendHorizontal,
+  TriangleAlert,
+  X,
+} from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { checkImageFile, type UploadHandle } from '../lib/uploads';
 import { useRealtime } from '../state/realtime';
 import { displayNameOf, mentionCandidates } from '../state/selectors';
+import { CreatePollDialog } from './CreatePollDialog';
+import { CreateRouletteDialog } from './CreateRouletteDialog';
 import { Markup } from './MessageContent';
 import { useMentionAutocomplete } from './MentionAutocomplete';
 
@@ -37,6 +48,9 @@ export function MessageInput({ targetId, label, canSend }: MessageInputProps) {
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [extrasOpen, setExtrasOpen] = useState(false);
+  const [dialog, setDialog] = useState<'poll' | 'roulette' | null>(null);
+  const extrasRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -48,10 +62,26 @@ export function MessageInput({ targetId, label, canSend }: MessageInputProps) {
   const candidates = mentionCandidates(state, targetId);
   const autocomplete = useMentionAutocomplete(textareaRef, draft, setDraft, candidates);
 
+  // O menu de enquete e roleta fecha com um clique fora dele ou com Esc.
+  useEffect(() => {
+    if (!extrasOpen) return;
+    const close = (e: Event) => {
+      if (e instanceof KeyboardEvent ? e.key === 'Escape' : !extrasRef.current?.contains(e.target as Node)) setExtrasOpen(false);
+    };
+    document.addEventListener('pointerdown', close);
+    document.addEventListener('keydown', close);
+    return () => {
+      document.removeEventListener('pointerdown', close);
+      document.removeEventListener('keydown', close);
+    };
+  }, [extrasOpen]);
+
   // Trocar de conversa descarta o rascunho e as imagens ainda não enviadas.
   useEffect(() => {
     setDraft('');
     setError(null);
+    setExtrasOpen(false);
+    setDialog(null);
     textareaRef.current?.focus();
     return () => {
       for (const image of imagesRef.current) discard(image);
@@ -171,6 +201,7 @@ export function MessageInput({ targetId, label, canSend }: MessageInputProps) {
   }
 
   return (
+    <>
     <form
       ref={formRef}
       onSubmit={(e) => {
@@ -233,6 +264,54 @@ export function MessageInput({ targetId, label, canSend }: MessageInputProps) {
           >
             <ImagePlus size={20} />
           </button>
+          <div ref={extrasRef} className="relative">
+            <button
+              type="button"
+              title="Criar enquete ou roleta"
+              aria-label="Criar enquete ou roleta"
+              aria-haspopup="menu"
+              aria-expanded={extrasOpen}
+              disabled={!canSend}
+              onClick={() => setExtrasOpen((open) => !open)}
+              className="rounded p-1 text-muted hover:text-fg disabled:opacity-40 disabled:hover:text-muted"
+            >
+              <ChartNoAxesColumn size={20} />
+            </button>
+            {extrasOpen && (
+              <div role="menu" className="absolute bottom-full left-0 z-20 mb-2 w-60 rounded-lg border border-line bg-panel p-1 shadow-xl">
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setExtrasOpen(false);
+                    setDialog('poll');
+                  }}
+                  className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left hover:bg-hover"
+                >
+                  <ChartNoAxesColumn size={18} className="shrink-0 text-muted" aria-hidden />
+                  <span>
+                    <span className="block text-sm font-medium">Enquete</span>
+                    <span className="block text-xs text-muted">Uma pergunta e votos por clique</span>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setExtrasOpen(false);
+                    setDialog('roulette');
+                  }}
+                  className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left hover:bg-hover"
+                >
+                  <LoaderPinwheel size={18} className="shrink-0 text-muted" aria-hidden />
+                  <span>
+                    <span className="block text-sm font-medium">Roleta</span>
+                    <span className="block text-xs text-muted">Gira e sorteia uma opção</span>
+                  </span>
+                </button>
+              </div>
+            )}
+          </div>
           <input
             ref={fileInputRef}
             type="file"
@@ -298,6 +377,10 @@ export function MessageInput({ targetId, label, canSend }: MessageInputProps) {
         </p>
       )}
     </form>
+    {/* Fora do formulário do campo de texto: um formulário dentro do outro não é válido. */}
+    {dialog === 'poll' && <CreatePollDialog targetId={targetId} onClose={() => setDialog(null)} />}
+    {dialog === 'roulette' && <CreateRouletteDialog targetId={targetId} onClose={() => setDialog(null)} />}
+    </>
   );
 }
 

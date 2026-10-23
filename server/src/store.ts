@@ -20,8 +20,10 @@ import type {
   Member,
   MentionCount,
   Message,
+  Poll,
   Reaction,
   Role,
+  Roulette,
   Space,
   SpaceSnapshot,
   UnreadCount,
@@ -29,10 +31,14 @@ import type {
   VoiceParticipant,
 } from '../../shared/src/models.js';
 import type { MessageContext, SignalPayload } from '../../shared/src/protocol.js';
+import type { NewPoll, NewRoulette } from '../../shared/src/polls.js';
 import { hashToken, type Db } from './db/client.js';
 import {
   messageInclude,
+  pollOptionInclude,
   replyParentSelect,
+  toPoll,
+  toRoulette,
   toReactions,
   toAttachment,
   toCategory,
@@ -600,7 +606,13 @@ export class Store {
     targetId: Id,
     authorId: Id,
     content: string,
-    { attachmentIds = [], mentions = [], replyToId = null }: { attachmentIds?: Id[]; mentions?: Id[]; replyToId?: Id | null } = {},
+    {
+      attachmentIds = [],
+      mentions = [],
+      replyToId = null,
+      poll,
+      roulette,
+    }: { attachmentIds?: Id[]; mentions?: Id[]; replyToId?: Id | null; poll?: NewPoll; roulette?: NewRoulette } = {},
   ): Promise<Message> {
     const createdAt = this.nextMessageTime();
     const direct = this.directs.get(targetId);
@@ -613,6 +625,15 @@ export class Store {
           searchText: searchKey(content),
           createdAt,
           replyToId,
+          ...(poll && {
+            poll: {
+              create: {
+                multiple: poll.multiple,
+                options: { create: poll.options.map((text, position) => ({ text, position })) },
+              },
+            },
+          }),
+          ...(roulette && { roulette: { create: { options: roulette.options } } }),
         },
       });
       for (const [position, id] of attachmentIds.entries()) {
@@ -641,6 +662,61 @@ export class Store {
   async authorOfMessageIn(targetId: Id, messageId: Id): Promise<Id | null> {
     const row = await this.db.message.findFirst({ where: { id: messageId, ...this.targetWhere(targetId) }, select: { authorId: true } });
     return row?.authorId ?? null;
+  }
+
+  // ── Enquetes e roletas ─────────────────────────────────────────────────────
+
+  async pollOf(messageId: Id): Promise<Poll | null> {
+    const row = await this.db.poll.findUnique({ where: { messageId }, include: { options: pollOptionInclude } });
+    return row ? toPoll(row) : null;
+  }
+
+  /**
+   * Vota na opção, ou tira o voto se já era dele. Numa enquete de uma resposta só, votar noutra opção troca o voto.
+   * Devolve a enquete atualizada, ou o motivo de não ter votado (`closed`: já encerrada; `unknown`: a opção não é desta enquete).
+   */
+  async toggleVote(messageId: Id, optionId: Id, userId: Id): Promise<Poll | 'closed' | 'unknown'> {
+    const changed = await this.db.$transaction(async (tx) => {
+      // Trava a enquete: dois votos do mesmo usuário (duas abas) entram um de cada vez e não deixam duas respostas numa enquete de uma só.
+      await tx.$queryRaw`SELECT 1 FROM "Poll" WHERE "messageId" = ${messageId} FOR UPDATE`;
+      const poll = await tx.poll.findUnique({ where: { messageId }, include: { options: { select: { id: true } } } });
+      if (!poll || !poll.options.some((o) => o.id === optionId)) return 'unknown' as const;
+      if (poll.closedAt) return 'closed' as const;
+      const ids = poll.options.map((o) => o.id);
+      const key = { optionId_userId: { optionId, userId } };
+      if (await tx.pollVote.findUnique({ where: key })) {
+        await tx.pollVote.delete({ where: key });
+      } else {
+        if (!poll.multiple) await tx.pollVote.deleteMany({ where: { userId, optionId: { in: ids } } });
+        await tx.pollVote.create({ data: { optionId, userId } });
+      }
+      return 'ok' as const;
+    });
+    if (changed !== 'ok') return changed;
+    return (await this.pollOf(messageId))!;
+  }
+
+  /** Encerra a enquete (de novo não faz diferença). Devolve a enquete atualizada, ou `null` se ela não existe. */
+  async closePoll(messageId: Id): Promise<Poll | null> {
+    const { count } = await this.db.poll.updateMany({ where: { messageId, closedAt: null }, data: { closedAt: new Date() } });
+    if (count === 0 && !(await this.db.poll.findUnique({ where: { messageId }, select: { messageId: true } }))) return null;
+    return this.pollOf(messageId);
+  }
+
+  /**
+   * Grava o resultado da roleta, uma vez só: `pick(n)` escolhe uma posição entre `n` opções. Se alguém já girou (ou girou
+   * ao mesmo tempo), não muda nada e devolve `already`. `unknown`: a mensagem não é uma roleta.
+   */
+  async spinRoulette(messageId: Id, userId: Id, pick: (count: number) => number): Promise<Roulette | 'already' | 'unknown'> {
+    const row = await this.db.roulette.findUnique({ where: { messageId } });
+    if (!row) return 'unknown';
+    if (row.resultIndex !== null) return 'already';
+    const { count } = await this.db.roulette.updateMany({
+      where: { messageId, resultIndex: null },
+      data: { resultIndex: pick(row.options.length), spunAt: new Date(), spunById: userId },
+    });
+    if (count === 0) return 'already';
+    return toRoulette(await this.db.roulette.findUniqueOrThrow({ where: { messageId } }));
   }
 
   // ── Reações ────────────────────────────────────────────────────────────────

@@ -180,7 +180,8 @@ export function MessageList({ conversationId, welcome, messages }: MessageListPr
                     canSend={canSend}
                     onGoToOriginal={goToOriginal}
                     editing={editingId === message.id}
-                    onEdit={mine ? () => setEditingId(message.id) : undefined}
+                    // Enquete e roleta são a própria mensagem: para mudar, apague e crie de novo.
+                    onEdit={mine && !message.poll && !message.roulette ? () => setEditingId(message.id) : undefined}
                     onDelete={mine || moderates ? () => setDeleting(message) : undefined}
                     onEditDone={() => setEditingId(null)}
                     compact={compact}

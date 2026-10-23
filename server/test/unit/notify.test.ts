@@ -15,6 +15,8 @@ const message = (patch: Partial<Message> = {}): Message => ({
   editedAt: null,
   replyTo: null,
   reactions: [],
+  poll: null,
+  roulette: null,
   ...patch,
 });
 

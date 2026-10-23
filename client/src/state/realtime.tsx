@@ -9,8 +9,10 @@ import type {
   MentionCount,
   LinkPreview,
   Message,
+  Poll,
   PresenceStatus,
   Reaction,
+  Roulette,
   Space,
   SpaceSnapshot,
   UnreadCount,
@@ -19,6 +21,7 @@ import type {
 } from '@shared/models';
 import type { ConnectionQuality } from '@shared/connection-quality';
 import { firstLink } from '@shared/links';
+import { ROULETTE_SPIN_MS } from '@shared/polls';
 import { toastFor } from '@shared/notify';
 import { hasPermission, Permission } from '@shared/permissions';
 import { deletedReply, replyPreviewOf } from '@shared/reply';
@@ -85,6 +88,8 @@ export interface RealtimeState {
   snapshot: SpaceSnapshot | null;
   directs: Record<Id, DirectConversation>;
   activeDirectId: Id | null;
+  /** Roletas que acabaram de girar ao vivo (mensagem → `true`): só elas animam; as que já tinham resultado aparecem paradas. */
+  freshSpins: Record<Id, true>;
   /** link → o cartão de pré-visualização (`null` se a página não tem o que mostrar); ausente = ainda não pedido */
   linkPreviews: Record<string, LinkPreview | null>;
   /** canal de texto ou conversa direta → mensagens de outras pessoas ainda não lidas (some o que está zerado) */
@@ -156,6 +161,7 @@ const initialState: RealtimeState = {
   snapshot: null,
   directs: {},
   activeDirectId: null,
+  freshSpins: {},
   linkPreviews: {},
   unread: {},
   users: {},
@@ -222,6 +228,9 @@ type Action =
   | { type: 'message:updated'; message: Message }
   | { type: 'message:deleted'; channelId: Id; messageId: Id }
   | { type: 'message:reactions'; channelId: Id; messageId: Id; reactions: Reaction[] }
+  | { type: 'poll:updated'; channelId: Id; messageId: Id; poll: Poll }
+  | { type: 'roulette:spun'; channelId: Id; messageId: Id; roulette: Roulette }
+  | { type: 'roulette:settled'; messageId: Id }
   | { type: 'link:preview'; url: string; preview: LinkPreview | null }
   | { type: 'reply:start'; message: Message }
   | { type: 'reply:cancel' }
@@ -527,6 +536,34 @@ function reducer(state: RealtimeState, action: Action): RealtimeState {
       };
     }
 
+    case 'poll:updated': {
+      const list = state.messages[action.channelId];
+      if (!list?.some((m) => m.id === action.messageId)) return state;
+      return {
+        ...state,
+        messages: {
+          ...state.messages,
+          [action.channelId]: list.map((m) => (m.id === action.messageId ? { ...m, poll: action.poll } : m)),
+        },
+      };
+    }
+
+    case 'roulette:spun': {
+      const list = state.messages[action.channelId];
+      if (!list?.some((m) => m.id === action.messageId)) return state;
+      return {
+        ...state,
+        freshSpins: { ...state.freshSpins, [action.messageId]: true },
+        messages: {
+          ...state.messages,
+          [action.channelId]: list.map((m) => (m.id === action.messageId ? { ...m, roulette: action.roulette } : m)),
+        },
+      };
+    }
+
+    case 'roulette:settled':
+      return state.freshSpins[action.messageId] ? { ...state, freshSpins: withoutKey(state.freshSpins, action.messageId) } : state;
+
     case 'link:preview':
       return { ...state, linkPreviews: { ...state.linkPreviews, [action.url]: action.preview } };
 
@@ -689,6 +726,16 @@ export interface RealtimeActions {
   selectDirect(conversationId: Id): void;
   /** Envia para um canal de texto ou conversa direta, com anexos já enviados. Resolve com erro ou `null`. */
   sendMessage(targetId: Id, content: string, attachmentIds?: Id[], replyToId?: Id): Promise<string | null>;
+  /** Cria uma enquete no canal ou conversa. Resolve com o erro, ou `null` quando deu certo (a mensagem chega pelo evento). */
+  createPoll(targetId: Id, poll: { question: string; options: string[]; multiple: boolean }): Promise<string | null>;
+  /** Cria uma roleta no canal ou conversa. Resolve com o erro, ou `null`. */
+  createRoulette(targetId: Id, roulette: { title: string; options: string[] }): Promise<string | null>;
+  /** Vota na opção (ou tira o voto). Resolve com o erro, ou `null`. */
+  votePoll(messageId: Id, optionId: Id): Promise<string | null>;
+  /** Encerra a enquete (quem criou, ou quem modera o canal). Resolve com o erro, ou `null`. */
+  closePoll(messageId: Id): Promise<string | null>;
+  /** Gira a roleta; o servidor sorteia e todo mundo vê o mesmo resultado. Resolve com o erro, ou `null`. */
+  spinRoulette(messageId: Id): Promise<string | null>;
   /** Pede ao servidor o cartão do primeiro link da mensagem (uma vez por link); o resultado vai para `state.linkPreviews`. */
   requestLinkPreview(message: Message): void;
   /** Começa a responder a uma mensagem: o campo de texto mostra a quem e o envio leva a resposta. */
@@ -783,6 +830,18 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
   const firstSessionRef = useRef(true);
   const identityRef = useRef(identity);
   identityRef.current = identity;
+
+  /** Faz um pedido ao servidor e devolve o erro para mostrar (ou `null` se deu certo). */
+  const ask = async (send: (socket: AppSocket) => Promise<Ack<unknown>>): Promise<string | null> => {
+    const socket = socketRef.current;
+    if (!socket) return 'Sem conexão com o servidor.';
+    try {
+      const res = await send(socket);
+      return res.ok ? null : res.error;
+    } catch {
+      return 'O servidor não respondeu. Tente de novo.';
+    }
+  };
 
   const actions = useMemo<RealtimeActions>(() => {
     const emitVoiceState = (muted: boolean, deafened: boolean) =>
@@ -1009,6 +1068,12 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
         const res = await socket.emitWithAck('message:delete', { messageId });
         return res.ok ? null : res.error;
       },
+
+      createPoll: (targetId, poll) => ask((s) => s.timeout(10_000).emitWithAck('poll:create', { channelId: targetId, ...poll })),
+      createRoulette: (targetId, roulette) => ask((s) => s.timeout(10_000).emitWithAck('roulette:create', { channelId: targetId, ...roulette })),
+      votePoll: (messageId, optionId) => ask((s) => s.timeout(10_000).emitWithAck('poll:vote', { messageId, optionId })),
+      closePoll: (messageId) => ask((s) => s.timeout(10_000).emitWithAck('poll:close', { messageId })),
+      spinRoulette: (messageId) => ask((s) => s.timeout(10_000).emitWithAck('roulette:spin', { messageId })),
 
       requestLinkPreview(message) {
         const url = firstLink(message.content);
@@ -1376,6 +1441,12 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
       notifyMessage(message);
     });
     socket.on('message:updated', (message) => dispatch({ type: 'message:updated', message }));
+    socket.on('poll:updated', ({ channelId, messageId, poll }) => dispatch({ type: 'poll:updated', channelId, messageId, poll }));
+    socket.on('roulette:spun', ({ channelId, messageId, roulette }) => {
+      dispatch({ type: 'roulette:spun', channelId, messageId, roulette });
+      // Depois que a roda para, a mensagem volta a ser um cartão comum (sem animar de novo se sair e voltar da tela).
+      setTimeout(() => dispatch({ type: 'roulette:settled', messageId }), ROULETTE_SPIN_MS + 1500);
+    });
     socket.on('message:reactions', ({ channelId, messageId, reactions }) =>
       dispatch({ type: 'message:reactions', channelId, messageId, reactions }),
     );

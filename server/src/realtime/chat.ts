@@ -1,8 +1,10 @@
+import { randomInt } from 'node:crypto';
 import { MAX_REACTION_KINDS, isReactionEmoji } from '../../../shared/src/emoji.js';
 import { mentionedUserIds } from '../../../shared/src/markup.js';
 import { SEARCH_PAGE_SIZE, searchWords } from '../../../shared/src/search.js';
 import type { Channel, Id, Message } from '../../../shared/src/models.js';
 import { hasPermission, Permission } from '../../../shared/src/permissions.js';
+import { checkPoll, checkRoulette, rouletteContent } from '../../../shared/src/polls.js';
 import {
   HISTORY_PAGE_SIZE,
   MAX_ATTACHMENTS_PER_MESSAGE,
@@ -19,6 +21,19 @@ const MAX_HISTORY_PAGE = 100;
 /** No máximo isto de reações por socket nesta janela: um clique nervoso passa, uma enxurrada não. */
 const REACTION_BURST = 20;
 const REACTION_WINDOW_MS = 5000;
+/** Votos, encerramentos e giros: o mesmo tipo de limite, para um clique nervoso passar e uma enxurrada não. */
+const POLL_BURST = 30;
+
+/** Devolve uma função que diz se mais um evento cabe agora: no máximo `max` por janela de `windowMs`. */
+function burstLimiter(max: number, windowMs: number): () => boolean {
+  const recent: number[] = [];
+  return () => {
+    const now = Date.now();
+    while (recent.length > 0 && now - recent[0] > windowMs) recent.shift();
+    recent.push(now);
+    return recent.length <= max;
+  };
+}
 
 /** Conteúdo pronto para gravar, ou o motivo da recusa. Vazio só vale para mensagem com anexos. */
 function validateContent(raw: unknown, allowEmpty = false): { ok: true; content: string } | { ok: false; error: string } {
@@ -156,13 +171,10 @@ export function registerChat(
   };
 
   // Reagir vale onde a pessoa pode ler (como no Discord, dá para reagir em canais só de leitura).
-  const recentReactions: number[] = [];
+  const reactionAllowed = burstLimiter(REACTION_BURST, REACTION_WINDOW_MS);
   socket.on('reaction:toggle', async (req, ack) => {
     if (!isFunction(ack)) return;
-    const now = Date.now();
-    while (recentReactions.length > 0 && now - recentReactions[0] > REACTION_WINDOW_MS) recentReactions.shift();
-    recentReactions.push(now);
-    if (recentReactions.length > REACTION_BURST) return ack({ ok: false, error: 'Devagar: muitas reações seguidas.' });
+    if (!reactionAllowed()) return ack({ ok: false, error: 'Devagar: muitas reações seguidas.' });
     if (!isReactionEmoji(req?.emoji)) return ack({ ok: false, error: 'Esse emoji não vale como reação.' });
     try {
       const found = await locate(req?.messageId);
@@ -178,6 +190,109 @@ export function registerChat(
     }
   });
 
+  // ── Enquetes e roletas ───────────────────────────────────────────────────────
+
+  /** Publica uma mensagem de enquete ou roleta, como qualquer outra mensagem do canal (menções, não lidas, tudo igual). */
+  const postSpecial = async (
+    target: MessageTarget,
+    ack: (res: { ok: true; data: Message } | { ok: false; error: string }) => void,
+    content: string,
+    extra: NonNullable<Parameters<Store['addMessage']>[3]>,
+  ) => {
+    const mentions = mentionTargets(store, target, content, userId);
+    let message;
+    try {
+      message = await store.addMessage(target.id, userId, content, { ...extra, mentions });
+    } catch (err) {
+      return ack(storageError('poll:create', err));
+    }
+    if (target.kind === 'direct') io.to(audienceOf(target)).emit('dm:upsert', directPayload(store, target.conversation));
+    io.to(audienceOf(target)).emit('message:new', message);
+    bumpUnread(io, store, target.id, userId);
+    ack({ ok: true, data: message });
+    // Não passa pelo bot de música: a pergunta de uma enquete nunca vira um comando.
+    if (target.kind === 'channel' && mentions.length > 0) notifyMentions(io, store, mentions, target.channel).catch(logError('mentions'));
+  };
+
+  socket.on('poll:create', async (req, ack) => {
+    if (!isFunction(ack)) return;
+    const target = messageTarget(store, userId, req?.channelId, 'write');
+    if (!target) return ack({ ok: false, error: 'Você não tem permissão para escrever aqui.' });
+    const checked = checkPoll(req ?? {});
+    if (!checked.ok) return ack(checked);
+    await postSpecial(target, ack, checked.value.question, { poll: checked.value });
+  });
+
+  socket.on('roulette:create', async (req, ack) => {
+    if (!isFunction(ack)) return;
+    const target = messageTarget(store, userId, req?.channelId, 'write');
+    if (!target) return ack({ ok: false, error: 'Você não tem permissão para escrever aqui.' });
+    const checked = checkRoulette(req ?? {});
+    if (!checked.ok) return ack(checked);
+    await postSpecial(target, ack, rouletteContent(checked.value.title), { roulette: checked.value });
+  });
+
+  // Votar e girar valem onde a pessoa pode ler, como reagir (num canal só de leitura dá para votar).
+  const pollActionAllowed = burstLimiter(POLL_BURST, REACTION_WINDOW_MS);
+
+  socket.on('poll:vote', async (req, ack) => {
+    if (!isFunction(ack)) return;
+    if (!pollActionAllowed()) return ack({ ok: false, error: 'Devagar: muitos votos seguidos.' });
+    try {
+      const found = await locate(req?.messageId);
+      if (!found?.message.poll) return ack({ ok: false, error: 'Enquete não encontrada.' });
+      if (typeof req.optionId !== 'string') return ack({ ok: false, error: 'Opção não encontrada.' });
+      const { message, target } = found;
+      const poll = await store.toggleVote(message.id, req.optionId, userId);
+      if (poll === 'closed') return ack({ ok: false, error: 'Esta enquete já foi encerrada.' });
+      if (poll === 'unknown') return ack({ ok: false, error: 'Opção não encontrada.' });
+      io.to(audienceOf(target)).emit('poll:updated', { channelId: message.channelId, messageId: message.id, poll });
+      ack({ ok: true, data: null });
+    } catch (err) {
+      ack(storageError('poll:vote', err));
+    }
+  });
+
+  socket.on('poll:close', async (req, ack) => {
+    if (!isFunction(ack)) return;
+    if (!pollActionAllowed()) return ack({ ok: false, error: 'Devagar.' });
+    try {
+      const found = await locate(req?.messageId);
+      if (!found?.message.poll) return ack({ ok: false, error: 'Enquete não encontrada.' });
+      const { message, target } = found;
+      const moderates =
+        target.kind === 'channel' &&
+        hasPermission(store.permissionsFor(userId, target.channel), Permission.MANAGE_MESSAGES);
+      if (message.authorId !== userId && !moderates) {
+        return ack({ ok: false, error: 'Só quem criou a enquete pode encerrá-la.' });
+      }
+      const poll = await store.closePoll(message.id);
+      if (!poll) return ack({ ok: false, error: 'Enquete não encontrada.' });
+      io.to(audienceOf(target)).emit('poll:updated', { channelId: message.channelId, messageId: message.id, poll });
+      ack({ ok: true, data: null });
+    } catch (err) {
+      ack(storageError('poll:close', err));
+    }
+  });
+
+  socket.on('roulette:spin', async (req, ack) => {
+    if (!isFunction(ack)) return;
+    if (!pollActionAllowed()) return ack({ ok: false, error: 'Devagar.' });
+    try {
+      const found = await locate(req?.messageId);
+      if (!found?.message.roulette) return ack({ ok: false, error: 'Roleta não encontrada.' });
+      const { message, target } = found;
+      // Sorteio com o gerador criptográfico do servidor: ninguém escolhe nem prevê o resultado.
+      const roulette = await store.spinRoulette(message.id, userId, (count) => randomInt(count));
+      if (roulette === 'already') return ack({ ok: false, error: 'Esta roleta já foi girada.' });
+      if (roulette === 'unknown') return ack({ ok: false, error: 'Roleta não encontrada.' });
+      io.to(audienceOf(target)).emit('roulette:spun', { channelId: message.channelId, messageId: message.id, roulette });
+      ack({ ok: true, data: null });
+    } catch (err) {
+      ack(storageError('roulette:spin', err));
+    }
+  });
+
   socket.on('message:edit', async (req, ack) => {
     if (!isFunction(ack)) return;
     try {
@@ -186,6 +301,9 @@ export function registerChat(
         return ack({ ok: false, error: 'Você só pode editar as suas mensagens.' });
       }
       const { message, target } = found;
+      if (message.poll || message.roulette) {
+        return ack({ ok: false, error: 'Enquetes e roletas não podem ser editadas. Apague e crie de novo.' });
+      }
       const valid = validateContent(req.content, message.attachments.length > 0);
       if (!valid.ok) return ack(valid);
       if (message.content === valid.content) return ack({ ok: true, data: message });

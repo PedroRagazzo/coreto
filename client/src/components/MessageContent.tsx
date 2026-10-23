@@ -5,6 +5,8 @@ import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from '
 import { formatMessageTime } from '../lib/format';
 import { attachmentUrl } from '../lib/uploads';
 import { LinkPreviewCard } from './LinkPreviewCard';
+import { PollCard } from './PollCard';
+import { RouletteCard } from './RouletteCard';
 import { useRealtime } from '../state/realtime';
 import { displayNameOf } from '../state/selectors';
 
@@ -27,6 +29,8 @@ export function MessageContent({ message, prefix }: { message: Message; prefix?:
         </div>
       )}
       {message.attachments.length > 0 && <AttachmentGallery attachments={message.attachments} />}
+      {message.poll && <PollCard message={message} />}
+      {message.roulette && <RouletteCard message={message} />}
       <LinkPreviewCard message={message} />
     </>
   );
