@@ -114,6 +114,57 @@ export class KeyTracker {
 /** Com algum desses, o atalho pode ser acionado mesmo digitando (não conflita com o texto). */
 export const hasCommandModifier = (keys: readonly string[]) => keys.some((k) => k === 'Ctrl' || k === 'Alt' || k === 'Meta');
 
+// ── Atalhos que valem com um jogo em primeiro plano (leitor de teclado nativo do app de desktop) ──
+//
+// O app de desktop tem um programa (coreto-keys.exe) que recebe as teclas de qualquer programa em foco e avisa
+// quando uma combinação é apertada. Ele identifica as teclas pelo código de varredura (scan code) do teclado, a
+// posição física, como o `code` do navegador. Aqui está a tradução de um para o outro.
+
+/** Código de varredura de cada tecla (Set 1, em hexadecimal); `E0xx` são as teclas estendidas. */
+const SCAN_CODES: Record<string, string> = {
+  Escape: '01', Digit1: '02', Digit2: '03', Digit3: '04', Digit4: '05', Digit5: '06', Digit6: '07', Digit7: '08',
+  Digit8: '09', Digit9: '0A', Digit0: '0B', Minus: '0C', Equal: '0D', Backspace: '0E', Tab: '0F',
+  KeyQ: '10', KeyW: '11', KeyE: '12', KeyR: '13', KeyT: '14', KeyY: '15', KeyU: '16', KeyI: '17', KeyO: '18',
+  KeyP: '19', BracketLeft: '1A', BracketRight: '1B', Enter: '1C',
+  KeyA: '1E', KeyS: '1F', KeyD: '20', KeyF: '21', KeyG: '22', KeyH: '23', KeyJ: '24', KeyK: '25', KeyL: '26',
+  Semicolon: '27', Quote: '28', Backquote: '29', Backslash: '2B',
+  KeyZ: '2C', KeyX: '2D', KeyC: '2E', KeyV: '2F', KeyB: '30', KeyN: '31', KeyM: '32', Comma: '33', Period: '34',
+  Slash: '35', NumpadMultiply: '37', Space: '39', CapsLock: '3A',
+  F1: '3B', F2: '3C', F3: '3D', F4: '3E', F5: '3F', F6: '40', F7: '41', F8: '42', F9: '43', F10: '44',
+  NumLock: '45', ScrollLock: '46',
+  Numpad7: '47', Numpad8: '48', Numpad9: '49', NumpadSubtract: '4A', Numpad4: '4B', Numpad5: '4C', Numpad6: '4D',
+  NumpadAdd: '4E', Numpad1: '4F', Numpad2: '50', Numpad3: '51', Numpad0: '52', NumpadDecimal: '53',
+  IntlBackslash: '56', F11: '57', F12: '58',
+  F13: '64', F14: '65', F15: '66', F16: '67', F17: '68', F18: '69', F19: '6A', F20: '6B', F21: '6C', F22: '6D',
+  F23: '6E', F24: '76',
+  NumpadEnter: 'E01C', NumpadDivide: 'E035', Home: 'E047', ArrowUp: 'E048', PageUp: 'E049', ArrowLeft: 'E04B',
+  ArrowRight: 'E04D', End: 'E04F', ArrowDown: 'E050', PageDown: 'E051', Insert: 'E052', Delete: 'E053',
+};
+
+/** Os dois lados do teclado valem para cada modificador. */
+const MODIFIER_SCAN_CODES: Record<string, string> = {
+  Ctrl: '1D|E01D',
+  Shift: '2A|36',
+  Alt: '38|E038',
+  Meta: 'E05B|E05C',
+};
+
+/**
+ * A combinação no formato do leitor de teclado nativo ("1D|E01D+2A|36+2F" para Ctrl + Shift + V): teclas separadas
+ * por "+", e cada tecla é a lista de códigos que a representam, separados por "|". `null` se alguma tecla não tem
+ * código conhecido (Pause, Print Screen...), e então o atalho só vale com o Coreto em foco.
+ */
+export function toScanSpec(keys: readonly string[] | null): string | null {
+  if (!keys || keys.length === 0 || keys.length > 8) return null;
+  const parts: string[] = [];
+  for (const key of orderKeys(keys)) {
+    const spec = MODIFIER_SCAN_CODES[key] ?? SCAN_CODES[key];
+    if (!spec) return null;
+    parts.push(spec);
+  }
+  return parts.join('+');
+}
+
 // ── Atalhos globais do app de desktop (Electron `globalShortcut`) ────────────
 
 const ELECTRON_KEYS: Record<string, string> = {

@@ -1,7 +1,7 @@
 {
   "name": "coreto-desktop",
   "productName": "Coreto",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "App de desktop do Coreto: abre o servidor configurado em coreto.config.json",
   "author": "PedroRagazzo",
   "license": "MIT",
@@ -11,9 +11,9 @@
   "scripts": {
     "start": "electron .",
     "icon": "node scripts/make-icon.js",
-    "audio-helper": "node scripts/build-audio-helper.js",
+    "native-helpers": "node scripts/build-native-helpers.js",
     "typecheck": "tsc --noEmit -p jsconfig.json",
-    "dist": "npm run icon && npm run audio-helper && electron-builder --win --publish never"
+    "dist": "npm run icon && npm run native-helpers && electron-builder --win --publish never"
   },
   "devDependencies": {
     "@resvg/resvg-js": "2.6.2",
@@ -38,6 +38,10 @@
       {
         "from": "native/bin/coreto-audio.exe",
         "to": "coreto-audio.exe"
+      },
+      {
+        "from": "native/bin/coreto-keys.exe",
+        "to": "coreto-keys.exe"
       }
     ],
     "win": {

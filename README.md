@@ -161,8 +161,20 @@ captura de áudio por processo do Windows 10 (a mesma que o Discord usa): ao com
 programa dela; ao compartilhar a **tela inteira** sai tudo menos o próprio Coreto. O helper escreve PCM de 16 bits,
 estéreo, 48 kHz; o processo principal repassa à página, que o toca numa faixa de áudio
 (`client/src/lib/app-audio.ts` e `client/public/app-audio.worklet.js`) e a junta ao vídeo. Sem o helper (ou fora do
-Windows) volta ao som do sistema inteiro na tela inteira. `npm run audio-helper` compila o helper (precisa do Visual
-Studio com as ferramentas de C++; o `npm run dist` já faz isso, e o `windows-latest` do GitHub Actions já tem).
+Windows) volta ao som do sistema inteiro na tela inteira. `npm run native-helpers` compila este helper e o dos atalhos
+(precisa do Visual Studio com as ferramentas de C++; o `npm run dist` já faz isso, e o `windows-latest` do GitHub
+Actions já tem).
+
+**Atalhos em jogos (a partir da 0.7.0):** o `globalShortcut` do Electron usa o `RegisterHotKey` do Windows, que não
+chega a um jogo em tela cheia, e não aceita uma tecla sozinha. Por isso há um segundo helper,
+`native/coreto-keys.exe`, que lê o teclado pelo Raw Input (`RIDEV_INPUTSINK`, sem hook e sem injetar nada em outros
+programas) e avisa o app quando uma combinação de atalho é apertada, com qualquer programa em primeiro plano. Não
+engole as teclas (o jogo continua recebendo tudo) e dispara quando todas as teclas do atalho estão apertadas, mesmo
+com outras seguradas (andar no jogo); havendo dois atalhos satisfeitos, vale o de mais teclas. O site manda a
+combinação em códigos de varredura (`toScanSpec`, em `shared/src/keybinds.ts`) e o app confere o formato antes de
+repassar ao helper. Sem o helper (desenvolvimento, ou fora do Windows) as combinações com modificador seguem pelo
+`globalShortcut`, como antes. Limite do Windows: se o jogo roda **como administrador**, o Coreto também precisa rodar
+como administrador para ver as teclas.
 
 **Botão de baixar no site:** a tela de login e Configurações → App de desktop (no navegador) têm o botão
 “Baixar para Windows”. Ele aponta para `/download`, que o servidor redireciona para o instalador da última release
@@ -462,10 +474,12 @@ guardado no aparelho (`localStorage`), porque o microfone do notebook não é o 
   `shared/src/call-sounds.ts`, com testes.
 - **Atalhos:** teclas para ativar/desativar o microfone e o som. Clique em Gravar e aperte a tecla ou as teclas juntas
   (até 4), como `V` ou `Shift + V`. Na janela valem para qualquer combinação, mas só durante uma chamada, e uma tecla
-  sem Ctrl/Alt/Win não dispara enquanto você digita num campo de texto. **No app de desktop** (a partir da 0.4.0),
-  combinações com um modificador e uma tecla comum, como `Ctrl + Shift + M`, valem também com o Coreto em segundo plano
-  (`globalShortcut` do Electron); a tela avisa quando outro programa já usa a combinação. Uma tecla sozinha não pode ser
-  global: pararia de funcionar em todos os outros programas.
+  sem Ctrl/Alt/Win não dispara enquanto você digita num campo de texto. **No app de desktop** (a partir da 0.7.0),
+  qualquer combinação, até uma tecla sozinha como `V`, vale em **qualquer programa, inclusive jogos em tela cheia**
+  (leitor de teclado nativo, veja "Atalhos em jogos" acima); a tela diz como cada atalho está valendo. Com o Coreto em
+  foco e você digitando, uma tecla sem Ctrl/Alt/Win continua sendo texto. Nas versões 0.4.0 a 0.6.0, só as combinações
+  com um modificador e uma tecla comum, como `Ctrl + Shift + M`, valiam com o Coreto em segundo plano (`globalShortcut`
+  do Electron), e não chegavam a jogos em tela cheia.
 - **Aparência:** tamanho do texto das mensagens (12 a 20 px) e modo compacto (uma linha por mensagem, sem avatar).
 - **App de desktop** (só no app): versão, estado da atualização com "Verificar agora" e "Reiniciar e atualizar", e
   "Abrir o Coreto ao ligar o computador". O site fala com o app por uma ponte mínima (`desktop/src/preload.cjs`), e o

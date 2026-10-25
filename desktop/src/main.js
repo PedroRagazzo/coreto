@@ -148,40 +148,147 @@ function configureUpdater() {
 const fromCoreto = (/** @type {Electron.IpcMainEvent | Electron.IpcMainInvokeEvent} */ event) =>
   mainWindow !== null && event.sender === mainWindow.webContents && isOurs(event.senderFrame?.url ?? '');
 
-// ── Atalhos que valem com o app em segundo plano ─────────────────────────────
+// ── Atalhos que valem com o app em segundo plano, ou com um jogo em primeiro plano ────────────
 
 const SHORTCUT_ACTIONS = ['mute', 'deafen'];
 
-/**
- * O site pede os atalhos de mutar (já com modificador, como "Ctrl+Shift+M"); cada pedido
- * substitui os anteriores. Responde quais conseguiu registrar: falha quando outro
- * programa já usa a combinação.
- * @param {unknown} accelerators
- */
-function setGlobalShortcuts(accelerators) {
-  globalShortcut.unregisterAll();
-  /** @type {Record<string, boolean>} */
-  const result = { mute: false, deafen: false };
-  if (!accelerators || typeof accelerators !== 'object') return result;
-  for (const action of SHORTCUT_ACTIONS) {
-    const accelerator = /** @type {Record<string, unknown>} */ (accelerators)[action];
-    if (typeof accelerator !== 'string' || accelerator.length > 40) continue;
-    try {
-      result[action] = globalShortcut.register(accelerator, () => mainWindow?.webContents.send('desktop:shortcut', action));
-    } catch {
-      // combinação que o Electron não reconhece: fica sem atalho global
+// O Electron (`globalShortcut`, que usa RegisterHotKey) não alcança um jogo em tela cheia: o Windows não entrega
+// esses atalhos a quem está atrás dele, e uma tecla sozinha, como "V", nem pode ser registrada. Quem vigia o teclado
+// é native/coreto-keys.exe (Raw Input), que avisa quando a combinação é apertada, em qualquer programa. Se ele não
+// existe (desenvolvimento, ou fora do Windows), as combinações com modificador seguem pelo `globalShortcut`.
+
+const KEYS_HELPER = app.isPackaged
+  ? join(process.resourcesPath, 'coreto-keys.exe')
+  : join(here, '..', 'native', 'bin', 'coreto-keys.exe');
+const keyWatcherAvailable = () => process.platform === 'win32' && existsSync(KEYS_HELPER);
+/** O formato que o helper entende (ver shared/src/keybinds.ts, `toScanSpec`). Nada além disso vai para a entrada dele. */
+const SCAN_SPEC = /^[0-9A-F]{2,4}(\|[0-9A-F]{2,4})*(\+[0-9A-F]{2,4}(\|[0-9A-F]{2,4})*){0,7}$/;
+const KEY_WATCHER_MAX_RESTARTS = 5;
+
+/** @type {import('node:child_process').ChildProcess | null} */
+let keyWatcher = null;
+/** Ação → combinação que o helper vigia agora. @type {Record<string, string>} */
+let watchedBinds = {};
+/** Ação → atalho do Electron que vale no lugar, se o helper cair de vez. @type {Record<string, string>} */
+let fallbackAccelerators = {};
+let keyWatcherRestarts = 0;
+
+/** Manda ao site que a ação foi pedida. @param {string} action */
+const fireShortcut = (action) => {
+  if (SHORTCUT_ACTIONS.includes(action) && mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('desktop:shortcut', action);
+  }
+};
+
+function pushWatchedBinds() {
+  const stdin = keyWatcher?.stdin;
+  if (!stdin?.writable) return;
+  for (const action of SHORTCUT_ACTIONS) stdin.write(`set ${action} ${watchedBinds[action] ?? ''}\n`);
+}
+
+function startKeyWatcher() {
+  if (keyWatcher || !keyWatcherAvailable()) return;
+  const child = spawn(KEYS_HELPER, [], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+  keyWatcher = child;
+  let pending = '';
+  child.stdout?.on('data', (/** @type {Buffer} */ chunk) => {
+    pending += chunk.toString();
+    let end;
+    while ((end = pending.indexOf('\n')) >= 0) {
+      const line = pending.slice(0, end).trim();
+      pending = pending.slice(end + 1);
+      if (line === 'ready') keyWatcherRestarts = 0;
+      else if (line.startsWith('fire ')) fireShortcut(line.slice(5));
     }
+    if (pending.length > 1024) pending = '';
+  });
+  child.stderr?.on('data', (/** @type {Buffer} */ line) => console.warn(`coreto-keys: ${line.toString().trim()}`));
+  const lost = () => {
+    if (keyWatcher !== child) return;
+    keyWatcher = null;
+    if (quitting || Object.keys(watchedBinds).length === 0) return;
+    if (keyWatcherRestarts < KEY_WATCHER_MAX_RESTARTS) {
+      keyWatcherRestarts++;
+      setTimeout(() => {
+        startKeyWatcher();
+        pushWatchedBinds();
+      }, keyWatcherRestarts * 1000).unref();
+      return;
+    }
+    // Não subiu de jeito nenhum: ao menos as combinações com modificador seguem pelo Windows.
+    console.warn('coreto-keys: o leitor de teclado não funciona; usando só os atalhos do sistema.');
+    for (const [action, accelerator] of Object.entries(fallbackAccelerators)) {
+      try {
+        globalShortcut.register(accelerator, () => fireShortcut(action));
+      } catch {
+        // combinação que o Electron não reconhece
+      }
+    }
+  };
+  child.on('error', lost);
+  child.on('exit', lost);
+  pushWatchedBinds();
+}
+
+function stopKeyWatcher() {
+  const child = keyWatcher;
+  keyWatcher = null;
+  if (!child) return;
+  // Fechar a entrada é o aviso combinado para o helper parar; o kill é só garantia.
+  child.stdin?.destroy();
+  setTimeout(() => child.kill(), 1000).unref();
+}
+
+/**
+ * O site pede os atalhos de mutar e de ensurdecer; cada pedido substitui os anteriores. Cada atalho vem com a
+ * combinação no formato do helper (`spec`, qualquer combinação) e, se tem modificador, o acelerador do Electron
+ * (`accelerator`), para o caso de o helper não existir. Responde como cada um ficou: `watcher` (vale em qualquer
+ * programa, inclusive jogos), `hotkey` (vale com o Coreto em segundo plano), `taken` (outro programa já usa a
+ * combinação) ou `off` (só vale com o Coreto em foco).
+ * @param {unknown} binds
+ */
+function setKeyBinds(binds) {
+  globalShortcut.unregisterAll();
+  /** @type {Record<string, string>} */
+  const result = { mute: 'off', deafen: 'off' };
+  watchedBinds = {};
+  fallbackAccelerators = {};
+  for (const action of SHORTCUT_ACTIONS) {
+    const item = binds && typeof binds === 'object' ? /** @type {Record<string, any>} */ (binds)[action] : null;
+    const spec = typeof item?.spec === 'string' && SCAN_SPEC.test(item.spec) ? item.spec : null;
+    const accelerator = typeof item?.accelerator === 'string' && item.accelerator.length <= 40 ? item.accelerator : null;
+    if (accelerator) fallbackAccelerators[action] = accelerator;
+    if (spec && keyWatcherAvailable()) {
+      watchedBinds[action] = spec;
+      result[action] = 'watcher';
+    } else if (accelerator) {
+      try {
+        result[action] = globalShortcut.register(accelerator, () => fireShortcut(action)) ? 'hotkey' : 'taken';
+      } catch {
+        // combinação que o Electron não reconhece: fica sem atalho global
+      }
+    }
+  }
+  if (Object.keys(watchedBinds).length > 0) {
+    keyWatcherRestarts = 0;
+    startKeyWatcher();
+    pushWatchedBinds();
+  } else {
+    stopKeyWatcher();
   }
   return result;
 }
 
 function registerBridge() {
-  ipcMain.handle('desktop:set-global-shortcuts', (event, accelerators) =>
-    fromCoreto(event) ? setGlobalShortcuts(accelerators) : null,
-  );
+  ipcMain.handle('desktop:set-key-binds', (event, binds) => (fromCoreto(event) ? setKeyBinds(binds) : null));
   // Versão e sistema não são segredo; responde sempre (o preload espera a resposta).
   ipcMain.on('desktop:info', (event) => {
-    event.returnValue = { version: app.getVersion(), platform: process.platform, appAudio: appAudioAvailable() };
+    event.returnValue = {
+      version: app.getVersion(),
+      platform: process.platform,
+      appAudio: appAudioAvailable(),
+      keyWatcher: keyWatcherAvailable(),
+    };
   });
   ipcMain.handle('desktop:update-state', (event) => (fromCoreto(event) ? updateState : null));
   ipcMain.handle('desktop:check-updates', async (event) => {
@@ -550,6 +657,7 @@ if (!app.requestSingleInstanceLock()) {
   });
   app.on('will-quit', () => {
     globalShortcut.unregisterAll();
+    stopKeyWatcher();
     stopAppAudio();
   });
 

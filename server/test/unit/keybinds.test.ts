@@ -8,6 +8,7 @@ import {
   orderKeys,
   sameKeys,
   toGlobalAccelerator,
+  toScanSpec,
 } from '../../../shared/src/keybinds.js';
 
 const press = (tracker: KeyTracker, ...codes: string[]) => codes.forEach((code) => tracker.press({ code }));
@@ -86,6 +87,50 @@ describe('KeyTracker', () => {
     press(tracker, 'ControlLeft', 'KeyM');
     tracker.clear();
     expect(tracker.keys()).toEqual([]);
+  });
+});
+
+describe('toScanSpec', () => {
+  it('traduz uma tecla sozinha para o código de varredura', () => {
+    expect(toScanSpec(['KeyV'])).toBe('2F');
+    expect(toScanSpec(['F13'])).toBe('64');
+    expect(toScanSpec(['Space'])).toBe('39');
+    expect(toScanSpec(['Digit0'])).toBe('0B');
+    expect(toScanSpec(['Numpad5'])).toBe('4C');
+  });
+
+  it('as teclas estendidas levam o prefixo E0', () => {
+    expect(toScanSpec(['ArrowUp'])).toBe('E048');
+    expect(toScanSpec(['NumpadEnter'])).toBe('E01C');
+    expect(toScanSpec(['Delete'])).toBe('E053');
+  });
+
+  it('um modificador vale pelos dois lados do teclado, e a ordem é a de sempre', () => {
+    expect(toScanSpec(['KeyV', 'Shift', 'Ctrl'])).toBe('1D|E01D+2A|36+2F');
+    expect(toScanSpec(['Meta', 'KeyM'])).toBe('E05B|E05C+32');
+    expect(toScanSpec(['Alt', 'F9'])).toBe('38|E038+43');
+  });
+
+  it('serve para combinações que o Electron não aceita como atalho global (sem modificador, várias teclas)', () => {
+    expect(toGlobalAccelerator(['KeyV'])).toBeNull();
+    expect(toScanSpec(['KeyV'])).toBe('2F');
+    expect(toGlobalAccelerator(['KeyA', 'KeyB'])).toBeNull();
+    expect(toScanSpec(['KeyA', 'KeyB'])).toBe('1E+30');
+  });
+
+  it('recusa o que não tem código conhecido, ou não é uma combinação', () => {
+    expect(toScanSpec(['Pause'])).toBeNull();
+    expect(toScanSpec(['PrintScreen'])).toBeNull();
+    expect(toScanSpec(['Ctrl', 'Pause'])).toBeNull();
+    expect(toScanSpec(null)).toBeNull();
+    expect(toScanSpec([])).toBeNull();
+  });
+
+  it('todo código gerado é aceito pelo leitor: hexadecimal de 2 a 4 dígitos, separadores + e |', () => {
+    const format = /^[0-9A-F]{2,4}(\|[0-9A-F]{2,4})*(\+[0-9A-F]{2,4}(\|[0-9A-F]{2,4})*)*$/;
+    for (const code of ['KeyA', 'Digit5', 'F1', 'F24', 'Numpad0', 'NumpadEnter', 'Insert', 'Backquote', 'IntlBackslash']) {
+      expect(toScanSpec(['Ctrl', code])).toMatch(format);
+    }
   });
 });
 

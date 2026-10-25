@@ -1,6 +1,6 @@
 import { soundsForChange, type CallSnapshot } from '@shared/call-sounds';
 import { useEffect, useRef, useSyncExternalStore } from 'react';
-import { desktop } from '../lib/desktop';
+import { desktop, type KeyBindMode } from '../lib/desktop';
 import {
   hasCommandModifier,
   isTypingTarget,
@@ -8,6 +8,7 @@ import {
   KeyTracker,
   sameKeys,
   toGlobalAccelerator,
+  toScanSpec,
   type KeybindAction,
 } from '../lib/keybinds';
 import { playSound } from '../lib/sounds';
@@ -57,8 +58,17 @@ export function CallSounds() {
 
 // ── Atalhos de teclado ───────────────────────────────────────────────────────
 
-/** Como cada atalho está valendo no app de desktop. */
-export type GlobalStatus = 'off' | 'active' | 'taken';
+/**
+ * Como cada atalho está valendo no app de desktop: `game` em qualquer programa (inclusive um jogo em tela cheia),
+ * `active` com o Coreto em segundo plano, `taken` outro programa já usa a combinação, `off` só com o Coreto em foco.
+ */
+export type GlobalStatus = 'off' | 'active' | 'game' | 'taken';
+
+/** O atalho vale fora do Coreto (e então o Windows ou o leitor de teclado o entregam pelo app, não a janela)? */
+const isGlobal = (status: GlobalStatus) => status === 'active' || status === 'game';
+
+const statusOf = (mode: KeyBindMode | undefined): GlobalStatus =>
+  mode === 'watcher' ? 'game' : mode === 'hotkey' ? 'active' : mode === 'taken' ? 'taken' : 'off';
 
 let globalStatus: Record<KeybindAction, GlobalStatus> = { mute: 'off', deafen: 'off' };
 const listeners = new Set<() => void>();
@@ -67,7 +77,7 @@ const setGlobalStatus = (next: Record<KeybindAction, GlobalStatus>) => {
   listeners.forEach((l) => l());
 };
 
-/** No app de desktop: o atalho vale com o Coreto em segundo plano ("active"), ou outro programa já o usa ("taken"). */
+/** No app de desktop: como cada atalho vale fora do Coreto (ver `GlobalStatus`). */
 export function useGlobalShortcutStatus(): Record<KeybindAction, GlobalStatus> {
   return useSyncExternalStore(
     (listener) => {
@@ -79,8 +89,9 @@ export function useGlobalShortcutStatus(): Record<KeybindAction, GlobalStatus> {
 }
 
 /**
- * Atalhos para mutar o microfone e o som. Na janela valem para qualquer combinação; no app
- * de desktop, as que têm Ctrl, Alt, Shift ou Win também valem com o Coreto em segundo plano.
+ * Atalhos para mutar o microfone e o som. Na janela valem para qualquer combinação. No app de desktop, qualquer
+ * combinação (até uma tecla sozinha) vale em qualquer programa, inclusive um jogo em tela cheia; no app antigo, só as
+ * que têm Ctrl, Alt, Shift ou Win valem com o Coreto em segundo plano.
  */
 export function Shortcuts() {
   const { actions } = useRealtime();
@@ -88,6 +99,8 @@ export function Shortcuts() {
   const { mute, deafen } = settings.keybinds;
   const actionsRef = useRef(actions);
   actionsRef.current = actions;
+  const bindsRef = useRef({ mute, deafen });
+  bindsRef.current = { mute, deafen };
 
   const run = useRef((action: KeybindAction) => {
     if (action === 'mute') actionsRef.current.toggleMute();
@@ -107,7 +120,7 @@ export function Shortcuts() {
       if (event.repeat) return;
       for (const [action, bind] of binds) {
         // Se o atalho já vale no sistema inteiro, o Windows o entrega pelo app: não dispare duas vezes.
-        if (!bind || globalStatus[action] === 'active' || !sameKeys(keys, bind)) continue;
+        if (!bind || isGlobal(globalStatus[action]) || !sameKeys(keys, bind)) continue;
         // Digitando, uma tecla sozinha (ou com Shift) é texto, não atalho.
         if (isTypingTarget(event.target) && !hasCommandModifier(bind)) continue;
         event.preventDefault();
@@ -127,18 +140,37 @@ export function Shortcuts() {
     };
   }, [mute, deafen]);
 
-  // No sistema inteiro (só no app de desktop, e só com um modificador na combinação).
+  // Fora da janela (só no app de desktop).
   useEffect(() => {
-    if (!desktop?.setGlobalShortcuts) return;
+    if (!desktop?.setKeyBinds && !desktop?.setGlobalShortcuts) return;
     const accelerators = { mute: toGlobalAccelerator(mute), deafen: toGlobalAccelerator(deafen) };
     let current = true;
-    void desktop.setGlobalShortcuts(accelerators).then((result) => {
-      if (!current) return;
-      const status = (action: KeybindAction): GlobalStatus =>
-        !accelerators[action] ? 'off' : result?.[action] ? 'active' : 'taken';
-      setGlobalStatus({ mute: status('mute'), deafen: status('deafen') });
+    if (desktop.setKeyBinds) {
+      // App novo: o leitor de teclado vigia qualquer combinação, e o atalho do Windows fica de reserva.
+      void desktop
+        .setKeyBinds({
+          mute: { spec: toScanSpec(mute), accelerator: accelerators.mute },
+          deafen: { spec: toScanSpec(deafen), accelerator: accelerators.deafen },
+        })
+        .then((result) => {
+          if (current) setGlobalStatus({ mute: statusOf(result?.mute), deafen: statusOf(result?.deafen) });
+        });
+    } else {
+      // App antigo: só atalho do Windows, e só com um modificador na combinação.
+      void desktop.setGlobalShortcuts?.(accelerators).then((result) => {
+        if (!current) return;
+        const status = (action: KeybindAction): GlobalStatus =>
+          !accelerators[action] ? 'off' : result?.[action] ? 'active' : 'taken';
+        setGlobalStatus({ mute: status('mute'), deafen: status('deafen') });
+      });
+    }
+    const stop = desktop.onShortcut?.((action) => {
+      if (keybindRecording.active) return;
+      // Com o Coreto em foco e você digitando, uma tecla sozinha (ou com Shift) é texto, não atalho: a mesma regra da janela.
+      const bind = bindsRef.current[action];
+      if (document.hasFocus() && isTypingTarget(document.activeElement) && bind && !hasCommandModifier(bind)) return;
+      run.current(action);
     });
-    const stop = desktop.onShortcut?.((action) => run.current(action));
     return () => {
       current = false;
       stop?.();

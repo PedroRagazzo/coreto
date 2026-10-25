@@ -33,12 +33,20 @@ export interface AppAudioBridge {
   stop(id: number): void;
 }
 
+/**
+ * Como um atalho ficou: `watcher` vale em qualquer programa, inclusive um jogo em tela cheia; `hotkey` vale com o Coreto em
+ * segundo plano (atalho do Windows); `taken`, outro programa já usa a combinação; `off`, só vale com o Coreto em foco.
+ */
+export type KeyBindMode = 'watcher' | 'hotkey' | 'taken' | 'off';
+
 export interface DesktopBridge {
   /** Versão do app instalado. */
   version: string;
   platform: string;
   /** Só no app de desktop do Windows com o helper de som por programa (0.5.0 em diante). */
   appAudio?: AppAudioBridge;
+  /** O app tem o leitor de teclado nativo: os atalhos valem com um jogo em primeiro plano (0.7.0 em diante). */
+  keyWatcher?: boolean;
   /** Nome da tela ou janela escolhida no seletor, para mostrar o que está sendo compartilhado. Ausente antes da 0.5.1. */
   getCaptureName?(): Promise<string | null>;
   getUpdateState(): Promise<UpdateState>;
@@ -58,6 +66,12 @@ export interface DesktopBridge {
    * (falha se outro programa já usa a combinação). Ausente antes da versão 0.4.0.
    */
   setGlobalShortcuts?(accelerators: Record<KeybindAction, string | null>): Promise<Record<KeybindAction, boolean> | null>;
+  /**
+   * Os atalhos que valem fora do Coreto, no lugar de `setGlobalShortcuts` (0.7.0 em diante). Cada um leva a combinação no
+   * formato do leitor de teclado (`spec`, qualquer combinação, até uma tecla sozinha) e, se tem modificador, o acelerador
+   * do Electron, para o caso de o leitor não existir. Substitui os anteriores e resolve com como cada um ficou.
+   */
+  setKeyBinds?(binds: Record<KeybindAction, { spec: string | null; accelerator: string | null }>): Promise<Record<KeybindAction, KeyBindMode> | null>;
   /** Um atalho global foi apertado. */
   onShortcut?(listener: (action: KeybindAction) => void): () => void;
   /** Traz o Coreto para a frente (da bandeja ou minimizado), ao clicar numa notificação. Ausente antes da 0.6.0. */

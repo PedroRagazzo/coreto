@@ -1,6 +1,6 @@
 // Ponte entre o site do Coreto e o app de desktop: só o necessário para a tela
 // "App de desktop" das configurações (versão, atualização, bandeja e abrir com o Windows)
-// e os atalhos de mutar que valem com o Coreto em segundo plano.
+// e os atalhos de mutar que valem com o Coreto em segundo plano ou com um jogo em primeiro plano.
 // O site continua sem acesso ao Node; o processo principal confere a origem.
 const { contextBridge, ipcRenderer } = require('electron');
 
@@ -34,6 +34,8 @@ contextBridge.exposeInMainWorld('coretoDesktop', {
   version: info.version,
   platform: info.platform,
   appAudio,
+  // Há o leitor de teclado nativo (atalhos que valem com um jogo em primeiro plano).
+  keyWatcher: Boolean(info.keyWatcher),
   getCaptureName: () => ipcRenderer.invoke('desktop:capture-name'),
   getUpdateState: () => ipcRenderer.invoke('desktop:update-state'),
   checkForUpdates: () => ipcRenderer.invoke('desktop:check-updates'),
@@ -47,7 +49,7 @@ contextBridge.exposeInMainWorld('coretoDesktop', {
   setOpenAtLogin: (/** @type {boolean} */ open) => ipcRenderer.invoke('desktop:set-open-at-login', Boolean(open)),
   getCloseToTray: () => ipcRenderer.invoke('desktop:get-close-to-tray'),
   setCloseToTray: (/** @type {boolean} */ enabled) => ipcRenderer.invoke('desktop:set-close-to-tray', Boolean(enabled)),
-  setGlobalShortcuts: (/** @type {unknown} */ accelerators) => ipcRenderer.invoke('desktop:set-global-shortcuts', accelerators),
+  setKeyBinds: (/** @type {unknown} */ binds) => ipcRenderer.invoke('desktop:set-key-binds', binds),
   // Clicar numa notificação traz a janela de volta, mesmo escondida na bandeja ou minimizada.
   focusWindow: () => ipcRenderer.send('desktop:focus-window'),
   onShortcut: (/** @type {(action: unknown) => void} */ listener) => {

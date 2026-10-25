@@ -32,7 +32,9 @@ export function ShortcutSettings() {
   const status = useGlobalShortcutStatus();
   const [message, setMessage] = useState<string | null>(null);
   const keybinds = settings.keybinds;
-  const canGlobal = Boolean(desktop?.setGlobalShortcuts);
+  const canGlobal = Boolean(desktop?.setKeyBinds || desktop?.setGlobalShortcuts);
+  /** O app tem o leitor de teclado: qualquer combinação vale em qualquer programa, inclusive jogos em tela cheia. */
+  const watcher = Boolean(desktop?.setKeyBinds);
 
   const setBind = (action: KeybindAction, keys: string[] | null) => {
     const other = keybinds[action === 'mute' ? 'deafen' : 'mute'];
@@ -56,6 +58,7 @@ export function ShortcutSettings() {
           description={description}
           keys={keybinds[action]}
           global={canGlobal ? status[action] : null}
+          watcher={watcher}
           onChange={(keys) => setBind(action, keys)}
         />
       ))}
@@ -65,18 +68,22 @@ export function ShortcutSettings() {
         </p>
       )}
       <p className="mt-4 text-xs text-faint">
-        {canGlobal
-          ? 'No app de desktop, combinações com Ctrl, Alt, Shift ou Win também funcionam com o Coreto em segundo plano, por exemplo jogando. Uma tecla sozinha, como V, só funciona com o Coreto em foco.'
-          : 'No navegador, os atalhos só funcionam com a aba do Coreto em foco. No app de desktop, combinações com Ctrl, Alt, Shift ou Win funcionam também em segundo plano.'}
+        {watcher
+          ? 'No app de desktop, qualquer combinação (até uma tecla sozinha, como V) funciona em qualquer programa, inclusive jogos em tela cheia. Se o jogo roda como administrador, abra o Coreto como administrador também, senão o Windows não deixa o Coreto ver as teclas.'
+          : canGlobal
+            ? 'No app de desktop, combinações com Ctrl, Alt, Shift ou Win também funcionam com o Coreto em segundo plano. Uma tecla sozinha, como V, só funciona com o Coreto em foco. Atualize o app para os atalhos valerem também em jogos em tela cheia.'
+            : 'No navegador, os atalhos só funcionam com a aba do Coreto em foco. O app de desktop faz os atalhos valerem em qualquer programa, inclusive jogos em tela cheia.'}
       </p>
     </SettingsGroup>
   );
 }
 
-function globalNote(keys: string[], global: GlobalStatus | null): string | null {
+function globalNote(keys: string[], global: GlobalStatus | null, watcher: boolean): string | null {
   if (global === null) return null;
+  if (global === 'game') return 'Vale em qualquer programa, inclusive jogos em tela cheia.';
   if (global === 'active') return 'Vale também com o Coreto em segundo plano.';
   if (global === 'taken') return 'Outro programa já usa esta combinação: ela só vale com o Coreto em foco.';
+  if (watcher) return 'Esta tecla não pode valer fora do Coreto. Escolha outra.';
   return toGlobalAccelerator(keys)
     ? null
     : 'Só vale com o Coreto em foco. Para valer fora dele, use um modificador (Ctrl, Alt, Shift ou Win) mais uma tecla.';
@@ -87,12 +94,14 @@ function KeybindRow({
   description,
   keys,
   global,
+  watcher,
   onChange,
 }: {
   label: string;
   description: string;
   keys: string[] | null;
   global: GlobalStatus | null;
+  watcher: boolean;
   onChange: (keys: string[] | null) => void;
 }) {
   const [recording, setRecording] = useState(false);
@@ -153,7 +162,7 @@ function KeybindRow({
     : keys
       ? formatKeybind(keys)
       : 'Sem atalho';
-  const note = !recording && keys ? globalNote(keys, global) : null;
+  const note = !recording && keys ? globalNote(keys, global, watcher) : null;
 
   return (
     <div className="border-b border-line py-3 first:pt-0 last:border-0">
