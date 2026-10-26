@@ -124,6 +124,15 @@ describe('rodada de backup', () => {
     expect(await readdir(config.dir)).toContain('coreto-20261022-050000.dump.tmp');
   });
 
+  it('não espelha anexo grande (dobraria o espaço do disco), só os pequenos', async () => {
+    const withUploads = { ...config, uploadDir: join(root, 'up') };
+    await writeFile(join(root, 'up', UUID_A), 'pequeno');
+    await writeFile(join(root, 'up', UUID_B), Buffer.alloc(9 * 1024 * 1024, 1));
+    const result = await runBackup(withUploads, { dump: fakeDump(), now: at(1) });
+    expect(result.uploads).toEqual({ copied: 1, removed: 0 });
+    expect(await readdir(join(config.dir, 'uploads'))).toEqual([UUID_A]);
+  });
+
   it('espelha as imagens junto: copia as novas e ignora o que não é imagem enviada', async () => {
     const withUploads = { ...config, uploadDir: join(root, 'up') };
     await writeFile(join(root, 'up', UUID_A), 'a');

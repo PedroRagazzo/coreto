@@ -103,7 +103,7 @@ export interface VoiceObserver {
 /** Um anexo do pedido não existe, é de outra pessoa ou já está em outra mensagem. */
 export class AttachmentUnavailableError extends Error {
   constructor() {
-    super('Anexo indisponível. Envie a imagem de novo.');
+    super('Anexo indisponível. Envie o arquivo de novo.');
   }
 }
 
@@ -112,8 +112,8 @@ export interface NewAttachment {
   fileName: string;
   contentType: string;
   size: number;
-  width: number;
-  height: number;
+  width: number | null;
+  height: number | null;
 }
 
 /** Quem ganha e quem perde a menção de uma mensagem ao editá-la. */
@@ -559,13 +559,15 @@ export class Store {
    * aparecer no texto normalizado (sem acentos, minúsculo).
    */
   async search(
-    where: { channelIds?: Id[]; directId?: Id; words: string[]; authorId?: Id; has?: 'image' | 'link'; before?: Id },
+    where: { channelIds?: Id[]; directId?: Id; words: string[]; authorId?: Id; has?: 'image' | 'file' | 'link'; before?: Id },
     limit = 25,
   ): Promise<{ messages: Message[]; total: number }> {
     const filter = {
       ...(where.directId ? { directId: where.directId } : { channelId: { in: where.channelIds ?? [] } }),
       ...(where.authorId && { authorId: where.authorId }),
-      ...(where.has === 'image' && { attachments: { some: {} } }),
+      // Imagem tem dimensões; arquivo, não.
+      ...(where.has === 'image' && { attachments: { some: { width: { not: null } } } }),
+      ...(where.has === 'file' && { attachments: { some: { width: null } } }),
       AND: [
         // O Prisma passa `contains` direto para o LIKE: sem escape, "%" e "_" seriam curingas.
         ...where.words.map((word) => ({ searchText: { contains: word.replace(/[\\%_]/g, '\\$&') } })),
@@ -773,6 +775,12 @@ export class Store {
   /** Registra um anexo ainda solto (sem mensagem). Grave o arquivo depois disso. */
   async createAttachment(input: NewAttachment): Promise<Attachment> {
     return toAttachment(await this.db.attachment.create({ data: input }));
+  }
+
+  /** Quanto espaço os anexos já ocupam, em bytes (para a cota de espaço do servidor). */
+  async attachmentBytes(): Promise<number> {
+    const { _sum } = await this.db.attachment.aggregate({ _sum: { size: true } });
+    return _sum.size ?? 0;
   }
 
   async discardAttachment(id: Id): Promise<void> {

@@ -59,16 +59,20 @@ export class TestServer {
     private readonly sfu: SfuConfig | null = null,
     /** Pré-visualização de links, só nos testes dela (os de verdade nunca visitam a rede interna). */
     private readonly embeds?: EmbedService,
+    /** Espaço máximo dos anexos, só nos testes da cota. */
+    private readonly uploadQuotaBytes?: number,
   ) {}
 
   /** Apaga o banco de teste, recria os dados de demonstração e sobe o servidor. */
-  static async start(options: { music?: MusicFactory; sfu?: SfuConfig; embeds?: EmbedService } = {}): Promise<TestServer> {
+  static async start(
+    options: { music?: MusicFactory; sfu?: SfuConfig; embeds?: EmbedService; uploadQuotaBytes?: number } = {},
+  ): Promise<TestServer> {
     if (!TEST_DATABASE_URL) throw new Error('TEST_DATABASE_URL não definida.');
     assertTestDatabase(TEST_DATABASE_URL);
     const db = createDb(TEST_DATABASE_URL);
     await resetDatabase(db);
     await seedIfEmpty(db);
-    const harness = new TestServer(db, await mkdtemp(join(tmpdir(), 'coreto-uploads-')), options.music, options.sfu ?? null, options.embeds);
+    const harness = new TestServer(db, await mkdtemp(join(tmpdir(), 'coreto-uploads-')), options.music, options.sfu ?? null, options.embeds, options.uploadQuotaBytes);
     await harness.boot();
     return harness;
   }
@@ -165,6 +169,7 @@ export class TestServer {
       ice: iceConfigFromEnv({}),
       sfu: this.sfu,
       embeds: this.embeds,
+      uploadQuotaBytes: this.uploadQuotaBytes,
       music: this.music,
     });
   }

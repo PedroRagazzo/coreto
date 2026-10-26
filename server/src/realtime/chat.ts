@@ -128,7 +128,7 @@ export function registerChat(
     const target = messageTarget(store, userId, req?.channelId, 'write');
     if (!target) return ack({ ok: false, error: 'Você não tem permissão para escrever aqui.' });
     const attachmentIds = readAttachmentIds(req.attachmentIds);
-    if (!attachmentIds) return ack({ ok: false, error: `Até ${MAX_ATTACHMENTS_PER_MESSAGE} imagens por mensagem.` });
+    if (!attachmentIds) return ack({ ok: false, error: `Até ${MAX_ATTACHMENTS_PER_MESSAGE} arquivos por mensagem.` });
     const valid = validateContent(req.content, attachmentIds.length > 0);
     if (!valid.ok) return ack(valid);
     // Responder: a original precisa estar neste mesmo canal ou conversa; quem escreveu a original é avisado como numa menção.
@@ -381,7 +381,7 @@ export function registerChat(
     const words = typeof req?.text === 'string' ? searchWords(req.text) : [];
     const authorId = typeof req?.authorId === 'string' ? req.authorId : undefined;
     const channelId = typeof req?.channelId === 'string' ? req.channelId : undefined;
-    const has = req?.has === 'image' || req?.has === 'link' ? req.has : undefined;
+    const has = req?.has === 'image' || req?.has === 'file' || req?.has === 'link' ? req.has : undefined;
     const before = typeof req?.before === 'string' ? req.before : undefined;
     if (words.length === 0 && !authorId && !channelId && !has) {
       return ack({ ok: false, error: 'Digite algo ou escolha um filtro para buscar.' });

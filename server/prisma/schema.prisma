@@ -293,8 +293,9 @@ model Attachment {
   fileName    String   @db.VarChar(255)
   contentType String   @db.VarChar(50)
   size        Int
-  width       Int
-  height      Int
+  /// Dimensões da imagem; nulas quando o anexo é um arquivo qualquer.
+  width       Int?
+  height      Int?
   createdAt   DateTime @default(now())
 
   @@index([messageId])

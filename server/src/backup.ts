@@ -1,5 +1,5 @@
 // Backup do banco: uma cópia do PostgreSQL (pg_dump, formato custom, já compactado) por dia, mais um espelho das
-// imagens enviadas, que o banco não guarda. Roda dentro do próprio servidor, sem agendamento de fora.
+// anexos pequenos (imagens e arquivos até 8 MB), que o banco não guarda. Roda dentro do próprio servidor, sem agendamento de fora.
 //
 // As cópias ficam em BACKUP_DIR (um volume): protegem contra erro humano e banco corrompido, não contra perder a VPS.
 // A senha do banco nunca vai na linha de comando (apareceria em `ps` e em mensagens de erro): vai pelo ambiente do pg_dump.
@@ -7,10 +7,13 @@
 import { execFile } from 'node:child_process';
 import { copyFile, mkdir, readdir, rename, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
+import { MAX_IMAGE_BYTES } from '../../shared/src/protocol.js';
 
 const DAY_MS = 24 * 60 * 60_000;
 const DUMP_NAME = /^coreto-(\d{8})-(\d{6})\.dump$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/** Anexos maiores que isso não entram no espelho: arquivos grandes dobrariam o espaço usado no disco. */
+const MIRROR_MAX_FILE_BYTES = MAX_IMAGE_BYTES;
 /** Quanto tempo uma imagem apagada do servidor ainda fica no espelho (ela pode estar numa cópia do banco que você restaure). */
 const MIRROR_GRACE_MS = 30 * DAY_MS;
 /** Depois de uma falha, tenta de novo daqui a pouco, e não só no dia seguinte. */
@@ -134,7 +137,10 @@ export async function lastBackupAt(dir: string): Promise<number | null> {
   return last ? dumpTime(last) : null;
 }
 
-/** Copia para `dest` as imagens que ainda não estão lá e tira as que sumiram do servidor há mais de um mês. */
+/**
+ * Copia para `dest` os anexos pequenos (até 8 MB) que ainda não estão lá e tira os que sumiram do servidor há mais de um
+ * mês. Os grandes ficam de fora: copiá-los dobraria o espaço que os arquivos ocupam no disco.
+ */
 export async function mirrorUploads(src: string, dest: string, now: number): Promise<{ copied: number; removed: number }> {
   await mkdir(dest, { recursive: true });
   const live = new Set((await readdir(src).catch(() => [] as string[])).filter((name) => UUID.test(name)));
@@ -143,6 +149,8 @@ export async function mirrorUploads(src: string, dest: string, now: number): Pro
   let copied = 0;
   for (const name of live) {
     if (kept.has(name)) continue;
+    const size = await stat(join(src, name)).then((s) => s.size, () => null);
+    if (size === null || size > MIRROR_MAX_FILE_BYTES) continue;
     // Copia para um nome provisório e renomeia: uma imagem pela metade nunca parece completa.
     await copyFile(join(src, name), join(dest, `${name}.tmp`));
     await rename(join(dest, `${name}.tmp`), join(dest, name));

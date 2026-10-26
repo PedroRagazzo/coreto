@@ -20,7 +20,7 @@ import { sfuConfigFromEnv, type SfuConfig } from './sfu.js';
 import type { Store } from './store.js';
 import { serveClient } from './static.js';
 import { iceConfigFromEnv, type IceConfig } from './turn.js';
-import { handleUpload, readBody, serveUpload, UploadDir } from './uploads.js';
+import { handleUpload, readBody, serveUpload, UploadDir, uploadQuotaFromEnv } from './uploads.js';
 
 const MAX_BODY_BYTES = 2_048;
 
@@ -30,6 +30,8 @@ export interface ServerOptions {
   clientOrigins: string[];
   /** Pasta dos anexos; é criada se não existir. */
   uploadDir: string;
+  /** Espaço máximo dos anexos, em bytes (ver `uploadQuotaFromEnv`); sem ele, o padrão do ambiente. */
+  uploadQuotaBytes?: number;
   /** Padrão: lido das variáveis de ambiente (ver turn.ts). */
   ice?: IceConfig;
   /** Pré-visualização de links (ver embeds/service.ts); sem ele, o servidor cria o padrão. */
@@ -52,10 +54,10 @@ export interface RunningServer {
 /** Sobe o HTTP (saúde, login e anexos) + socket.io sobre um Store já carregado. */
 export async function startServer(
   store: Store,
-  { port, clientOrigins, uploadDir, ice = iceConfigFromEnv(), sfu = sfuConfigFromEnv(), clientDist = null, music: createMusic, embeds = createEmbeds() }: ServerOptions,
+  { port, clientOrigins, uploadDir, uploadQuotaBytes = uploadQuotaFromEnv(process.env), ice = iceConfigFromEnv(), sfu = sfuConfigFromEnv(), clientDist = null, music: createMusic, embeds = createEmbeds() }: ServerOptions,
 ): Promise<RunningServer> {
   const throttle = new LoginThrottle();
-  const uploads = new UploadDir(uploadDir);
+  const uploads = new UploadDir(uploadDir, uploadQuotaBytes);
   await uploads.ensure();
   const installer = new LatestInstaller();
   // O site precisa poder falar com o servidor de mídia (ws → http, wss → https).
@@ -75,7 +77,7 @@ export async function startServer(
       if (preflight(req, res, clientOrigins, 'POST', 'authorization, content-type, x-file-name')) return;
       return void handleUpload(req, res, store, uploads).catch((err: unknown) => {
         console.error('[upload]', err);
-        if (!res.headersSent) sendJson(res, 500, { ok: false, error: 'Não foi possível guardar a imagem.' });
+        if (!res.headersSent) sendJson(res, 500, { ok: false, error: 'Não foi possível guardar o arquivo.' });
       });
     }
     const embedImage = /^\/embed-image\/([0-9a-f-]{36})$/.exec(path);
@@ -96,8 +98,8 @@ export async function startServer(
       });
     }
     const file = /^\/uploads\/([^/]+)$/.exec(path);
-    if (file && req.method === 'GET') {
-      return void serveUpload(file[1], res, store, uploads).catch((err: unknown) => {
+    if (file && (req.method === 'GET' || req.method === 'HEAD')) {
+      return void serveUpload(file[1], res, store, uploads, req.method === 'HEAD').catch((err: unknown) => {
         console.error('[upload]', err);
         if (!res.headersSent) res.writeHead(500).end();
       });

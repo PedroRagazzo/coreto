@@ -44,7 +44,7 @@ import type { Identity } from '../lib/identity';
 import { createSocket, type AppSocket } from '../lib/socket';
 import { useWindowActive, isWindowActive } from '../lib/focus';
 import { bringWindowToFront, showToast } from '../lib/notifications';
-import { uploadImage, type UploadHandle } from '../lib/uploads';
+import { uploadFile, type UploadHandle } from '../lib/uploads';
 import { DEFAULT_SETTINGS } from '../lib/settings';
 import { displayNameOf } from './selectors';
 import { useSettings } from './settings';
@@ -743,8 +743,8 @@ export interface RealtimeActions {
   cancelReply(): void;
   /** Reage à mensagem com o emoji, ou tira a reação se já tinha. Resolve com erro ou `null`. */
   toggleReaction(messageId: Id, emoji: string): Promise<string | null>;
-  /** Envia uma imagem para anexar depois em `sendMessage`. */
-  uploadImage(file: File, onProgress: (fraction: number) => void): UploadHandle;
+  /** Envia uma imagem ou um arquivo para anexar depois em `sendMessage`. */
+  uploadFile(file: File, onProgress: (fraction: number) => void): UploadHandle;
   /** Busca a página anterior à mensagem mais antiga carregada. */
   loadOlder(targetId: Id): void;
   /** Edita uma mensagem sua. Resolve com erro ou `null`. */
@@ -1121,8 +1121,8 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
         }
       },
 
-      uploadImage(file, onProgress) {
-        return uploadImage(identityRef.current.token, file, onProgress);
+      uploadFile(file, onProgress) {
+        return uploadFile(identityRef.current.token, file, onProgress);
       },
 
       notifyTyping(channelId) {

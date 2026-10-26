@@ -31,9 +31,15 @@ export const HISTORY_PAGE_SIZE = 50;
 // O corpo é o arquivo cru; `Authorization: Bearer <token>` e `X-File-Name`
 // (codificado com encodeURIComponent). Depois, o id vai em `message:send`.
 
-export const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+/** Tamanho máximo de qualquer anexo (imagem ou outro arquivo). */
+export const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
+/** Até este tamanho o servidor confere se o arquivo é uma imagem e lê as dimensões; acima, é só um arquivo. */
+export const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 export const MAX_ATTACHMENTS_PER_MESSAGE = 4;
+/** As imagens que aparecem na conversa; qualquer outro anexo é um arquivo para baixar. */
 export const ATTACHMENT_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] as const;
+/** Tipo guardado de um arquivo que não é imagem: o servidor nunca confia no tipo que o navegador declarou. */
+export const FILE_CONTENT_TYPE = 'application/octet-stream';
 
 export type UploadResponse = { ok: true; attachment: Attachment } | { ok: false; error: string };
 
@@ -142,7 +148,7 @@ export interface SearchRequest {
   authorId?: Id;
   /** Só com `scope.spaceId`: limita a um canal. */
   channelId?: Id;
-  has?: 'image' | 'link';
+  has?: 'image' | 'file' | 'link';
   /** Próxima página: resultados mais antigos que esta mensagem. */
   before?: Id;
 }

@@ -2,7 +2,7 @@ import type { Id, Message } from '@shared/models';
 import { Permission } from '@shared/permissions';
 import type { SearchRequest, SearchScope } from '@shared/protocol';
 import { searchWords } from '@shared/search';
-import { Hash, ImageIcon, Link2, Search as SearchIcon, X } from 'lucide-react';
+import { Hash, ImageIcon, Link2, Paperclip, Search as SearchIcon, X } from 'lucide-react';
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { formatMessageTime } from '../lib/format';
 import { useRealtime } from '../state/realtime';
@@ -159,6 +159,9 @@ export function SearchPanel({ scope, query, onClose }: SearchPanelProps) {
           <FilterChip active={has === 'image'} onClick={() => toggleHas('image')}>
             <ImageIcon size={13} /> Com imagem
           </FilterChip>
+          <FilterChip active={has === 'file'} onClick={() => toggleHas('file')}>
+            <Paperclip size={13} /> Com arquivo
+          </FilterChip>
           <FilterChip active={has === 'link'} onClick={() => toggleHas('link')}>
             <Link2 size={13} /> Com link
           </FilterChip>
@@ -251,7 +254,7 @@ function SearchResultItem({ message, words, channelName }: { message: Message; w
               <Markup content={message.content} highlight={words} />
               {message.attachments.length > 0 && (
                 <span className="ml-1 inline-flex items-center gap-0.5 text-xs text-faint">
-                  <ImageIcon size={12} /> {message.attachments.length}
+                  <Paperclip size={12} /> {message.attachments.length}
                 </span>
               )}
             </div>

@@ -1,9 +1,10 @@
 import { parseMarkup, type MarkupNode } from '@shared/markup';
-import type { Attachment, Message } from '@shared/models';
+import { isImageAttachment, type Attachment, type ImageAttachment, type Message } from '@shared/models';
 import { ExternalLink, X } from 'lucide-react';
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { formatMessageTime } from '../lib/format';
 import { attachmentUrl } from '../lib/uploads';
+import { FileList } from './FileCard';
 import { LinkPreviewCard } from './LinkPreviewCard';
 import { PollCard } from './PollCard';
 import { RouletteCard } from './RouletteCard';
@@ -28,7 +29,7 @@ export function MessageContent({ message, prefix }: { message: Message; prefix?:
           )}
         </div>
       )}
-      {message.attachments.length > 0 && <AttachmentGallery attachments={message.attachments} />}
+      <Attachments attachments={message.attachments} />
       {message.poll && <PollCard message={message} />}
       {message.roulette && <RouletteCard message={message} />}
       <LinkPreviewCard message={message} />
@@ -155,14 +156,26 @@ function Mention({ userId }: { userId: string }) {
   );
 }
 
+/** As imagens da mensagem aparecem na conversa; os outros arquivos viram cartões para baixar. */
+function Attachments({ attachments }: { attachments: Attachment[] }) {
+  const images = attachments.filter(isImageAttachment);
+  const files = attachments.filter((a) => !isImageAttachment(a));
+  return (
+    <>
+      {images.length > 0 && <AttachmentGallery attachments={images} />}
+      {files.length > 0 && <FileList files={files} />}
+    </>
+  );
+}
+
 /** Tamanho de exibição que cabe em PREVIEW_MAX; reservado antes de a imagem carregar. */
-function previewSize({ width, height }: Attachment): { width: number; height: number } {
+function previewSize({ width, height }: ImageAttachment): { width: number; height: number } {
   const scale = Math.min(1, PREVIEW_MAX.width / width, PREVIEW_MAX.height / height);
   return { width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)) };
 }
 
-function AttachmentGallery({ attachments }: { attachments: Attachment[] }) {
-  const [viewing, setViewing] = useState<Attachment | null>(null);
+function AttachmentGallery({ attachments }: { attachments: ImageAttachment[] }) {
+  const [viewing, setViewing] = useState<ImageAttachment | null>(null);
   return (
     <div className="mt-1 flex flex-wrap gap-2">
       {attachments.map((attachment) => {
@@ -193,7 +206,7 @@ function AttachmentGallery({ attachments }: { attachments: Attachment[] }) {
 }
 
 /** Imagem em tela cheia sobre o `<dialog>` nativo: Esc ou clique fora fecham. */
-function ImageViewer({ attachment, onClose }: { attachment: Attachment; onClose: () => void }) {
+function ImageViewer({ attachment, onClose }: { attachment: ImageAttachment; onClose: () => void }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const dialog = ref.current;

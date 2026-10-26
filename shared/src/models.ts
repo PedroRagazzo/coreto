@@ -82,16 +82,27 @@ export interface DirectConversation {
   lastMessageAt: string | null;
 }
 
-/** Imagem anexada a uma mensagem. O arquivo é servido em `GET /uploads/<id>`. */
+/**
+ * Anexo de uma mensagem: uma imagem (que aparece na conversa) ou outro arquivo (que se baixa). O conteúdo é servido em
+ * `GET /uploads/<id>`.
+ */
 export interface Attachment {
   id: Id;
   fileName: string;
+  /** Das imagens, o tipo lido do conteúdo; dos outros arquivos, sempre `application/octet-stream`. */
   contentType: string;
   /** Bytes. */
   size: number;
-  width: number;
-  height: number;
+  /** Dimensões da imagem; `null` quando o anexo é um arquivo. */
+  width: number | null;
+  height: number | null;
 }
+
+/** Um anexo que é uma imagem (aparece na conversa), com as dimensões. */
+export type ImageAttachment = Attachment & { width: number; height: number };
+
+/** O anexo é uma imagem (aparece na conversa) e não um arquivo para baixar? */
+export const isImageAttachment = (a: Attachment): a is ImageAttachment => a.width !== null && a.height !== null;
 
 /** Uma opção de enquete e quem votou nela. */
 export interface PollOption {

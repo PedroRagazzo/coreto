@@ -1,6 +1,7 @@
 // Quando e como avisar de uma mensagem nova com uma notificação do sistema (o "toast" do Windows). Decidido aqui,
 // sem tocar em nada, para dar para testar.
 
+import { sentAttachments } from './files.js';
 import { decodeMentions, mentionedUserIds } from './markup.js';
 import type { Id, Message } from './models.js';
 
@@ -54,8 +55,7 @@ const hint = (direct: boolean, repliesToMe: boolean): string =>
 function previewOf(message: Message, nameOf: (userId: Id) => string | null): string {
   const text = decodeMentions(message.content, nameOf).replace(/\s+/g, ' ').trim();
   if (!text) {
-    const images = message.attachments.length;
-    return images === 1 ? 'Enviou uma imagem' : `Enviou ${images} imagens`;
+    return `Enviou ${sentAttachments(message.attachments)}`;
   }
   return text.length > NOTIFICATION_BODY_LENGTH ? `${text.slice(0, NOTIFICATION_BODY_LENGTH - 1).trimEnd()}…` : text;
 }

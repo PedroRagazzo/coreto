@@ -45,7 +45,8 @@ Abra duas janelas (uma anônima) com nomes diferentes para ver mensagens, digita
 | `SERVER_PORT` | server | `3001` |
 | `CLIENT_ORIGIN` | server | `http://localhost:5173,http://127.0.0.1:5173` |
 | `ICE_SERVERS` | server | STUN público do Google (JSON de `RTCIceServer[]`) |
-| `UPLOAD_DIR` | server | `uploads` (pasta das imagens enviadas) |
+| `UPLOAD_DIR` | server | `uploads` (pasta dos anexos: imagens e arquivos) |
+| `UPLOAD_QUOTA_MB` | server | `10240` (10 GB): espaço máximo de todos os anexos juntos; passando disso, o envio é recusado |
 | `SUPER_ADMIN_NAMES` | server | vazio. Nomes de contas (separados por vírgula) que são **administradoras gerais**: têm todas as permissões em todos os espaços e podem excluir espaços, canais de texto e de voz mesmo sem ser donas. A conta precisa já existir: quem criar o nome primeiro vira administrador |
 | `CLIENT_DIST` | server | `../client/dist`: se existir, o servidor também entrega o site |
 | `VITE_SERVER_URL` | client | em dev, `http://localhost:3001`; no build, a mesma origem do site |
@@ -67,7 +68,7 @@ No [Dokploy](https://dokploy.com):
 2. **App:** crie uma Application com o provedor Git apontando para este repositório (branch `main`) e build
    type **Dockerfile**.
 3. **Variáveis:** `DATABASE_URL` (a URL interna do banco). Para TURN, veja [TURN](#turn).
-4. **Volume:** monte um volume em `/data/uploads`, senão as imagens somem a cada deploy.
+4. **Volume:** monte um volume em `/data/uploads`, senão os anexos (imagens e arquivos) somem a cada deploy.
 5. **Domínio:** porta 3000, com HTTPS (Let's Encrypt). Sem domínio próprio, use `coreto.<IP-da-VPS>.nip.io`
    (o Dokploy não ativa HTTPS para sslip.io). **Microfone, câmera e tela só funcionam em HTTPS.**
 6. **Deploy.** O primeiro deploy cria as tabelas e os espaços de demonstração.
@@ -124,8 +125,9 @@ de NAT restrito chega ao servidor de mídia pelo TURN do Coreto. Variáveis: `LI
 ### Backup do banco
 
 O servidor faz o backup sozinho: todo dia às 06:00 UTC (03:00 em Brasília) ele grava uma cópia compactada do banco
-(`pg_dump` 17, que vem na imagem) em `/data/backups` e guarda as 14 mais recentes. Junto, espelha as imagens enviadas
-em `/data/backups/uploads`, que o banco não guarda. Se ele sobe e a última cópia tem mais de um dia (ou não há
+(`pg_dump` 17, que vem na imagem) em `/data/backups` e guarda as 14 mais recentes. Junto, espelha os anexos pequenos
+(até 8 MB: imagens e arquivos) em `/data/backups/uploads`, que o banco não guarda; os maiores ficam de fora, porque copiá-los
+dobraria o espaço dos arquivos no disco. Se ele sobe e a última cópia tem mais de um dia (ou não há
 nenhuma), faz uma logo depois; um deploy no mesmo dia não gera cópia à toa. Se a cópia falha, o erro aparece nos logs
 (`[backup] falha: ...`) e ele tenta de novo em uma hora.
 
@@ -140,7 +142,7 @@ no terminal do app (isto apaga e recria as tabelas a partir da cópia):
 
 ```bash
 pg_restore --clean --if-exists --no-owner --dbname="${DATABASE_URL%%\?*}" /data/backups/coreto-AAAAMMDD-HHMMSS.dump
-cp -n /data/backups/uploads/* /data/uploads/   # só se perdeu também as imagens
+cp -n /data/backups/uploads/* /data/uploads/   # só se perdeu também os anexos
 ```
 
 ## App de desktop (Windows)
@@ -264,7 +266,7 @@ coreto/
     ├── state/realtime.tsx   Socket + reducer + ações (fonte única de estado)
     ├── state/selectors.ts
     ├── lib/voice.ts         Malha WebRTC (voz e tela) + medidor de quem está falando
-    ├── lib/uploads.ts       Envio de imagens com progresso
+    ├── lib/uploads.ts       Envio de anexos (imagens e arquivos) com progresso
     ├── lib/socket.ts, identity.ts, format.ts
     └── components/
         ├── layout/AppShell.tsx   Layout de três colunas
@@ -272,7 +274,7 @@ coreto/
         ├── ChannelSidebar.tsx    Coluna 2: categorias recolhíveis, # texto e 🔊 voz
         ├── ChatPanel.tsx         Coluna 3: cabeçalho, mensagens, campo de texto
         ├── MemberList.tsx        Membros online / indisponíveis à direita
-        ├── MessageContent.tsx    Texto formatado, menções e imagens de uma mensagem
+        ├── MessageContent.tsx    Texto formatado, menções, imagens e arquivos de uma mensagem
         ├── MentionAutocomplete.tsx  Sugestões ao digitar "@"
         ├── CallView.tsx          Mosaico da chamada: câmeras, avatares e cartões de quem está ao vivo
         ├── StreamStage.tsx       Transmissão de tela no painel central (assistir ou prévia)
@@ -422,7 +424,7 @@ Como o servidor visita endereços que estranhos escrevem, as defesas ficam em `s
   JPEG, GIF e WebP, nunca SVG nem HTML), `nosniff` e uma política que não executa nada.
 - **Só texto.** O título e a descrição são mostrados como texto puro, nunca como HTML.
 
-## Formatação, menções e imagens
+## Formatação, menções e anexos
 
 - **Formatação:** `**negrito**`, `*itálico*` ou `_itálico_`, `~~riscado~~`, `` `código` `` e blocos com três crases
   (` ```ts ` na primeira linha indica a linguagem). Links `http(s)://` viram clicáveis; `\*` escreve um asterisco.
@@ -433,13 +435,25 @@ Como o servidor visita endereços que estranhos escrevem, as defesas ficam em `s
   As menções não vistas ficam no banco (tabela `Mention`) e somem quando a pessoa abre o canal (`mentions:ack`). Só
   conta quem enxerga o canal; o autor, robôs e menções dentro de código ficam de fora. Editar a mensagem tira a menção
   de quem saiu do texto e avisa só quem entrou. Em conversas diretas a menção só destaca o texto.
-- **Imagens:** até 4 por mensagem, 8 MB cada, PNG, JPEG, GIF ou WebP. Anexe pelo botão, colando (Ctrl+V) ou
-  arrastando para a conversa. Cada imagem sobe na hora para `POST /uploads` (com barra de progresso) e o id vai
-  junto no `message:send`. O servidor reconhece o tipo pelo conteúdo (não pela extensão), guarda as dimensões para o
-  cliente reservar o espaço antes de a imagem carregar, e serve o arquivo em `GET /uploads/{id}` com `nosniff`.
-  Clique numa imagem para ampliar. Apagar a mensagem apaga o arquivo; imagens enviadas e nunca usadas, e arquivos de
-  canais ou espaços excluídos, são limpos ao iniciar e a cada hora. Os arquivos ficam em `server/uploads`
-  (`UPLOAD_DIR`). O link de uma imagem é aleatório e não exige login, como num CDN: quem tem o link vê a imagem.
+- **Anexos (imagens e arquivos):** até 4 por mensagem, **qualquer tipo de arquivo, até 50 MB cada**. Anexe pelo clipe,
+  colando (Ctrl+V) ou arrastando para a conversa. Cada anexo sobe na hora para `POST /uploads` (com barra de progresso) e o
+  id vai junto no `message:send`. O servidor grava o arquivo direto no disco, sem guardá-lo inteiro na memória, e
+  reconhece **imagens** (PNG, JPEG, GIF e WebP, até 8 MB) pelo conteúdo, não pela extensão: elas aparecem na conversa, com as
+  dimensões guardadas para o site reservar o espaço, e abrem ampliadas ao clique. Todo o resto é um **arquivo**: aparece como
+  um cartão (ícone do tipo, nome e tamanho) com o botão de baixar. `.exe`, `.bat`, `.js` e outros que rodam no computador
+  ganham o aviso "só abra se confiar"; `shared/src/files.ts` decide ícones e avisos.
+- **Segurança dos arquivos:** o que não é imagem NUNCA é servido para o navegador abrir (um `.html` ou `.svg` rodaria dentro do
+  site, com acesso à sessão de quem abrir). Sai sempre como `application/octet-stream`, `Content-Disposition: attachment`,
+  `nosniff` e `Content-Security-Policy: sandbox`, qualquer que seja a extensão ou o tipo que o navegador declarou. O nome é
+  limpo (sem caminho, sem caracteres de controle nem os que invertem a direção do texto, usados para disfarçar um `.exe` de imagem) e a extensão original
+  fica. Uma imagem de verdade continua sendo imagem mesmo com nome de outro tipo (`gato.gif` que é PNG vira `gato.png`).
+- **Espaço:** o servidor recusa novos anexos quando todos juntos passam de `UPLOAD_QUOTA_MB` (padrão 10 GB). Apagar a
+  mensagem apaga o arquivo; anexos enviados e nunca usados, arquivos de canais ou espaços excluídos e envios interrompidos
+  são limpos ao iniciar e a cada hora. Os arquivos ficam em `server/uploads` (`UPLOAD_DIR`). O link de um anexo é aleatório e não
+  exige login, como num CDN: quem tem o link baixa o arquivo. A busca tem os filtros "Com imagem" e "Com arquivo".
+- **Limite de tempo do envio:** o envio de um arquivo grande atravessa o proxy (Traefik, no Dokploy); se ele tiver um limite de
+  tempo para ler o pedido, uma internet lenta pode não conseguir enviar 50 MB a tempo. Se isso acontecer, aumente o
+  `readTimeout` do ponto de entrada no Traefik.
 
 ## Configurações
 
@@ -729,8 +743,9 @@ log. O áudio do robô atravessa a rede como o de qualquer pessoa, então a cham
 - Mensagens diretas só entre duas pessoas (sem grupos) e sem lista para buscar usuários: comece pela lista de membros.
 - Mensagens não lidas só são contadas nas conversas diretas, e a contagem zera ao recarregar a página. Menções, ao
   contrário, ficam guardadas até serem vistas.
-- Anexos só de imagem, sem limite de envios por pessoa, guardados no disco do servidor (para várias instâncias, troque
-  por um armazenamento de objetos como S3).
+- Anexos de até 50 MB, sem limite de envios por pessoa (só a cota de espaço total), guardados no disco do servidor (para
+  várias instâncias, troque por um armazenamento de objetos como S3). Não há como retomar um envio interrompido, nem
+  tocar vídeo ou áudio direto na conversa: o arquivo é baixado.
 - O anel de quem está falando só aparece para quem está na mesma chamada.
 - Na malha P2P, cada câmera vai para todos da chamada e cada tela vai para cada pessoa que assiste. Com vídeo, a
   chamada aguenta umas 4 ou 5 pessoas, conforme a internet de cada uma. Cada pessoa assiste a uma transmissão por vez.

@@ -2,7 +2,8 @@ import { decodeMentions, encodeMentions, mentionedUserIds } from '@shared/markup
 import type { Id, Message, ReplyPreview } from '@shared/models';
 import { Permission } from '@shared/permissions';
 import { MAX_MESSAGE_LENGTH } from '@shared/protocol';
-import { ArrowDown, CornerUpRight, Image as ImageIcon, Pencil, Reply, SmilePlus, Trash2 } from 'lucide-react';
+import { describeAttachments } from '@shared/files';
+import { ArrowDown, CornerUpRight, Paperclip, Pencil, Reply, SmilePlus, Trash2 } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { formatMessageTime, formatShortTime } from '../lib/format';
 import { useRealtime } from '../state/realtime';
@@ -398,9 +399,9 @@ function ReplyReference({ reply, onJump }: { reply: ReplyPreview; onJump: () => 
         {name}
       </span>
       <span className="min-w-0 truncate">
-        {reply.excerpt ? <Markup content={reply.excerpt} /> : reply.hasAttachments ? 'Imagem' : ''}
+        {reply.excerpt ? <Markup content={reply.excerpt} /> : reply.hasAttachments ? 'Anexo' : ''}
       </span>
-      {reply.hasAttachments && <ImageIcon size={12} className="shrink-0" aria-label="com imagem" />}
+      {reply.hasAttachments && <Paperclip size={12} className="shrink-0" aria-label="com anexo" />}
     </button>
   );
 }
@@ -522,8 +523,8 @@ function DeleteMessageDialog({ message, onClose }: { message: Message; onClose: 
           <Markup content={message.content} />
           {message.attachments.length > 0 && (
             <p className="mt-1 text-xs text-faint">
-              {message.attachments.length === 1 ? '1 imagem' : `${message.attachments.length} imagens`} também
-              {message.attachments.length === 1 ? ' será apagada' : ' serão apagadas'}.
+              {describeAttachments(message.attachments)} também
+              {message.attachments.length === 1 ? ' será apagado' : ' serão apagados'}.
             </p>
           )}
         </blockquote>

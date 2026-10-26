@@ -4,28 +4,33 @@ import { ATTACHMENT_TYPES, MAX_ATTACHMENTS_PER_MESSAGE, MAX_MESSAGE_LENGTH } fro
 import {
   ChartNoAxesColumn,
   CornerUpRight,
-  ImagePlus,
   LoaderCircle,
   LoaderPinwheel,
+  Paperclip,
   SendHorizontal,
   TriangleAlert,
   X,
 } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { checkImageFile, type UploadHandle } from '../lib/uploads';
+import { formatBytes } from '@shared/files';
+import { MAX_IMAGE_BYTES } from '@shared/protocol';
+import { checkFile, type UploadHandle } from '../lib/uploads';
 import { useRealtime } from '../state/realtime';
 import { displayNameOf, mentionCandidates } from '../state/selectors';
 import { CreatePollDialog } from './CreatePollDialog';
+import { FileIcon } from './FileIcon';
 import { CreateRouletteDialog } from './CreateRouletteDialog';
 import { Markup } from './MessageContent';
 import { useMentionAutocomplete } from './MentionAutocomplete';
 
 const MAX_HEIGHT_PX = 192;
+const ATTACHMENT_TYPES_SET: ReadonlySet<string> = new Set(ATTACHMENT_TYPES);
 
-interface PendingImage {
+interface PendingFile {
   key: string;
   file: File;
-  previewUrl: string;
+  /** Miniatura das imagens; `null` nos outros arquivos, que aparecem com o ícone. */
+  previewUrl: string | null;
   progress: number;
   /** Preenchido quando o envio termina; é o id que vai na mensagem. */
   attachment: Attachment | null;
@@ -44,7 +49,7 @@ interface MessageInputProps {
 export function MessageInput({ targetId, label, canSend }: MessageInputProps) {
   const { state, actions } = useRealtime();
   const [draft, setDraft] = useState('');
-  const [images, setImages] = useState<PendingImage[]>([]);
+  const [pending, setPending] = useState<PendingFile[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -54,8 +59,8 @@ export function MessageInput({ targetId, label, canSend }: MessageInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const imagesRef = useRef(images);
-  imagesRef.current = images;
+  const pendingRef = useRef(pending);
+  pendingRef.current = pending;
 
   // Só vale a resposta que começou neste canal ou conversa.
   const replyingTo = state.replyingTo?.channelId === targetId ? state.replyingTo : null;
@@ -76,7 +81,7 @@ export function MessageInput({ targetId, label, canSend }: MessageInputProps) {
     };
   }, [extrasOpen]);
 
-  // Trocar de conversa descarta o rascunho e as imagens ainda não enviadas.
+  // Trocar de conversa descarta o rascunho e os anexos ainda não enviados.
   useEffect(() => {
     setDraft('');
     setError(null);
@@ -84,8 +89,8 @@ export function MessageInput({ targetId, label, canSend }: MessageInputProps) {
     setDialog(null);
     textareaRef.current?.focus();
     return () => {
-      for (const image of imagesRef.current) discard(image);
-      setImages([]);
+      for (const image of pendingRef.current) discard(image);
+      setPending([]);
     };
   }, [targetId]);
 
@@ -102,39 +107,41 @@ export function MessageInput({ targetId, label, canSend }: MessageInputProps) {
     el.style.height = `${Math.min(el.scrollHeight, MAX_HEIGHT_PX)}px`;
   }, [draft]);
 
-  const patchImage = (key: string, patch: Partial<PendingImage>) =>
-    setImages((list) => list.map((image) => (image.key === key ? { ...image, ...patch } : image)));
+  const patchPending = (key: string, patch: Partial<PendingFile>) =>
+    setPending((list) => list.map((image) => (image.key === key ? { ...image, ...patch } : image)));
 
   function addFiles(files: File[]) {
     if (!canSend || files.length === 0) return;
-    const room = MAX_ATTACHMENTS_PER_MESSAGE - imagesRef.current.length;
+    const room = MAX_ATTACHMENTS_PER_MESSAGE - pendingRef.current.length;
     const problems: string[] = [];
-    if (files.length > room) problems.push(`Até ${MAX_ATTACHMENTS_PER_MESSAGE} imagens por mensagem.`);
-    const accepted: PendingImage[] = [];
+    if (files.length > room) problems.push(`Até ${MAX_ATTACHMENTS_PER_MESSAGE} arquivos por mensagem.`);
+    const accepted: PendingFile[] = [];
     for (const file of files.slice(0, Math.max(room, 0))) {
-      const problem = checkImageFile(file);
+      const problem = checkFile(file);
       if (problem) {
         problems.push(problem);
         continue;
       }
       const key = crypto.randomUUID();
-      const upload = actions.uploadImage(file, (progress) => patchImage(key, { progress }));
-      accepted.push({ key, file, previewUrl: URL.createObjectURL(file), progress: 0, attachment: null, error: null, upload });
+      const upload = actions.uploadFile(file, (progress) => patchPending(key, { progress }));
+      // Só imagens pequenas ganham miniatura (as outras o servidor trata como arquivo).
+      const previewUrl = ATTACHMENT_TYPES_SET.has(file.type) && file.size <= MAX_IMAGE_BYTES ? URL.createObjectURL(file) : null;
+      accepted.push({ key, file, previewUrl, progress: 0, attachment: null, error: null, upload });
       void upload.done.then((res) =>
-        patchImage(key, res.ok ? { attachment: res.attachment, progress: 1, upload: null } : { error: res.error, upload: null }),
+        patchPending(key, res.ok ? { attachment: res.attachment, progress: 1, upload: null } : { error: res.error, upload: null }),
       );
     }
-    setImages((list) => [...list, ...accepted]);
+    setPending((list) => [...list, ...accepted]);
     setError(problems[0] ?? null);
   }
 
-  function removeImage(key: string) {
-    const image = imagesRef.current.find((i) => i.key === key);
+  function removePending(key: string) {
+    const image = pendingRef.current.find((i) => i.key === key);
     if (image) discard(image);
-    setImages((list) => list.filter((i) => i.key !== key));
+    setPending((list) => list.filter((i) => i.key !== key));
   }
 
-  // Arrastar imagens para qualquer parte da conversa (a <section> em volta), não só para a caixa de texto.
+  // Arrastar arquivos para qualquer parte da conversa (a <section> em volta), não só para a caixa de texto.
   useEffect(() => {
     const zone = formRef.current?.closest('section');
     if (!zone || !canSend) return;
@@ -175,9 +182,9 @@ export function MessageInput({ targetId, label, canSend }: MessageInputProps) {
     };
   });
 
-  const uploading = images.some((i) => i.upload !== null);
-  const failed = images.some((i) => i.error !== null);
-  const ready = images.filter((i) => i.attachment);
+  const uploading = pending.some((i) => i.upload !== null);
+  const failed = pending.some((i) => i.error !== null);
+  const ready = pending.filter((i) => i.attachment);
   const canSubmit = canSend && !sending && !uploading && !failed && (draft.trim() !== '' || ready.length > 0);
 
   async function submit() {
@@ -195,8 +202,8 @@ export function MessageInput({ targetId, label, canSend }: MessageInputProps) {
     if (!err) {
       actions.cancelReply();
       setDraft('');
-      for (const image of images) URL.revokeObjectURL(image.previewUrl);
-      setImages([]);
+      for (const item of pending) if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+      setPending([]);
     }
   }
 
@@ -232,7 +239,7 @@ export function MessageInput({ targetId, label, canSend }: MessageInputProps) {
                   : <Markup content={replyingTo.content.replace(/\s+/g, ' ').slice(0, 120)} />
                 </>
               ) : (
-                ' (imagem)'
+                ' (anexo)'
               )}
             </span>
             <button
@@ -246,23 +253,23 @@ export function MessageInput({ targetId, label, canSend }: MessageInputProps) {
             </button>
           </div>
         )}
-        {images.length > 0 && (
-          <ul aria-label="Imagens anexadas" className="flex gap-3 overflow-x-auto border-b border-line px-4 pt-3 pb-2">
-            {images.map((image) => (
-              <PendingImageTile key={image.key} image={image} onRemove={() => removeImage(image.key)} />
+        {pending.length > 0 && (
+          <ul aria-label="Anexos" className="flex gap-3 overflow-x-auto border-b border-line px-4 pt-3 pb-2">
+            {pending.map((image) => (
+              <PendingTile key={image.key} image={image} onRemove={() => removePending(image.key)} />
             ))}
           </ul>
         )}
         <div className="flex items-end gap-2 px-3 py-2.5">
           <button
             type="button"
-            title="Anexar imagem"
-            aria-label="Anexar imagem"
-            disabled={!canSend || images.length >= MAX_ATTACHMENTS_PER_MESSAGE}
+            title="Anexar arquivo"
+            aria-label="Anexar arquivo"
+            disabled={!canSend || pending.length >= MAX_ATTACHMENTS_PER_MESSAGE}
             onClick={() => fileInputRef.current?.click()}
             className="rounded p-1 text-muted hover:text-fg disabled:opacity-40 disabled:hover:text-muted"
           >
-            <ImagePlus size={20} />
+            <Paperclip size={20} />
           </button>
           <div ref={extrasRef} className="relative">
             <button
@@ -315,7 +322,6 @@ export function MessageInput({ targetId, label, canSend }: MessageInputProps) {
           <input
             ref={fileInputRef}
             type="file"
-            accept={ATTACHMENT_TYPES.join(',')}
             multiple
             hidden
             onChange={(e) => {
@@ -384,30 +390,38 @@ export function MessageInput({ targetId, label, canSend }: MessageInputProps) {
   );
 }
 
-function discard(image: PendingImage): void {
+function discard(image: PendingFile): void {
   image.upload?.abort();
-  URL.revokeObjectURL(image.previewUrl);
+  if (image.previewUrl) URL.revokeObjectURL(image.previewUrl);
 }
 
-function PendingImageTile({ image, onRemove }: { image: PendingImage; onRemove: () => void }) {
-  const status = image.error ?? (image.upload ? `Enviando… ${Math.round(image.progress * 100)}%` : 'Pronta para enviar');
+function PendingTile({ image, onRemove }: { image: PendingFile; onRemove: () => void }) {
+  const status = image.error ?? (image.upload ? `Enviando… ${Math.round(image.progress * 100)}%` : 'Pronto para enviar');
+  const busy = image.upload !== null;
   return (
     <li className="relative shrink-0" title={`${image.file.name} — ${status}`}>
-      <img
-        src={image.previewUrl}
-        alt={image.file.name}
-        className={`h-20 w-20 rounded-md object-cover ${image.upload || image.error ? 'opacity-50' : ''}`}
-      />
-      {image.upload && (
+      {image.previewUrl ? (
+        <img
+          src={image.previewUrl}
+          alt={image.file.name}
+          className={`h-20 w-20 rounded-md object-cover ${busy || image.error ? 'opacity-50' : ''}`}
+        />
+      ) : (
+        <div className={`flex h-20 w-44 items-center gap-2 rounded-md bg-rail px-3 ${busy || image.error ? 'opacity-50' : ''}`}>
+          <FileIcon name={image.file.name} size={26} className="shrink-0 text-muted" />
+          <span className="min-w-0 text-xs">
+            <span className="block truncate font-medium">{image.file.name}</span>
+            <span className="block text-faint">{formatBytes(image.file.size)}</span>
+          </span>
+        </div>
+      )}
+      {busy && image.previewUrl && (
         <span className="absolute inset-0 flex items-center justify-center">
           <LoaderCircle size={22} className="animate-spin text-fg" aria-label={status} />
         </span>
       )}
-      {image.upload && (
-        <span
-          aria-hidden
-          className="absolute right-1 bottom-1 left-1 h-1 overflow-hidden rounded-full bg-rail/80"
-        >
+      {busy && (
+        <span aria-hidden className="absolute right-1 bottom-1 left-1 h-1 overflow-hidden rounded-full bg-rail/80">
           <span className="block h-full bg-accent transition-[width]" style={{ width: `${image.progress * 100}%` }} />
         </span>
       )}
@@ -424,7 +438,7 @@ function PendingImageTile({ image, onRemove }: { image: PendingImage; onRemove: 
       >
         <X size={12} />
       </button>
-      {image.error && <p className="mt-1 w-20 truncate text-[10px] text-dnd">{image.error}</p>}
+      {image.error && <p className={`mt-1 truncate text-[10px] text-dnd ${image.previewUrl ? 'w-20' : 'w-44'}`}>{image.error}</p>}
     </li>
   );
 }
