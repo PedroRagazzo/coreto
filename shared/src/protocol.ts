@@ -37,6 +37,8 @@ export const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
 /** Até este tamanho o servidor confere se o arquivo é uma imagem e lê as dimensões; acima, é só um arquivo. */
 export const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 export const MAX_ATTACHMENTS_PER_MESSAGE = 4;
+/** Depois de quantos dias o servidor apaga o arquivo de um anexo (a mensagem fica, com um aviso no lugar). */
+export const ATTACHMENT_RETENTION_DAYS = 20;
 /** Mensagens fixadas ao mesmo tempo num canal ou numa conversa. */
 export const MAX_PINS_PER_CHANNEL = 50;
 /** As imagens que aparecem na conversa; qualquer outro anexo é um arquivo para baixar. */

@@ -3,8 +3,9 @@
 // Um anexo é uma imagem (PNG, JPEG, GIF ou WebP reconhecida pelo conteúdo, até MAX_IMAGE_BYTES), que aparece na
 // conversa, ou qualquer outro arquivo, que se baixa. O arquivo vai direto para o disco (UPLOAD_DIR/<id>), sem passar
 // inteiro pela memória, e os metadados ficam no banco. O id é um UUID aleatório: quem tem o link baixa o arquivo, como
-// num CDN. Anexos que nunca entraram numa mensagem, e arquivos cujo registro sumiu (canal ou espaço excluído), são
-// apagados por `sweepUploads`.
+// num CDN. Anexos que nunca entraram numa mensagem, arquivos cujo registro sumiu (canal ou espaço excluído) e arquivos
+// com mais de ATTACHMENT_RETENTION_DAYS dias são apagados por `sweepUploads` (nos que passaram do prazo, o registro
+// fica marcado como `expiredAt`, para a mensagem mostrar que o arquivo foi apagado).
 //
 // Segurança: um arquivo que não é imagem NUNCA é servido para o navegador abrir (um .html ou .svg rodaria dentro do
 // site, com acesso à sessão de quem abrir). Sai sempre como `application/octet-stream`, `attachment` e `nosniff`.
@@ -15,7 +16,13 @@ import { mkdir, open, readdir, rename, rm, stat } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { join } from 'node:path';
 import { isImageAttachment } from '../../shared/src/models.js';
-import { FILE_CONTENT_TYPE, MAX_ATTACHMENT_BYTES, MAX_IMAGE_BYTES, type UploadResponse } from '../../shared/src/protocol.js';
+import {
+  ATTACHMENT_RETENTION_DAYS,
+  FILE_CONTENT_TYPE,
+  MAX_ATTACHMENT_BYTES,
+  MAX_IMAGE_BYTES,
+  type UploadResponse,
+} from '../../shared/src/protocol.js';
 import type { Db } from './db/client.js';
 import { imageInfo } from './images.js';
 import type { Store } from './store.js';
@@ -30,6 +37,8 @@ const EXTENSIONS: Record<string, string> = {
 };
 /** Anexos soltos (enviados mas nunca usados numa mensagem) vivem no máximo isso. */
 export const PENDING_UPLOAD_TTL_MS = 60 * 60_000;
+/** Um anexo já usado numa mensagem vive este tempo; depois o arquivo é apagado e só o aviso fica. */
+export const ATTACHMENT_RETENTION_MS = ATTACHMENT_RETENTION_DAYS * 24 * 60 * 60_000;
 /** Espaço padrão para todos os anexos juntos, em MB. */
 const DEFAULT_QUOTA_MB = 10_240;
 
@@ -111,13 +120,23 @@ export class UploadDir {
   }
 }
 
-/** Apaga anexos soltos antigos, arquivos sem registro no banco e provisórios de envios interrompidos. */
-export async function sweepUploads(db: Db, dir: UploadDir, now = Date.now()): Promise<number> {
+/**
+ * Apaga anexos soltos antigos, arquivos que passaram do prazo (`retentionMs`), arquivos sem registro no banco e provisórios
+ * de envios interrompidos. Devolve quantos arquivos saíram do disco por não terem mais registro válido.
+ */
+export async function sweepUploads(db: Db, dir: UploadDir, now = Date.now(), retentionMs = ATTACHMENT_RETENTION_MS): Promise<number> {
   const stale = await db.attachment.findMany({
     where: { messageId: null, createdAt: { lt: new Date(now - PENDING_UPLOAD_TTL_MS) } },
     select: { id: true },
   });
   await db.attachment.deleteMany({ where: { id: { in: stale.map((a) => a.id) } } });
+
+  // Passou do prazo: o registro fica (a mensagem mostra "arquivo apagado"), mas deixa de contar como conhecido logo abaixo,
+  // e o arquivo sai do disco junto com os órfãos. Se o servidor cair no meio, a próxima limpeza termina o serviço.
+  await db.attachment.updateMany({
+    where: { messageId: { not: null }, expiredAt: null, createdAt: { lt: new Date(now - retentionMs) } },
+    data: { expiredAt: new Date(now) },
+  });
 
   const names = await readdir(dir.path);
   // Um envio interrompido (conexão caiu, servidor reiniciou) deixa o provisório para trás.
@@ -129,7 +148,7 @@ export async function sweepUploads(db: Db, dir: UploadDir, now = Date.now()): Pr
   const files = names.filter((name) => UUID.test(name));
   // Os arquivos da pasta são anexos ou sons do quadro de som.
   const known = new Set([
-    ...(await db.attachment.findMany({ where: { id: { in: files } }, select: { id: true } })).map((a) => a.id),
+    ...(await db.attachment.findMany({ where: { id: { in: files }, expiredAt: null }, select: { id: true } })).map((a) => a.id),
     ...(await db.soundClip.findMany({ where: { id: { in: files } }, select: { id: true } })).map((s) => s.id),
   ]);
   const orphans = files.filter((name) => !known.has(name));

@@ -4,7 +4,7 @@ import { ExternalLink, X } from 'lucide-react';
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { formatMessageTime } from '../lib/format';
 import { attachmentUrl } from '../lib/uploads';
-import { FileList } from './FileCard';
+import { ExpiredList, FileList } from './FileCard';
 import { LinkPreviewCard } from './LinkPreviewCard';
 import { PollCard } from './PollCard';
 import { RouletteCard } from './RouletteCard';
@@ -158,12 +158,15 @@ function Mention({ userId }: { userId: string }) {
 
 /** As imagens da mensagem aparecem na conversa; os outros arquivos viram cartões para baixar. */
 function Attachments({ attachments }: { attachments: Attachment[] }) {
-  const images = attachments.filter(isImageAttachment);
-  const files = attachments.filter((a) => !isImageAttachment(a));
+  const available = attachments.filter((a) => !a.expired);
+  const expired = attachments.filter((a) => a.expired);
+  const images = available.filter(isImageAttachment);
+  const files = available.filter((a) => !isImageAttachment(a));
   return (
     <>
       {images.length > 0 && <AttachmentGallery attachments={images} />}
       {files.length > 0 && <FileList files={files} />}
+      {expired.length > 0 && <ExpiredList files={expired} />}
     </>
   );
 }

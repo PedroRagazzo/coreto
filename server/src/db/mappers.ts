@@ -104,6 +104,7 @@ export const toAttachment = (row: Db.Attachment): Attachment => ({
   size: row.size,
   width: row.width,
   height: row.height,
+  expired: row.expiredAt !== null,
 });
 
 /** As opções de uma enquete em ordem, cada uma com quem votou (na ordem dos votos). */

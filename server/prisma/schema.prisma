@@ -321,7 +321,10 @@ model Attachment {
   width       Int?
   height      Int?
   createdAt   DateTime @default(now())
+  /// Quando o arquivo foi apagado do disco por passar do prazo; o registro fica para a mensagem mostrar o aviso.
+  expiredAt   DateTime?
 
   @@index([messageId])
   @@index([uploaderId, messageId])
+  @@index([createdAt, expiredAt])
 }

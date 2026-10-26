@@ -22,6 +22,16 @@ export interface ChangelogEntry {
 /** Da mais nova para a mais antiga. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-10-28-2',
+    title: 'Arquivos expiram em 20 dias',
+    items: [
+      {
+        title: 'Arquivos e imagens somem depois de 20 dias',
+        text: 'Para o servidor não encher, o arquivo de cada anexo é apagado 20 dias depois do envio. A mensagem fica, com um aviso no lugar. Guarde o que quiser manter.',
+      },
+    ],
+  },
+  {
     id: '2026-10-28',
     title: 'O que há de novo',
     items: [

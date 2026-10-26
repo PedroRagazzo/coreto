@@ -1,6 +1,7 @@
 import { fileKind, formatBytes } from '@shared/files';
 import type { Attachment } from '@shared/models';
-import { Download, ShieldAlert } from 'lucide-react';
+import { ATTACHMENT_RETENTION_DAYS } from '@shared/protocol';
+import { Download, FileX, ShieldAlert } from 'lucide-react';
 import { attachmentUrl } from '../lib/uploads';
 import { FileIcon } from './FileIcon';
 
@@ -10,6 +11,30 @@ export function FileList({ files }: { files: Attachment[] }) {
     <ul aria-label="Arquivos" className="mt-1 flex flex-col gap-1.5">
       {files.map((file) => (
         <FileCard key={file.id} file={file} />
+      ))}
+    </ul>
+  );
+}
+
+/** Os anexos que o servidor já apagou (passaram do prazo): um aviso por anexo, no lugar da imagem ou do arquivo. */
+export function ExpiredList({ files }: { files: Attachment[] }) {
+  return (
+    <ul aria-label="Arquivos apagados" className="mt-1 flex flex-col gap-1.5">
+      {files.map((file) => (
+        <li
+          key={file.id}
+          className="flex w-full max-w-sm items-center gap-3 rounded-lg border border-dashed border-line p-3 text-faint"
+        >
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-elevated/60">
+            <FileX size={20} aria-hidden />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm line-through decoration-faint/60">{file.fileName}</span>
+            <span className="block text-xs">
+              {formatBytes(file.size)} · apagado depois de {ATTACHMENT_RETENTION_DAYS} dias para liberar espaço
+            </span>
+          </span>
+        </li>
       ))}
     </ul>
   );

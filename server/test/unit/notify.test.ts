@@ -77,7 +77,7 @@ describe('toastFor', () => {
   });
 
   it('diz que veio uma imagem quando a mensagem não tem texto', () => {
-    const image = { id: 'a', fileName: 'f.png', contentType: 'image/png', size: 1, width: 1, height: 1 };
+    const image = { id: 'a', fileName: 'f.png', contentType: 'image/png', size: 1, width: 1, height: 1, expired: false };
     expect(toastFor(input({ message: message({ content: '', attachments: [image] }) }))?.body).toBe('Enviou uma imagem');
     expect(toastFor(input({ message: message({ content: '', attachments: [image, image] }) }))?.body).toBe('Enviou 2 imagens');
   });

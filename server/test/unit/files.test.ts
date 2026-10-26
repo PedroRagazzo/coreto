@@ -2,8 +2,16 @@ import { describe, expect, it } from 'vitest';
 import { describeAttachments, extensionOf, fileKind, formatBytes, sentAttachments } from '../../../shared/src/files.js';
 import type { Attachment } from '../../../shared/src/models.js';
 
-const image = (): Attachment => ({ id: 'i', fileName: 'a.png', contentType: 'image/png', size: 1, width: 4, height: 3 });
-const file = (name = 'a.zip'): Attachment => ({ id: 'f', fileName: name, contentType: 'application/octet-stream', size: 1, width: null, height: null });
+const image = (): Attachment => ({ id: 'i', fileName: 'a.png', contentType: 'image/png', size: 1, width: 4, height: 3, expired: false });
+const file = (name = 'a.zip'): Attachment => ({
+  id: 'f',
+  fileName: name,
+  contentType: 'application/octet-stream',
+  size: 1,
+  width: null,
+  height: null,
+  expired: false,
+});
 
 describe('fileKind', () => {
   it('escolhe o tipo pela extensão, sem ligar para maiúsculas', () => {

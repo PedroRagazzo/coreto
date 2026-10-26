@@ -486,7 +486,12 @@ Como o servidor visita endereços que estranhos escrevem, as defesas ficam em `s
   fica. Uma imagem de verdade continua sendo imagem mesmo com nome de outro tipo (`gato.gif` que é PNG vira `gato.png`).
 - **Espaço:** o servidor recusa novos anexos quando todos juntos passam de `UPLOAD_QUOTA_MB` (padrão 10 GB). Apagar a
   mensagem apaga o arquivo; anexos enviados e nunca usados, arquivos de canais ou espaços excluídos e envios interrompidos
-  são limpos ao iniciar e a cada hora. Os arquivos ficam em `server/uploads` (`UPLOAD_DIR`). O link de um anexo é aleatório e não
+  são limpos ao iniciar e a cada hora. Os arquivos ficam em `server/uploads` (`UPLOAD_DIR`).
+- **Validade:** 20 dias depois do envio (`ATTACHMENT_RETENTION_DAYS`, em `shared/src/protocol.ts`), a limpeza apaga o
+  **arquivo** do disco e marca o anexo como vencido (`Attachment.expiredAt`). A mensagem e o nome do arquivo ficam, com um
+  aviso "apagado depois de 20 dias" no lugar da imagem ou do cartão; o link deixa de funcionar (404) e o tamanho deixa de
+  contar na cota. O espelho do backup guarda as imagens até 8 MB por até 30 dias de idade, então elas saem dele um pouco
+  depois. Para mudar o prazo, troque a constante e faça o deploy. O link de um anexo é aleatório e não
   exige login, como num CDN: quem tem o link baixa o arquivo. A busca tem os filtros "Com imagem" e "Com arquivo".
 - **Limite de tempo do envio:** o envio de um arquivo grande atravessa o proxy (Traefik, no Dokploy); se ele tiver um limite de
   tempo para ler o pedido, uma internet lenta pode não conseguir enviar 50 MB a tempo. Se isso acontecer, aumente o
@@ -805,7 +810,7 @@ log. O áudio do robô atravessa a rede como o de qualquer pessoa, então a cham
 - Mensagens diretas só entre duas pessoas (sem grupos) e sem lista para buscar usuários: comece pela lista de membros.
 - Mensagens não lidas só são contadas nas conversas diretas, e a contagem zera ao recarregar a página. Menções, ao
   contrário, ficam guardadas até serem vistas.
-- Anexos de até 50 MB, sem limite de envios por pessoa (só a cota de espaço total), guardados no disco do servidor (para
+- Anexos de até 50 MB, sem limite de envios por pessoa (só a cota de espaço total), apagados 20 dias depois do envio e guardados no disco do servidor (para
   várias instâncias, troque por um armazenamento de objetos como S3). Não há como retomar um envio interrompido, nem
   tocar vídeo ou áudio direto na conversa: o arquivo é baixado.
 - O anel de quem está falando só aparece para quem está na mesma chamada.

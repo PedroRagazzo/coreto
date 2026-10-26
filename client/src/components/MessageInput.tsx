@@ -1,6 +1,6 @@
 import { encodeMentions } from '@shared/markup';
 import type { Attachment, Id } from '@shared/models';
-import { ATTACHMENT_TYPES, MAX_ATTACHMENTS_PER_MESSAGE, MAX_MESSAGE_LENGTH } from '@shared/protocol';
+import { ATTACHMENT_RETENTION_DAYS, ATTACHMENT_TYPES, MAX_ATTACHMENTS_PER_MESSAGE, MAX_MESSAGE_LENGTH } from '@shared/protocol';
 import {
   ChartNoAxesColumn,
   CornerUpRight,
@@ -263,7 +263,7 @@ export function MessageInput({ targetId, label, canSend }: MessageInputProps) {
         <div className="flex items-end gap-2 px-3 py-2.5">
           <button
             type="button"
-            title="Anexar arquivo"
+            title={`Anexar arquivo (fica ${ATTACHMENT_RETENTION_DAYS} dias no servidor)`}
             aria-label="Anexar arquivo"
             disabled={!canSend || pending.length >= MAX_ATTACHMENTS_PER_MESSAGE}
             onClick={() => fileInputRef.current?.click()}

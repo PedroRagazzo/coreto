@@ -96,6 +96,8 @@ export interface Attachment {
   /** Dimensões da imagem; `null` quando o anexo é um arquivo. */
   width: number | null;
   height: number | null;
+  /** O servidor já apagou o arquivo (passou do prazo); a mensagem fica, mas não há o que mostrar ou baixar. */
+  expired: boolean;
 }
 
 /** Um som do quadro de som de um espaço. O áudio é servido em `GET /sounds/<id>`. */

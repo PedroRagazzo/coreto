@@ -568,8 +568,8 @@ export class Store {
       ...(where.directId ? { directId: where.directId } : { channelId: { in: where.channelIds ?? [] } }),
       ...(where.authorId && { authorId: where.authorId }),
       // Imagem tem dimensões; arquivo, não.
-      ...(where.has === 'image' && { attachments: { some: { width: { not: null } } } }),
-      ...(where.has === 'file' && { attachments: { some: { width: null } } }),
+      ...(where.has === 'image' && { attachments: { some: { width: { not: null }, expiredAt: null } } }),
+      ...(where.has === 'file' && { attachments: { some: { width: null, expiredAt: null } } }),
       AND: [
         // O Prisma passa `contains` direto para o LIKE: sem escape, "%" e "_" seriam curingas.
         ...where.words.map((word) => ({ searchText: { contains: word.replace(/[\\%_]/g, '\\$&') } })),
@@ -840,9 +840,9 @@ export class Store {
     return toAttachment(await this.db.attachment.create({ data: input }));
   }
 
-  /** Quanto espaço os anexos já ocupam, em bytes (para a cota de espaço do servidor). */
+  /** Quanto espaço os anexos já ocupam, em bytes (para a cota de espaço do servidor). Os já apagados não contam. */
   async attachmentBytes(): Promise<number> {
-    const { _sum } = await this.db.attachment.aggregate({ _sum: { size: true } });
+    const { _sum } = await this.db.attachment.aggregate({ _sum: { size: true }, where: { expiredAt: null } });
     return _sum.size ?? 0;
   }
 
@@ -850,9 +850,9 @@ export class Store {
     await this.db.attachment.deleteMany({ where: { id } });
   }
 
-  /** Anexo já publicado numa mensagem; os soltos não são servidos. */
+  /** Anexo já publicado numa mensagem; os soltos e os que passaram do prazo não são servidos. */
   async publishedAttachment(id: Id): Promise<Attachment | null> {
-    const row = await this.db.attachment.findFirst({ where: { id, messageId: { not: null } } });
+    const row = await this.db.attachment.findFirst({ where: { id, messageId: { not: null }, expiredAt: null } });
     return row ? toAttachment(row) : null;
   }
 

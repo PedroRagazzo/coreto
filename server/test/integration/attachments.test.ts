@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { Attachment } from '../../../shared/src/models.js';
 import { MAX_ATTACHMENT_BYTES } from '../../../shared/src/protocol.js';
-import { cleanFileName, PENDING_UPLOAD_TTL_MS, sweepUploads, UploadDir } from '../../src/uploads.js';
+import { ATTACHMENT_RETENTION_MS, cleanFileName, PENDING_UPLOAD_TTL_MS, sweepUploads, UploadDir } from '../../src/uploads.js';
 import { hasTestDatabase } from '../support/database.js';
 import { channelNamed, fakePng, joinDemoSpace, nextEvent, ok, TestServer, type TestClient } from '../support/harness.js';
 
@@ -178,6 +178,7 @@ describe.skipIf(!hasTestDatabase)('anexos', () => {
         size: data.length,
         width: null,
         height: null,
+        expired: false,
       });
 
       const received = nextEvent(bruno.socket, 'message:new', (m) => m.channelId === geral.id);
@@ -294,6 +295,69 @@ describe.skipIf(!hasTestDatabase)('anexos', () => {
       await sweepUploads(server.db, new UploadDir(server.uploadDir), Date.now() + 2 * PENDING_UPLOAD_TTL_MS);
       expect(existsSync(fresh)).toBe(false);
     });
+
+    describe('prazo de validade', () => {
+      const age = (id: string, ms: number) =>
+        server.db.attachment.update({ where: { id }, data: { createdAt: new Date(Date.now() - ms) } });
+
+      it('passado o prazo a limpeza apaga o arquivo, mas a mensagem fica com o anexo marcado como apagado', async () => {
+        const { ana, bruno, geral } = await inGeral();
+        const oldFile = await uploaded(ana, Buffer.from('velho'), 'velho.txt');
+        const oldImage = await uploaded(ana, fakePng(64, 48), 'velha.png');
+        const recent = await uploaded(ana, Buffer.from('novo'), 'novo.txt');
+        const sentOld = ok(
+          await ana.socket.emitWithAck('message:send', { channelId: geral.id, content: 'antigo', attachmentIds: [oldFile.id, oldImage.id] }),
+        );
+        ok(await ana.socket.emitWithAck('message:send', { channelId: geral.id, content: 'recente', attachmentIds: [recent.id] }));
+        await age(oldFile.id, ATTACHMENT_RETENTION_MS + 60_000);
+        await age(oldImage.id, ATTACHMENT_RETENTION_MS + 60_000);
+        await age(recent.id, ATTACHMENT_RETENTION_MS - 60 * 60_000); // falta uma hora para vencer
+
+        await sweepUploads(server.db, new UploadDir(server.uploadDir));
+
+        expect(existsSync(join(server.uploadDir, oldFile.id))).toBe(false);
+        expect(existsSync(join(server.uploadDir, oldImage.id))).toBe(false);
+        expect(existsSync(join(server.uploadDir, recent.id))).toBe(true);
+        expect((await fetchFile(oldFile.id)).status).toBe(404);
+        expect((await fetchFile(recent.id)).status).toBe(200);
+
+        // Quem abre o canal depois vê a mensagem, com os anexos antigos marcados e o recente intacto.
+        const history = ok(await bruno.socket.emitWithAck('channel:history', { channelId: geral.id }));
+        const old = history.find((m) => m.id === sentOld.id)!;
+        expect(old.content).toBe('antigo');
+        expect(old.attachments).toEqual([
+          { ...oldFile, expired: true },
+          { ...oldImage, expired: true },
+        ]);
+        expect(history.find((m) => m.content === 'recente')!.attachments).toEqual([{ ...recent, expired: false }]);
+      });
+
+      it('a limpeza refeita não mexe de novo no que já venceu, e termina o serviço se o arquivo ficou para trás', async () => {
+        const { ana, geral } = await inGeral();
+        const file = await uploaded(ana, Buffer.from('teimoso'), 'teimoso.txt');
+        ok(await ana.socket.emitWithAck('message:send', { channelId: geral.id, content: '', attachmentIds: [file.id] }));
+        await age(file.id, ATTACHMENT_RETENTION_MS + 60_000);
+        await sweepUploads(server.db, new UploadDir(server.uploadDir));
+        const { expiredAt } = (await server.db.attachment.findUnique({ where: { id: file.id } }))!;
+        expect(expiredAt).not.toBeNull();
+
+        // Servidor caiu no meio: o registro já está marcado, mas o arquivo continua no disco.
+        await writeFile(join(server.uploadDir, file.id), 'teimoso');
+        await sweepUploads(server.db, new UploadDir(server.uploadDir), Date.now() + 60_000);
+        expect(existsSync(join(server.uploadDir, file.id))).toBe(false);
+        expect((await server.db.attachment.findUnique({ where: { id: file.id } }))!.expiredAt).toEqual(expiredAt);
+      });
+
+      it('apagar a mensagem depois do prazo não deixa o registro para trás', async () => {
+        const { ana, geral } = await inGeral();
+        const file = await uploaded(ana, Buffer.from('some'), 'some.txt');
+        const sent = ok(await ana.socket.emitWithAck('message:send', { channelId: geral.id, content: '', attachmentIds: [file.id] }));
+        await age(file.id, ATTACHMENT_RETENTION_MS + 60_000);
+        await sweepUploads(server.db, new UploadDir(server.uploadDir));
+        ok(await ana.socket.emitWithAck('message:delete', { messageId: sent.id }));
+        expect(await server.db.attachment.count({ where: { id: file.id } })).toBe(0);
+      });
+    });
   });
 
   describe('nome do arquivo', () => {
@@ -353,5 +417,30 @@ describe.skipIf(!hasTestDatabase)('cota de espaço dos anexos', () => {
     expect((await readdir(server.uploadDir)).filter((n) => n.endsWith('.part'))).toEqual([]);
     const small = await server.upload(ana.token, Buffer.alloc(300, 3), 'c.bin');
     expect(small.status).toBe(201);
+  });
+});
+
+describe.skipIf(!hasTestDatabase)('cota de espaço e prazo dos anexos', () => {
+  let server: TestServer;
+  beforeAll(async () => {
+    server = await TestServer.start({ uploadQuotaBytes: 1000 });
+  });
+  afterEach(() => server.disconnectAll());
+  afterAll(() => server?.stop());
+
+  it('o arquivo que venceu deixa de contar na cota', async () => {
+    const ana = await server.connect('Ana');
+    const geral = channelNamed(await joinDemoSpace(ana), 'geral');
+    const full = await server.upload(ana.token, Buffer.alloc(900, 1), 'grande.bin');
+    if (!full.body.ok) throw new Error(`Upload recusado (${full.status}): ${full.body.error}`);
+    ok(await ana.socket.emitWithAck('message:send', { channelId: geral.id, content: '', attachmentIds: [full.body.attachment.id] }));
+    expect((await server.upload(ana.token, Buffer.alloc(900, 2), 'outro.bin')).status).toBe(507);
+
+    await server.db.attachment.update({
+      where: { id: full.body.attachment.id },
+      data: { createdAt: new Date(Date.now() - ATTACHMENT_RETENTION_MS - 60_000) },
+    });
+    await sweepUploads(server.db, new UploadDir(server.uploadDir));
+    expect((await server.upload(ana.token, Buffer.alloc(900, 2), 'outro.bin')).status).toBe(201);
   });
 });
