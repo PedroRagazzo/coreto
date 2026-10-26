@@ -198,6 +198,50 @@ export class MicPipeline {
     this.gain.gain.setTargetAtTime(volume, this.context.currentTime, 0.05);
   }
 
+  /** Decodifica um áudio (MP3, OGG, WAV...) para tocar aqui. */
+  decode(bytes: ArrayBuffer): Promise<AudioBuffer> {
+    return this.context.decodeAudioData(bytes);
+  }
+
+  /**
+   * Toca o som junto com o microfone: ele entra na mesma saída que vai para a chamada, então todo mundo o ouve como se
+   * viesse de você. Com `monitor`, você também o ouve (no volume `monitor`, de 0 a 1). Devolve a função que o corta.
+   * `onEnded` roda quando termina ou é cortado.
+   */
+  playClip(buffer: AudioBuffer, volume: number, monitor: number, onEnded: () => void): () => void {
+    const source = this.context.createBufferSource();
+    source.buffer = buffer;
+    const toCall = this.context.createGain();
+    toCall.gain.value = volume;
+    source.connect(toCall).connect(this.output);
+    let toYou: GainNode | null = null;
+    if (monitor > 0) {
+      toYou = this.context.createGain();
+      toYou.gain.value = volume * monitor;
+      source.connect(toYou).connect(this.context.destination);
+    }
+    source.onended = () => {
+      source.disconnect();
+      toCall.disconnect();
+      toYou?.disconnect();
+      onEnded();
+    };
+    source.start();
+    return () => {
+      try {
+        source.stop();
+      } catch {
+        // já terminou
+      }
+    };
+  }
+
+  /** Por qual saída de áudio você ouve o som que toca (onde o navegador permite; padrão: a do sistema). */
+  setMonitorDevice(deviceId: string | null): void {
+    const context = this.context as AudioContext & { setSinkId?: (id: string) => Promise<void> };
+    void context.setSinkId?.(deviceId ?? '').catch(() => {});
+  }
+
   /** Automático = sempre aberto; manual = só passa o que está acima do limite. */
   setSensitivity({ autoSensitivity, inputSensitivity }: Pick<VoicePrefs, 'autoSensitivity' | 'inputSensitivity'>): void {
     this.gate?.port.postMessage({ enabled: !autoSensitivity, threshold: dbToLinear(inputSensitivity) });
@@ -457,6 +501,12 @@ export class VoiceManager {
   private deafened = false;
   private selfId: Id | null = null;
   private readonly detector: SpeakingDetector;
+  /** Você está mutado (o microfone fechado)? Um som do quadro de som ainda toca assim: ele abre a saída só para ele. */
+  private mutedState = false;
+  /** Quantos sons do quadro de som estão tocando. */
+  private soundsPlaying = 0;
+  private readonly soundCache = new Map<Id, AudioBuffer>();
+  private readonly soundStops = new Set<() => void>();
   /** As últimas leituras de rede de cada pessoa, para medir a qualidade da conexão. */
   private readonly qualitySamples = new Map<Id, QualitySample[]>();
   private published: Record<Id, ConnectionQuality> = {};
@@ -524,6 +574,7 @@ export class VoiceManager {
       throw new Error(res.error);
     }
     this.mic = mic;
+    mic.setMonitorDevice(this.prefs.outputDeviceId);
     this.playback = playback;
     const stream = mic.stream;
     this.localStream = stream;
@@ -565,7 +616,10 @@ export class VoiceManager {
     this.qualityTimer = null;
     this.qualitySamples.clear();
     this.publishQuality({});
+    this.stopSounds();
     this.mic?.close();
+    this.soundsPlaying = 0;
+    this.soundCache.clear();
     this.mic = null;
     void this.playback?.close();
     this.playback = null;
@@ -582,13 +636,14 @@ export class VoiceManager {
     const prev = this.prefs;
     this.prefs = next;
     if (this.mic) {
-      if (next.inputVolume !== prev.inputVolume) this.mic.setVolume(next.inputVolume);
+      if (next.inputVolume !== prev.inputVolume) this.applyMic();
       if (next.aiNoiseSuppression !== prev.aiNoiseSuppression) await this.mic.setAiNoiseSuppression(next.aiNoiseSuppression);
       if (next.autoSensitivity !== prev.autoSensitivity || next.inputSensitivity !== prev.inputSensitivity) {
         this.mic.setSensitivity(next);
       }
       if (micChanged(prev, next)) this.mic.use(await openMicrophone(next));
     }
+    if (next.outputDeviceId !== prev.outputDeviceId) this.mic?.setMonitorDevice(next.outputDeviceId);
     if (next.outputDeviceId !== prev.outputDeviceId || next.outputVolume !== prev.outputVolume) {
       for (const peer of this.peers.values()) if (peer.voice) applyOutput(peer.voice.output, next);
     }
@@ -606,9 +661,50 @@ export class VoiceManager {
   }
 
   setMuted(muted: boolean): void {
+    this.mutedState = muted;
+    this.applyMic();
+  }
+
+  /**
+   * Abre ou fecha o microfone: mutado, ele fica fechado, a não ser enquanto toca um som do quadro de som (a saída abre
+   * só para o som, e o microfone em si fica sem volume, então ninguém ouve você).
+   */
+  private applyMic(): void {
+    const open = !this.mutedState || this.soundsPlaying > 0;
     this.localStream?.getAudioTracks().forEach((track) => {
-      track.enabled = !muted;
+      track.enabled = open;
     });
+    this.mic?.setVolume(this.mutedState ? 0 : this.prefs.inputVolume);
+  }
+
+  /**
+   * Toca um som do quadro de som para a chamada (e para você, se `monitor` > 0). `load` busca os bytes na primeira vez;
+   * depois o som decodificado fica guardado. Resolve quando o som começa a tocar.
+   */
+  async playSound(id: Id, load: () => Promise<ArrayBuffer>, volume: number, monitor: number): Promise<void> {
+    const mic = this.mic;
+    if (!mic || !this.localStream) throw new Error('Entre em um canal de voz para usar o quadro de som.');
+    if (this.deafened) throw new Error('Ative o som para usar o quadro de som.');
+    let buffer = this.soundCache.get(id);
+    if (!buffer) {
+      buffer = await mic.decode(await load());
+      if (this.soundCache.size >= 32) this.soundCache.delete(this.soundCache.keys().next().value!);
+      this.soundCache.set(id, buffer);
+    }
+    if (this.mic !== mic) return; // saiu da chamada enquanto o som carregava
+    this.soundsPlaying++;
+    this.applyMic();
+    const stop = mic.playClip(buffer, volume, this.deafened ? 0 : monitor, () => {
+      this.soundStops.delete(stop);
+      this.soundsPlaying = Math.max(0, this.soundsPlaying - 1);
+      if (this.mic === mic) this.applyMic();
+    });
+    this.soundStops.add(stop);
+  }
+
+  /** Corta os sons do quadro de som que estão tocando. */
+  stopSounds(): void {
+    for (const stop of [...this.soundStops]) stop();
   }
 
   setDeafened(deafened: boolean): void {

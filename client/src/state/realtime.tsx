@@ -13,6 +13,7 @@ import type {
   PresenceStatus,
   Reaction,
   Roulette,
+  SoundClip,
   Space,
   SpaceSnapshot,
   UnreadCount,
@@ -44,6 +45,7 @@ import type { Identity } from '../lib/identity';
 import { createSocket, type AppSocket } from '../lib/socket';
 import { useWindowActive, isWindowActive } from '../lib/focus';
 import { bringWindowToFront, showToast } from '../lib/notifications';
+import { checkSoundFile, fetchSound, uploadSound } from '../lib/soundboard';
 import { uploadFile, type UploadHandle } from '../lib/uploads';
 import { DEFAULT_SETTINGS } from '../lib/settings';
 import { displayNameOf } from './selectors';
@@ -88,6 +90,10 @@ export interface RealtimeState {
   snapshot: SpaceSnapshot | null;
   directs: Record<Id, DirectConversation>;
   activeDirectId: Id | null;
+  /** espaço → os sons do quadro de som (carregados quando o quadro abre; o servidor avisa quando mudam) */
+  sounds: Record<Id, SoundClip[]>;
+  /** canal → contador que sobe quando as fixadas dele mudam (fixar, desafixar, editar ou apagar uma mensagem); o painel recarrega */
+  pinsVersion: Record<Id, number>;
   /** Roletas que acabaram de girar ao vivo (mensagem → `true`): só elas animam; as que já tinham resultado aparecem paradas. */
   freshSpins: Record<Id, true>;
   /** link → o cartão de pré-visualização (`null` se a página não tem o que mostrar); ausente = ainda não pedido */
@@ -161,6 +167,8 @@ const initialState: RealtimeState = {
   snapshot: null,
   directs: {},
   activeDirectId: null,
+  sounds: {},
+  pinsVersion: {},
   freshSpins: {},
   linkPreviews: {},
   unread: {},
@@ -228,6 +236,8 @@ type Action =
   | { type: 'message:updated'; message: Message }
   | { type: 'message:deleted'; channelId: Id; messageId: Id }
   | { type: 'message:reactions'; channelId: Id; messageId: Id; reactions: Reaction[] }
+  | { type: 'sounds:set'; spaceId: Id; clips: SoundClip[] }
+  | { type: 'message:pinned'; channelId: Id; messageId: Id; pinnedAt: string | null; pinnedById: Id | null }
   | { type: 'poll:updated'; channelId: Id; messageId: Id; poll: Poll }
   | { type: 'roulette:spun'; channelId: Id; messageId: Id; roulette: Roulette }
   | { type: 'roulette:settled'; messageId: Id }
@@ -266,7 +276,26 @@ function closeStage(state: RealtimeState, userId: Id): Pick<RealtimeState, 'stag
   return { stages, focusedStage };
 }
 
+/** Os eventos que mudam o que o painel de fixadas mostra: ele recarrega quando o contador do canal sobe. */
+function pinsChannel(action: Action): Id | null {
+  switch (action.type) {
+    case 'message:pinned':
+    case 'message:deleted':
+      return action.channelId;
+    case 'message:updated':
+      return action.message.pinnedAt ? action.message.channelId : null;
+    default:
+      return null;
+  }
+}
+
 function reducer(state: RealtimeState, action: Action): RealtimeState {
+  const next = apply(state, action);
+  const channelId = pinsChannel(action);
+  return channelId ? { ...next, pinsVersion: { ...next.pinsVersion, [channelId]: (next.pinsVersion[channelId] ?? 0) + 1 } } : next;
+}
+
+function apply(state: RealtimeState, action: Action): RealtimeState {
   switch (action.type) {
     case 'connection':
       return { ...state, connection: action.connection, connectionError: action.error ?? null };
@@ -536,6 +565,23 @@ function reducer(state: RealtimeState, action: Action): RealtimeState {
       };
     }
 
+    case 'sounds:set':
+      return { ...state, sounds: { ...state.sounds, [action.spaceId]: action.clips } };
+
+    case 'message:pinned': {
+      const list = state.messages[action.channelId];
+      if (!list?.some((m) => m.id === action.messageId)) return state;
+      return {
+        ...state,
+        messages: {
+          ...state.messages,
+          [action.channelId]: list.map((m) =>
+            m.id === action.messageId ? { ...m, pinnedAt: action.pinnedAt, pinnedById: action.pinnedById } : m,
+          ),
+        },
+      };
+    }
+
     case 'poll:updated': {
       const list = state.messages[action.channelId];
       if (!list?.some((m) => m.id === action.messageId)) return state;
@@ -726,6 +772,19 @@ export interface RealtimeActions {
   selectDirect(conversationId: Id): void;
   /** Envia para um canal de texto ou conversa direta, com anexos já enviados. Resolve com erro ou `null`. */
   sendMessage(targetId: Id, content: string, attachmentIds?: Id[], replyToId?: Id): Promise<string | null>;
+  /** Carrega os sons do quadro de som do espaço para `state.sounds`. Resolve com o erro, ou `null`. */
+  loadSounds(spaceId: Id): Promise<string | null>;
+  /** Envia um som para o quadro de som do espaço. Resolve com o erro, ou `null`. */
+  addSound(spaceId: Id, file: File, name: string, emoji: string | null): Promise<string | null>;
+  removeSound(id: Id): Promise<string | null>;
+  /** Toca o som para a chamada (e para você, se `monitor` > 0). Resolve com o erro, ou `null`. */
+  playSound(clip: SoundClip, volume: number, monitor: number): Promise<string | null>;
+  /** Corta os sons que estão tocando. */
+  stopSounds(): void;
+  /** Fixa a mensagem (ou desafixa). Resolve com o erro, ou `null`. */
+  pinMessage(messageId: Id, pinned: boolean): Promise<string | null>;
+  /** As mensagens fixadas do canal ou da conversa; ou o erro. */
+  loadPins(channelId: Id): Promise<{ messages: Message[] } | { error: string }>;
   /** Cria uma enquete no canal ou conversa. Resolve com o erro, ou `null` quando deu certo (a mensagem chega pelo evento). */
   createPoll(targetId: Id, poll: { question: string; options: string[]; multiple: boolean }): Promise<string | null>;
   /** Cria uma roleta no canal ou conversa. Resolve com o erro, ou `null`. */
@@ -1069,6 +1128,49 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
         return res.ok ? null : res.error;
       },
 
+      async loadSounds(spaceId) {
+        const socket = socketRef.current;
+        if (!socket) return 'Sem conexão com o servidor.';
+        try {
+          const res = await socket.timeout(10_000).emitWithAck('sounds:list', { spaceId });
+          if (!res.ok) return res.error;
+          dispatch({ type: 'sounds:set', spaceId, clips: res.data });
+          return null;
+        } catch {
+          return 'O servidor não respondeu. Tente de novo.';
+        }
+      },
+      async addSound(spaceId, file, name, emoji) {
+        const problem = await checkSoundFile(file);
+        if (problem) return problem;
+        const res = await uploadSound(identityRef.current.token, spaceId, file, name, emoji);
+        return res.ok ? null : res.error;
+      },
+      removeSound: (id) => ask((s) => s.timeout(10_000).emitWithAck('sound:remove', { id })),
+      async playSound(clip, volume, monitor) {
+        const voice = voiceRef.current;
+        if (!voice) return 'Entre em um canal de voz para usar o quadro de som.';
+        try {
+          await voice.playSound(clip.id, () => fetchSound(clip.id), volume, monitor);
+          return null;
+        } catch (err) {
+          return err instanceof Error ? err.message : 'Não foi possível tocar o som.';
+        }
+      },
+      stopSounds() {
+        voiceRef.current?.stopSounds();
+      },
+      pinMessage: (messageId, pinned) => ask((s) => s.timeout(10_000).emitWithAck('message:pin', { messageId, pinned })),
+      async loadPins(channelId) {
+        const socket = socketRef.current;
+        if (!socket) return { error: 'Sem conexão com o servidor.' };
+        try {
+          const res = await socket.timeout(10_000).emitWithAck('pins:list', { channelId });
+          return res.ok ? { messages: res.data } : { error: res.error };
+        } catch {
+          return { error: 'O servidor não respondeu. Tente de novo.' };
+        }
+      },
       createPoll: (targetId, poll) => ask((s) => s.timeout(10_000).emitWithAck('poll:create', { channelId: targetId, ...poll })),
       createRoulette: (targetId, roulette) => ask((s) => s.timeout(10_000).emitWithAck('roulette:create', { channelId: targetId, ...roulette })),
       votePoll: (messageId, optionId) => ask((s) => s.timeout(10_000).emitWithAck('poll:vote', { messageId, optionId })),
@@ -1441,6 +1543,10 @@ export function RealtimeProvider({ identity, onSessionInvalid, children }: Realt
       notifyMessage(message);
     });
     socket.on('message:updated', (message) => dispatch({ type: 'message:updated', message }));
+    socket.on('sounds:updated', ({ spaceId, clips }) => dispatch({ type: 'sounds:set', spaceId, clips }));
+    socket.on('message:pinned', ({ channelId, messageId, pinnedAt, pinnedById }) =>
+      dispatch({ type: 'message:pinned', channelId, messageId, pinnedAt, pinnedById }),
+    );
     socket.on('poll:updated', ({ channelId, messageId, poll }) => dispatch({ type: 'poll:updated', channelId, messageId, poll }));
     socket.on('roulette:spun', ({ channelId, messageId, roulette }) => {
       dispatch({ type: 'roulette:spun', channelId, messageId, roulette });

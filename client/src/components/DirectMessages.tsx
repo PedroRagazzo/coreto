@@ -1,10 +1,11 @@
 import type { DirectConversation, User } from '@shared/models';
-import { AtSign, MessageCircle } from 'lucide-react';
+import { AtSign, MessageCircle, Pin } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useRealtime, type RealtimeState } from '../state/realtime';
 import { Avatar, STATUS_LABEL } from './Avatar';
 import { MessageInput } from './MessageInput';
 import { MessageList } from './MessageList';
+import { PinsPanel } from './PinsPanel';
 import { SearchBox, SearchPanel } from './Search';
 import { TypingIndicator } from './TypingIndicator';
 
@@ -81,7 +82,11 @@ export function DirectMessagesPanel() {
   const conversation = state.activeDirectId ? state.directs[state.activeDirectId] : undefined;
   const partner = conversation ? partnerOf(state, conversation) : undefined;
   const [searchQuery, setSearchQuery] = useState<string | null>(null);
-  useEffect(() => setSearchQuery(null), [conversation?.id]);
+  const [showPins, setShowPins] = useState(false);
+  useEffect(() => {
+    setSearchQuery(null);
+    setShowPins(false);
+  }, [conversation?.id]);
 
   if (!conversation || !partner) {
     return (
@@ -101,7 +106,27 @@ export function DirectMessagesPanel() {
         <AtSign size={20} className="shrink-0 text-faint" />
         <h2 className="truncate font-semibold">{partner.displayName}</h2>
         <span className="shrink-0 text-sm text-muted">· {STATUS_LABEL[partner.status]}</span>
-        <SearchBox key={conversation.id} placeholder={`Buscar com ${partner.displayName}`} onSearch={setSearchQuery} />
+        <SearchBox
+          key={conversation.id}
+          placeholder={`Buscar com ${partner.displayName}`}
+          onSearch={(query) => {
+            setShowPins(false);
+            setSearchQuery(query);
+          }}
+        />
+        <button
+          type="button"
+          onClick={() => {
+            setSearchQuery(null);
+            setShowPins((open) => !open);
+          }}
+          aria-pressed={showPins && searchQuery === null}
+          aria-label="Mensagens fixadas"
+          title="Mensagens fixadas"
+          className={`rounded p-1.5 ${showPins && searchQuery === null ? 'text-fg' : 'text-faint hover:text-fg'}`}
+        >
+          <Pin size={20} />
+        </button>
       </header>
       <div className="flex min-h-0 flex-1">
         <section aria-label={`Conversa com ${partner.displayName}`} className="flex min-w-0 flex-1 flex-col">
@@ -121,8 +146,10 @@ export function DirectMessagesPanel() {
           <MessageInput targetId={conversation.id} label={`@${partner.displayName}`} canSend />
           <TypingIndicator channelId={conversation.id} />
         </section>
-        {searchQuery !== null && (
+        {searchQuery !== null ? (
           <SearchPanel scope={{ directId: conversation.id }} query={searchQuery} onClose={() => setSearchQuery(null)} />
+        ) : (
+          showPins && <PinsPanel channelId={conversation.id} canPin onClose={() => setShowPins(false)} />
         )}
       </div>
     </>

@@ -12,6 +12,7 @@ import type {
   Reaction,
   Role,
   Roulette,
+  SoundClip,
   Space,
   User,
 } from '../../../shared/src/models.js';
@@ -83,6 +84,17 @@ export const toDirect = (row: Db.DirectConversation): DirectConversation => ({
   id: row.id,
   participantIds: [row.userAId, row.userBId],
   lastMessageAt: iso(row.lastMessageAt),
+});
+
+export const toSound = (row: Db.SoundClip): SoundClip => ({
+  id: row.id,
+  spaceId: row.spaceId,
+  name: row.name,
+  emoji: row.emoji,
+  uploaderId: row.uploaderId,
+  contentType: row.contentType,
+  size: row.size,
+  createdAt: row.createdAt.toISOString(),
 });
 
 export const toAttachment = (row: Db.Attachment): Attachment => ({
@@ -165,6 +177,8 @@ export const toMessage = (row: MessageRow, parents: ReadonlyMap<string, ReplyPar
   editedAt: iso(row.editedAt),
   replyTo: row.replyToId ? replyPreviewFor(row.replyToId, parents.get(row.replyToId)) : null,
   reactions: toReactions(row.reactions),
+  pinnedAt: iso(row.pinnedAt),
+  pinnedById: row.pinnedById,
   poll: row.poll ? toPoll(row.poll) : null,
   roulette: row.roulette ? toRoulette(row.roulette) : null,
 });

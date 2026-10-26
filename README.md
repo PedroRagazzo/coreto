@@ -145,6 +145,25 @@ pg_restore --clean --if-exists --no-owner --dbname="${DATABASE_URL%%\?*}" /data/
 cp -n /data/backups/uploads/* /data/uploads/   # só se perdeu também os anexos
 ```
 
+### Alerta de servidor fora do ar
+
+O aviso precisa vir de fora do servidor (um servidor fora do ar não consegue avisar), então quem confere é o GitHub:
+`.github/workflows/monitor.yml` roda de 10 em 10 minutos, pede `GET /health` ao endereço de `desktop/coreto.config.json`
+(`deploy/monitor/`, até 4 tentativas com 30 s entre elas, para um deploy não virar alarme) e avisa **uma vez quando cai e
+uma vez quando volta**. O estado ("já avisei") fica na execução anterior do próprio workflow (o passo "Registrar queda"
+rodou ou não), sem issue pública nem arquivo no repositório, então um servidor fora do ar por horas não gera uma enxurrada.
+
+- **Sem configurar nada:** a execução fica vermelha na primeira queda e o GitHub manda e-mail (e notificação no app do GitHub).
+- **Notificação no celular (ntfy):** instale o app gratuito [ntfy](https://ntfy.sh) (sem conta), toque em "+" e assine um tópico
+  com um nome comprido e aleatório, por exemplo `coreto-` e mais 20 letras (o nome é a senha: quem o souber lê e escreve nele).
+  No GitHub, em Settings → Secrets and variables → Actions → New repository secret, crie `NTFY_TOPIC` com esse nome.
+- **Discord (opcional):** num canal, Editar canal → Integrações → Webhooks → Novo webhook, copie a URL e guarde como o segredo
+  `DISCORD_WEBHOOK`.
+- **Conferir:** em Actions → Monitor → Run workflow, marque "teste": ele só manda um aviso de teste e diz se nenhum segredo está
+  configurado. Os segredos ficam só no GitHub; nunca no código.
+- O GitHub desliga workflows agendados em repositórios sem nenhuma atividade por 60 dias; um commit reativa. Os horários dos
+  agendamentos podem atrasar alguns minutos.
+
 ## App de desktop (Windows)
 
 `desktop/` é um app Electron que abre o servidor de `desktop/coreto.config.json`, como o app do Discord abre o
@@ -382,6 +401,18 @@ a busca e as respostas funcionam como sempre. Não dá para editar: apague e cri
   servidor; a conta do ângulo da roda (`wheelAngle`, `sliceAt`) também. Votos, encerramentos e giros têm limite de 30
   a cada 5 segundos por conexão.
 
+## Mensagens fixadas
+
+Passando o mouse numa mensagem aparece o alfinete: um clique fixa (ou desafixa). A mensagem fixada ganha o selo "Fixada" e
+entra na lista do botão de alfinete no cabeçalho do canal ou da conversa, que abre ao lado da conversa: cada item mostra
+quem escreveu, o texto, "Fixada por ..." e o botão **Desafixar**, e clicar nele leva até a mensagem no histórico.
+
+- Quem pode escrever no canal (ou participa da conversa direta) fixa e desafixa: num grupo de amigos ninguém tem cargo de moderação.
+  No máximo 50 fixadas por canal ou conversa (`MAX_PINS_PER_CHANNEL`).
+- No banco, `Message.pinnedAt` e `pinnedById` (sem chave estrangeira). Apagar a mensagem a desafixa sozinha.
+- Eventos: `message:pin` e `pins:list` (pedidos) e `message:pinned` (para todos que veem o canal); o painel se recarrega
+  quando o contador `pinsVersion` do canal sobe (fixar, desafixar, editar ou apagar uma fixada).
+
 ## Mensagens não lidas e notificações
 
 - **Não lidas.** Cada canal e cada conversa direta mostra quantas mensagens de outras pessoas chegaram depois da
@@ -571,6 +602,25 @@ ruim quando metade ou mais delas está ruim para você, aí o problema provavelm
 A malha funciona bem até umas 5 a 8 pessoas por sala, porque cada participante envia o áudio para todos os outros.
 Para salas maiores, e para impor `SPEAK` no servidor, troque por um SFU (mediasoup, LiveKit ou Janus):
 o protocolo de `voice:join` / `voice:signal` já isola essa troca em `server/src/realtime/voice.ts` e `client/src/lib/voice.ts`.
+
+### Quadro de som
+
+O botão **Quadro de som** (a onda, ao lado de Música na barra da chamada, e "Sons" no painel da chamada) abre os sons do
+espaço: um clique toca o som para todo mundo na chamada. Qualquer pessoa do espaço acrescenta um (MP3, OGG, WAV, WebM ou
+M4A, **até 8 s e 1 MB**, com um nome e, se quiser, um emoji; até 24 por espaço) e remove os que enviou; quem gerencia os canais
+remove qualquer um.
+
+- **Como a chamada ouve:** o site baixa o áudio e o toca **dentro do seu microfone** (`MicPipeline.playClip`): o som entra na
+  mesma saída que vai para a chamada, então todo mundo o ouve como se viesse de você (o anel de "falando" acende), sem o
+  servidor misturar nada. "Ouvir o som que eu toco" liga o retorno para você (desligue com caixa de som, senão o
+  microfone repete o som). O volume do quadro e essa opção ficam só no seu computador.
+- **Mutado também toca:** com o microfone mutado, o som sai só durante o som: a saída abre e o microfone em si fica sem volume,
+  então ninguém ouve você falar (conferido com um microfone ruidoso: os outros ouviram só o som). Com o som da chamada
+  desativado (ensurdecido), não toca.
+- **Servidor:** os sons ficam na tabela `SoundClip` e o áudio na pasta dos anexos (`UPLOAD_DIR`, contando na cota
+  `UPLOAD_QUOTA_MB`). `POST /sounds` recebe o áudio, que é reconhecido pelo conteúdo (`shared/src/sounds.ts`: nunca pela extensão)
+  e servido só como áudio, com `nosniff` e `sandbox`; `GET /sounds/<id>`. Eventos: `sounds:list`, `sound:remove` e
+  `sounds:updated`. O limite de 8 s é conferido no site (que decodifica o áudio antes de enviar); o servidor limita o tamanho.
 
 ### Câmera e visão da chamada
 

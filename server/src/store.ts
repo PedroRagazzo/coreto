@@ -24,6 +24,7 @@ import type {
   Reaction,
   Role,
   Roulette,
+  SoundClip,
   Space,
   SpaceSnapshot,
   UnreadCount,
@@ -39,6 +40,7 @@ import {
   replyParentSelect,
   toPoll,
   toRoulette,
+  toSound,
   toReactions,
   toAttachment,
   toCategory,
@@ -664,6 +666,67 @@ export class Store {
   async authorOfMessageIn(targetId: Id, messageId: Id): Promise<Id | null> {
     const row = await this.db.message.findFirst({ where: { id: messageId, ...this.targetWhere(targetId) }, select: { authorId: true } });
     return row?.authorId ?? null;
+  }
+
+  // ── Quadro de som ──────────────────────────────────────────────────────────
+
+  /** Os sons do espaço, do mais antigo ao mais novo. */
+  async soundsOf(spaceId: Id): Promise<SoundClip[]> {
+    return (await this.db.soundClip.findMany({ where: { spaceId }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] })).map(toSound);
+  }
+
+  soundCount(spaceId: Id): Promise<number> {
+    return this.db.soundClip.count({ where: { spaceId } });
+  }
+
+  /** Quanto espaço os sons ocupam, em bytes (entra na cota de espaço do servidor). */
+  async soundBytes(): Promise<number> {
+    const { _sum } = await this.db.soundClip.aggregate({ _sum: { size: true } });
+    return _sum.size ?? 0;
+  }
+
+  async findSound(id: Id): Promise<SoundClip | null> {
+    const row = await this.db.soundClip.findUnique({ where: { id } });
+    return row ? toSound(row) : null;
+  }
+
+  async createSound(input: Pick<SoundClip, 'spaceId' | 'uploaderId' | 'name' | 'emoji' | 'contentType' | 'size'>): Promise<SoundClip> {
+    return toSound(await this.db.soundClip.create({ data: input }));
+  }
+
+  async deleteSound(id: Id): Promise<void> {
+    await this.db.soundClip.deleteMany({ where: { id } });
+  }
+
+  // ── Mensagens fixadas ──────────────────────────────────────────────────────
+
+  /** As mensagens fixadas do canal ou da conversa, da fixação mais recente para a mais antiga. */
+  async pinnedMessages(targetId: Id, limit: number): Promise<Message[]> {
+    const rows = await this.db.message.findMany({
+      where: { ...this.targetWhere(targetId), pinnedAt: { not: null } },
+      orderBy: [{ pinnedAt: 'desc' }, { id: 'desc' }],
+      take: limit,
+      include: messageInclude,
+    });
+    return this.toMessages(rows);
+  }
+
+  /**
+   * Fixa a mensagem, ou desafixa. Fixar o que já está fixado não muda nada (nem a hora). Devolve `full` se o lugar já tem
+   * `max` fixadas, ou a mensagem atualizada.
+   */
+  async setPinned(message: Message, userId: Id, pinned: boolean, max: number): Promise<Message | 'full'> {
+    if (pinned && message.pinnedAt === null) {
+      const count = await this.db.message.count({ where: { ...this.targetWhere(message.channelId), pinnedAt: { not: null } } });
+      if (count >= max) return 'full';
+    }
+    if (pinned === (message.pinnedAt !== null)) return message;
+    const row = await this.db.message.update({
+      where: { id: message.id },
+      data: pinned ? { pinnedAt: new Date(), pinnedById: userId } : { pinnedAt: null, pinnedById: null },
+      include: messageInclude,
+    });
+    return (await this.toMessages([row]))[0];
   }
 
   // ── Enquetes e roletas ─────────────────────────────────────────────────────

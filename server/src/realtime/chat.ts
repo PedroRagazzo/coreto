@@ -9,6 +9,7 @@ import {
   HISTORY_PAGE_SIZE,
   MAX_ATTACHMENTS_PER_MESSAGE,
   MAX_MESSAGE_LENGTH,
+  MAX_PINS_PER_CHANNEL,
 } from '../../../shared/src/protocol.js';
 import { AttachmentUnavailableError, type Store } from '../store.js';
 import type { UploadDir } from '../uploads.js';
@@ -234,6 +235,43 @@ export function registerChat(
 
   // Votar e girar valem onde a pessoa pode ler, como reagir (num canal só de leitura dá para votar).
   const pollActionAllowed = burstLimiter(POLL_BURST, REACTION_WINDOW_MS);
+
+  // Fixar vale para quem pode escrever no lugar (num grupo de amigos ninguém tem cargo de moderação): o limite é o de
+  // MAX_PINS_PER_CHANNEL fixadas por vez.
+  socket.on('message:pin', async (req, ack) => {
+    if (!isFunction(ack)) return;
+    if (!pollActionAllowed()) return ack({ ok: false, error: 'Devagar.' });
+    if (typeof req?.pinned !== 'boolean') return ack({ ok: false, error: 'Pedido inválido.' });
+    try {
+      const found = await locate(req.messageId);
+      const target = found ? messageTarget(store, userId, found.message.channelId, 'write') : null;
+      if (!found || !target) return ack({ ok: false, error: 'Você não pode fixar mensagens aqui.' });
+      const result = await store.setPinned(found.message, userId, req.pinned, MAX_PINS_PER_CHANNEL);
+      if (result === 'full') return ack({ ok: false, error: `Já há ${MAX_PINS_PER_CHANNEL} mensagens fixadas aqui. Desafixe uma antes.` });
+      if (result.pinnedAt !== found.message.pinnedAt) {
+        io.to(audienceOf(target)).emit('message:pinned', {
+          channelId: result.channelId,
+          messageId: result.id,
+          pinnedAt: result.pinnedAt,
+          pinnedById: result.pinnedById,
+        });
+      }
+      ack({ ok: true, data: null });
+    } catch (err) {
+      ack(storageError('message:pin', err));
+    }
+  });
+
+  socket.on('pins:list', async (req, ack) => {
+    if (!isFunction(ack)) return;
+    const target = messageTarget(store, userId, req?.channelId, 'read');
+    if (!target) return ack({ ok: false, error: 'Canal indisponível.' });
+    try {
+      ack({ ok: true, data: await store.pinnedMessages(target.id, MAX_PINS_PER_CHANNEL) });
+    } catch (err) {
+      ack(storageError('pins:list', err));
+    }
+  });
 
   socket.on('poll:vote', async (req, ack) => {
     if (!isFunction(ack)) return;

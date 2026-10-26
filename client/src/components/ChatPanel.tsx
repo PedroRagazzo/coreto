@@ -1,11 +1,12 @@
 import { Permission } from '@shared/permissions';
-import { Hash, Users } from 'lucide-react';
+import { Hash, Pin, Users } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useRealtime } from '../state/realtime';
 import { can } from '../state/selectors';
 import { MemberList } from './MemberList';
 import { MessageInput } from './MessageInput';
 import { MessageList } from './MessageList';
+import { PinsPanel } from './PinsPanel';
 import { SearchBox, SearchPanel } from './Search';
 import { TypingIndicator } from './TypingIndicator';
 
@@ -21,8 +22,12 @@ export function ChatPanel({ showMembers, onToggleMembers }: ChatPanelProps) {
   const channel = snapshot?.channels.find((c) => c.id === channelId);
   /** Texto da busca aberta ao lado; `null` = busca fechada. */
   const [searchQuery, setSearchQuery] = useState<string | null>(null);
+  const [showPins, setShowPins] = useState(false);
   const spaceId = snapshot?.space.id;
-  useEffect(() => setSearchQuery(null), [spaceId]);
+  useEffect(() => {
+    setSearchQuery(null);
+    setShowPins(false);
+  }, [spaceId]);
 
   return (
     <>
@@ -41,16 +46,41 @@ export function ChatPanel({ showMembers, onToggleMembers }: ChatPanelProps) {
         ) : (
           <h2 className="font-semibold text-muted">Nenhum canal selecionado</h2>
         )}
-        {snapshot && <SearchBox key={snapshot.space.id} placeholder={`Buscar em ${snapshot.space.name}`} onSearch={setSearchQuery} />}
+        {snapshot && (
+          <SearchBox
+            key={snapshot.space.id}
+            placeholder={`Buscar em ${snapshot.space.name}`}
+            onSearch={(query) => {
+              setShowPins(false);
+              setSearchQuery(query);
+            }}
+          />
+        )}
+        {channel && (
+          <button
+            type="button"
+            onClick={() => {
+              setSearchQuery(null);
+              setShowPins((open) => !open);
+            }}
+            aria-pressed={showPins && searchQuery === null}
+            aria-label="Mensagens fixadas"
+            title="Mensagens fixadas"
+            className={`rounded p-1.5 ${showPins && searchQuery === null ? 'text-fg' : 'text-faint hover:text-fg'}`}
+          >
+            <Pin size={20} />
+          </button>
+        )}
         <button
           type="button"
           onClick={() => {
             setSearchQuery(null);
-            if (searchQuery === null || !showMembers) onToggleMembers();
+            setShowPins(false);
+            if ((searchQuery === null && !showPins) || !showMembers) onToggleMembers();
           }}
-          aria-pressed={showMembers && searchQuery === null}
+          aria-pressed={showMembers && searchQuery === null && !showPins}
           title={showMembers ? 'Ocultar membros' : 'Mostrar membros'}
-          className={`hidden rounded p-1.5 lg:block ${showMembers && searchQuery === null ? 'text-fg' : 'text-faint hover:text-fg'}`}
+          className={`hidden rounded p-1.5 lg:block ${showMembers && searchQuery === null && !showPins ? 'text-fg' : 'text-faint hover:text-fg'}`}
         >
           <Users size={20} />
         </button>
@@ -89,6 +119,8 @@ export function ChatPanel({ showMembers, onToggleMembers }: ChatPanelProps) {
 
         {snapshot && searchQuery !== null ? (
           <SearchPanel scope={{ spaceId: snapshot.space.id }} query={searchQuery} onClose={() => setSearchQuery(null)} />
+        ) : showPins && channel ? (
+          <PinsPanel channelId={channel.id} canPin={can(snapshot, channel.id, Permission.SEND_MESSAGES)} onClose={() => setShowPins(false)} />
         ) : (
           showMembers && snapshot && <MemberList />
         )}

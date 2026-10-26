@@ -14,6 +14,7 @@ import type {
   PresenceStatus,
   Reaction,
   Roulette,
+  SoundClip,
   Space,
   UnreadCount,
   SpaceSnapshot,
@@ -36,12 +37,17 @@ export const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
 /** Até este tamanho o servidor confere se o arquivo é uma imagem e lê as dimensões; acima, é só um arquivo. */
 export const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 export const MAX_ATTACHMENTS_PER_MESSAGE = 4;
+/** Mensagens fixadas ao mesmo tempo num canal ou numa conversa. */
+export const MAX_PINS_PER_CHANNEL = 50;
 /** As imagens que aparecem na conversa; qualquer outro anexo é um arquivo para baixar. */
 export const ATTACHMENT_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] as const;
 /** Tipo guardado de um arquivo que não é imagem: o servidor nunca confia no tipo que o navegador declarou. */
 export const FILE_CONTENT_TYPE = 'application/octet-stream';
 
 export type UploadResponse = { ok: true; attachment: Attachment } | { ok: false; error: string };
+
+/** Resposta de POST /sounds (o envio de um som para o quadro de som). */
+export type SoundUploadResponse = { ok: true; clip: SoundClip } | { ok: false; error: string };
 
 // ── Login (HTTP POST /login) ─────────────────────────────────────────────────
 // O socket.io só aceita conexões com o token de sessão devolvido aqui.
@@ -226,6 +232,14 @@ export interface ClientToServerEvents {
     req: { channelId: Id; content: string; attachmentIds?: Id[]; replyToId?: Id },
     ack: (res: Ack<Message>) => void,
   ) => void;
+  /** Fixa a mensagem (ou desafixa, com `pinned: false`). Vale para quem pode escrever no canal ou na conversa. */
+  'message:pin': (req: { messageId: Id; pinned: boolean }, ack: (res: Ack<null>) => void) => void;
+  /** As mensagens fixadas do canal ou da conversa, da mais recente fixação para a mais antiga. */
+  'pins:list': (req: { channelId: Id }, ack: (res: Ack<Message[]>) => void) => void;
+  /** Os sons do quadro de som do espaço. Quem acrescenta usa POST /sounds (ver server/src/sounds.ts). */
+  'sounds:list': (req: { spaceId: Id }, ack: (res: Ack<SoundClip[]>) => void) => void;
+  /** Remove um som: quem enviou, ou quem gerencia os canais do espaço. */
+  'sound:remove': (req: { id: Id }, ack: (res: Ack<null>) => void) => void;
   /** Cria uma enquete (mensagem com opções para votar). Limites em shared/src/polls.ts. */
   'poll:create': (
     req: { channelId: Id; question: string; options: string[]; multiple?: boolean },
@@ -310,6 +324,10 @@ export interface ServerToClientEvents {
   'unread:bump': (payload: { channelId: Id; spaceId: Id | null }) => void;
   /** As reações de uma mensagem mudaram (a lista inteira, já atualizada). */
   'message:reactions': (payload: { channelId: Id; messageId: Id; reactions: Reaction[] }) => void;
+  /** Os sons do espaço mudaram (a lista inteira, já atualizada). */
+  'sounds:updated': (payload: { spaceId: Id; clips: SoundClip[] }) => void;
+  /** Uma mensagem foi fixada ou desafixada (`pinnedAt` nulo = desafixada). */
+  'message:pinned': (payload: { channelId: Id; messageId: Id; pinnedAt: string | null; pinnedById: Id | null }) => void;
   /** Os votos (ou o encerramento) de uma enquete mudaram (a enquete inteira, já atualizada). */
   'poll:updated': (payload: { channelId: Id; messageId: Id; poll: Poll }) => void;
   /** Alguém girou a roleta e a opção sorteada já está decidida; todo mundo anima até ela. */

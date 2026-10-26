@@ -1,7 +1,8 @@
-import { Eye, Headphones, HeadphoneOff, Mic, MicOff, MonitorUp, MonitorX, Music2, Pause, PhoneOff, Play, Settings2, SkipForward, Video, VideoOff, X } from 'lucide-react';
+import { AudioLines, Eye, Headphones, HeadphoneOff, Mic, MicOff, MonitorUp, MonitorX, Music2, Pause, PhoneOff, Play, Settings2, SkipForward, Video, VideoOff, X } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { useRealtime } from '../state/realtime';
 import { MusicDialog, useMusic } from './MusicDialog';
+import { SoundboardDialog } from './SoundboardDialog';
 import { ScreenShareDialog } from './ScreenShareDialog';
 import { StreamSettingsDialog } from './StreamSettingsDialog';
 import { LiveBadge } from './StreamStage';
@@ -12,6 +13,7 @@ export function VoiceStatusBar() {
   const [choosingScreen, setChoosingScreen] = useState(false);
   const [configuring, setConfiguring] = useState(false);
   const [musicOpen, setMusicOpen] = useState(false);
+  const [soundsOpen, setSoundsOpen] = useState(false);
   const music = useMusic();
   const voice = state.myVoice;
   const me = state.me?.id;
@@ -164,10 +166,18 @@ export function VoiceStatusBar() {
             <button
               type="button"
               onClick={() => setMusicOpen(true)}
-              className="col-span-2 flex items-center justify-center gap-1.5 rounded-md bg-elevated py-1.5 text-sm font-medium text-muted hover:bg-hover hover:text-fg"
+              className="flex items-center justify-center gap-1.5 rounded-md bg-elevated py-1.5 text-sm font-medium text-muted hover:bg-hover hover:text-fg"
             >
               <Music2 size={16} />
               Música
+            </button>
+            <button
+              type="button"
+              onClick={() => setSoundsOpen(true)}
+              className="flex items-center justify-center gap-1.5 rounded-md bg-elevated py-1.5 text-sm font-medium text-muted hover:bg-hover hover:text-fg"
+            >
+              <AudioLines size={16} />
+              Sons
             </button>
           </div>
         )}
@@ -175,6 +185,7 @@ export function VoiceStatusBar() {
       {choosingScreen && <ScreenShareDialog onClose={() => setChoosingScreen(false)} />}
       {configuring && voice.streaming && <StreamSettingsDialog onClose={() => setConfiguring(false)} />}
       {musicOpen && voice.channelId && <MusicDialog onClose={() => setMusicOpen(false)} />}
+      {soundsOpen && voice.channelId && <SoundboardDialog onClose={() => setSoundsOpen(false)} />}
     </>
   );
 }

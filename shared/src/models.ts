@@ -98,6 +98,21 @@ export interface Attachment {
   height: number | null;
 }
 
+/** Um som do quadro de som de um espaço. O áudio é servido em `GET /sounds/<id>`. */
+export interface SoundClip {
+  id: Id;
+  spaceId: Id;
+  name: string;
+  /** Um emoji para identificar o som no quadro; `null` se não tem. */
+  emoji: string | null;
+  /** Quem enviou (e pode remover). */
+  uploaderId: Id;
+  /** Formato do áudio, lido do conteúdo (ex.: `audio/mpeg`). */
+  contentType: string;
+  size: number;
+  createdAt: string;
+}
+
 /** Um anexo que é uma imagem (aparece na conversa), com as dimensões. */
 export type ImageAttachment = Attachment & { width: number; height: number };
 
@@ -144,6 +159,10 @@ export interface Message {
   replyTo: ReplyPreview | null;
   /** Reações, na ordem em que cada emoji apareceu pela primeira vez. */
   reactions: Reaction[];
+  /** Quando a mensagem foi fixada no canal ou na conversa; `null` se não está fixada. */
+  pinnedAt: string | null;
+  /** Quem a fixou; `null` se não está fixada. */
+  pinnedById: Id | null;
   /** Presente quando a mensagem é uma enquete (o `content` é a pergunta). */
   poll: Poll | null;
   /** Presente quando a mensagem é uma roleta (o `content` é o título, ou "Roleta"). */

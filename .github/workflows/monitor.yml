@@ -1,0 +1,124 @@
+name: Monitor
+
+# De 10 em 10 minutos, confere se o servidor do Coreto responde e avisa quando ele cai e quando volta (uma vez cada).
+# O aviso vem de fora do servidor, porque um servidor fora do ar não consegue avisar. Como avisa (ver README, "Alerta de
+# servidor fora do ar"):
+#   - sempre: esta execução fica vermelha quando o servidor cai, e o GitHub manda e-mail (e notificação no app do GitHub);
+#   - se existir o segredo NTFY_TOPIC: notificação no celular pelo app ntfy;
+#   - se existir o segredo DISCORD_WEBHOOK: mensagem num canal do Discord.
+# O estado ("já avisei que caiu") fica na execução anterior: ela conta como "fora do ar" se o passo "Registrar queda" rodou.
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+    inputs:
+      teste:
+        description: 'Só manda um aviso de teste (para conferir o ntfy e o Discord), sem mexer no estado'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: monitor
+  cancel-in-progress: false
+
+jobs:
+  health:
+    name: Servidor no ar?
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+      DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: |
+            deploy/monitor
+            desktop/coreto.config.json
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - name: Avisos
+        id: notify
+        run: |
+          cat > "$RUNNER_TEMP/notify.sh" <<'SH'
+          # notify <título sem acentos> <mensagem> <prioridade do ntfy> <ícone do ntfy>
+          notify() {
+            if [ -n "$NTFY_TOPIC" ]; then
+              curl -fsS -m 20 -H "Title: $1" -H "Priority: $3" -H "Tags: $4" -d "$2" "https://ntfy.sh/$NTFY_TOPIC" >/dev/null || echo "ntfy falhou"
+            fi
+            if [ -n "$DISCORD_WEBHOOK" ]; then
+              curl -fsS -m 20 -H 'content-type: application/json' \
+                -d "$(node -e 'console.log(JSON.stringify({ content: `**${process.argv[1]}**\n${process.argv[2]}` }))' "$1" "$2")" \
+                "$DISCORD_WEBHOOK" >/dev/null || echo "discord falhou"
+            fi
+          }
+          SH
+          echo "script=$RUNNER_TEMP/notify.sh" >> "$GITHUB_OUTPUT"
+
+      - name: Aviso de teste
+        if: ${{ inputs.teste }}
+        run: |
+          . "${{ steps.notify.outputs.script }}"
+          if [ -z "$NTFY_TOPIC" ] && [ -z "$DISCORD_WEBHOOK" ]; then
+            echo "Nenhum segredo configurado (NTFY_TOPIC ou DISCORD_WEBHOOK): só o e-mail do GitHub avisa quando o servidor cair."
+          fi
+          notify "Coreto: teste do alerta" "Se voce recebeu isto, o alerta de servidor fora do ar esta funcionando." default "white_check_mark"
+
+      - name: Conferir o servidor
+        id: check
+        if: ${{ !inputs.teste }}
+        run: node deploy/monitor/check.ts "$(node -p "require('./desktop/coreto.config.json').url")"
+
+      # O estado vem da execução anterior (concluída): ela estava "fora do ar" se rodou o passo "Registrar queda".
+      - name: Ver o estado anterior
+        id: before
+        if: ${{ !inputs.teste }}
+        run: |
+          run_id=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/monitor.yml/runs?status=completed&per_page=1&event=schedule" --jq '.workflow_runs[0].id // empty')
+          was_down=false
+          if [ -n "$run_id" ]; then
+            ran=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/jobs" --jq '[.jobs[0].steps[] | select(.name == "Registrar queda") | .conclusion] | first // "skipped"')
+            [ "$ran" != "skipped" ] && was_down=true
+          fi
+          echo "Execução anterior: ${run_id:-nenhuma}; estava fora do ar: $was_down"
+          echo "was_down=$was_down" >> "$GITHUB_OUTPUT"
+
+      # Só roda (e portanto só conta como "fora do ar" na próxima vez) quando o servidor está fora do ar.
+      - name: Registrar queda
+        id: down
+        if: ${{ !inputs.teste && steps.check.outputs.up == 'false' }}
+        env:
+          DETAIL: ${{ steps.check.outputs.detail }}
+          WAS_DOWN: ${{ steps.before.outputs.was_down }}
+        run: |
+          . "${{ steps.notify.outputs.script }}"
+          if [ "$WAS_DOWN" = "true" ]; then
+            echo "Continua fora do ar ($DETAIL); o aviso já foi dado."
+          else
+            notify "Coreto fora do ar" "O servidor nao responde: $DETAIL. Confira o painel do Dokploy." urgent "rotating_light"
+          fi
+
+      - name: Voltou
+        if: ${{ !inputs.teste && steps.check.outputs.up == 'true' && steps.before.outputs.was_down == 'true' }}
+        run: |
+          . "${{ steps.notify.outputs.script }}"
+          notify "Coreto voltou" "O servidor voltou a responder." default "white_check_mark"
+
+      # Vermelho só na primeira vez que cai: o e-mail do GitHub avisa uma vez, e não a cada 10 minutos.
+      - name: Falhar (primeira queda)
+        if: ${{ !inputs.teste && steps.check.outputs.up == 'false' && steps.before.outputs.was_down != 'true' }}
+        env:
+          DETAIL: ${{ steps.check.outputs.detail }}
+        run: |
+          echo "::error title=Coreto fora do ar::O servidor nao responde: $DETAIL"
+          exit 1

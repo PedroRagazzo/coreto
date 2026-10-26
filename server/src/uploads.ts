@@ -127,9 +127,11 @@ export async function sweepUploads(db: Db, dir: UploadDir, now = Date.now()): Pr
   }
 
   const files = names.filter((name) => UUID.test(name));
-  const known = new Set(
-    (await db.attachment.findMany({ where: { id: { in: files } }, select: { id: true } })).map((a) => a.id),
-  );
+  // Os arquivos da pasta são anexos ou sons do quadro de som.
+  const known = new Set([
+    ...(await db.attachment.findMany({ where: { id: { in: files } }, select: { id: true } })).map((a) => a.id),
+    ...(await db.soundClip.findMany({ where: { id: { in: files } }, select: { id: true } })).map((s) => s.id),
+  ]);
   const orphans = files.filter((name) => !known.has(name));
   await dir.remove(orphans);
   return orphans.length;

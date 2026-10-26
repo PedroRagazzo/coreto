@@ -21,6 +21,8 @@ import type { Store } from './store.js';
 import { serveClient } from './static.js';
 import { iceConfigFromEnv, type IceConfig } from './turn.js';
 import { handleUpload, readBody, serveUpload, UploadDir, uploadQuotaFromEnv } from './uploads.js';
+import { handleSoundUpload, serveSound } from './sounds.js';
+import { announceSounds, registerSounds } from './realtime/sounds.js';
 
 const MAX_BODY_BYTES = 2_048;
 
@@ -97,6 +99,22 @@ export async function startServer(
           .end(image.body);
       });
     }
+    if (path === '/sounds') {
+      if (preflight(req, res, clientOrigins, 'POST', 'authorization, content-type, x-space-id, x-sound-name, x-sound-emoji')) return;
+      return void handleSoundUpload(req, res, store, uploads, (spaceId) =>
+        void announceSounds(io, store, spaceId).catch((err: unknown) => console.error('[sounds]', err)),
+      ).catch((err: unknown) => {
+        console.error('[sounds]', err);
+        if (!res.headersSent) sendJson(res, 500, { ok: false, error: 'Não foi possível guardar o som.' });
+      });
+    }
+    const sound = /^\/sounds\/([^/]+)$/.exec(path);
+    if (sound && (req.method === 'GET' || req.method === 'HEAD')) {
+      return void serveSound(sound[1], res, store, uploads, req.method === 'HEAD').catch((err: unknown) => {
+        console.error('[sounds]', err);
+        if (!res.headersSent) res.writeHead(500).end();
+      });
+    }
     const file = /^\/uploads\/([^/]+)$/.exec(path);
     if (file && (req.method === 'GET' || req.method === 'HEAD')) {
       return void serveUpload(file[1], res, store, uploads, req.method === 'HEAD').catch((err: unknown) => {
@@ -143,6 +161,7 @@ export async function startServer(
     registerManagement(io, socket, store);
     registerVoice(io, socket, store, ice, sfu);
     registerMusic(socket, () => music);
+    registerSounds(io, socket, store, uploads);
   });
 
   music = (await createMusic?.({ io, store, ice })) ?? null;

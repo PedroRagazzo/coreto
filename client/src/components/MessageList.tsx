@@ -3,7 +3,7 @@ import type { Id, Message, ReplyPreview } from '@shared/models';
 import { Permission } from '@shared/permissions';
 import { MAX_MESSAGE_LENGTH } from '@shared/protocol';
 import { describeAttachments } from '@shared/files';
-import { ArrowDown, CornerUpRight, Paperclip, Pencil, Reply, SmilePlus, Trash2 } from 'lucide-react';
+import { ArrowDown, CornerUpRight, Paperclip, Pencil, Pin, PinOff, Reply, SmilePlus, Trash2 } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { formatMessageTime, formatShortTime } from '../lib/format';
 import { useRealtime } from '../state/realtime';
@@ -314,6 +314,11 @@ function MessageRow({
       {leading}
       <div className="min-w-0 flex-1">
         {message.replyTo && <ReplyReference reply={message.replyTo} onJump={() => onGoToOriginal(message.replyTo!.id)} />}
+        {message.pinnedAt && (
+          <p className="flex items-center gap-1 text-xs text-faint">
+            <Pin size={11} aria-hidden /> Fixada
+          </p>
+        )}
         {header}
         {editing ? (
           <MessageEditor message={message} onDone={onEditDone} />
@@ -336,6 +341,17 @@ function MessageRow({
           >
             <SmilePlus size={15} />
           </button>
+          {canSend && (
+            <button
+              type="button"
+              title={message.pinnedAt ? 'Desafixar' : 'Fixar'}
+              aria-label={message.pinnedAt ? 'Desafixar mensagem' : 'Fixar mensagem'}
+              onClick={() => void actions.pinMessage(message.id, !message.pinnedAt)}
+              className="rounded p-1 text-muted hover:bg-hover hover:text-fg"
+            >
+              {message.pinnedAt ? <PinOff size={15} /> : <Pin size={15} />}
+            </button>
+          )}
           {canSend && (
             <button
               type="button"

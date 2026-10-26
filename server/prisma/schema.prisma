@@ -65,6 +65,7 @@ model Space {
   categories Category[]
   channels   Channel[]
   members    Member[]
+  sounds     SoundClip[]
 }
 
 /// Cargo. O cargo "@everyone" usa o mesmo id do espaço.
@@ -181,6 +182,9 @@ model Message {
   /// A mensagem a que esta responde. Sem chave estrangeira de propósito: apagar a original não apaga as respostas,
   /// e o servidor mostra "mensagem apagada" quando não a encontra.
   replyToId   String?
+  /// Quando foi fixada e por quem (sem chave estrangeira: só serve para mostrar o nome). Nulos = não fixada.
+  pinnedAt    DateTime?
+  pinnedById  String?
   mentions    Mention[]
   attachments Attachment[]
   reactions   Reaction[]
@@ -190,6 +194,9 @@ model Message {
 
   @@index([channelId, createdAt(sort: Desc)])
   @@index([directId, createdAt(sort: Desc)])
+  /// As fixadas de um canal, da mais recente para a mais antiga.
+  @@index([channelId, pinnedAt])
+  @@index([directId, pinnedAt])
   /// Busca por trecho (`LIKE '%palavra%'`) com a extensão pg_trgm.
   @@index([searchText(ops: raw("gin_trgm_ops"))], type: Gin)
 }
@@ -250,6 +257,23 @@ model Roulette {
   spunAt      DateTime?
   /// Quem girou. Sem chave estrangeira de propósito: só serve para mostrar o nome.
   spunById    String?
+}
+
+/// Um som do quadro de som de um espaço. O arquivo fica na pasta dos anexos, com o id como nome.
+model SoundClip {
+  id          String   @id @default(uuid())
+  spaceId     String
+  space       Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  name        String   @db.VarChar(48)
+  /// Um emoji para identificar o som; nulo se não tem.
+  emoji       String?  @db.VarChar(16)
+  /// Quem enviou. Sem chave estrangeira de propósito: só serve para saber quem pode remover.
+  uploaderId  String
+  contentType String   @db.VarChar(30)
+  size        Int
+  createdAt   DateTime @default(now())
+
+  @@index([spaceId, createdAt])
 }
 
 model Reaction {
