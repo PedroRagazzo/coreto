@@ -282,7 +282,13 @@ coreto/
 │           ├── guards.ts    Validação de payload e permissão
 │           └── types.ts     Tipos do socket e nomes das salas
 └── client/src/
-    ├── state/realtime.tsx   Socket + reducer + ações (fonte única de estado)
+    ├── state/realtime/      Socket + reducer + ações (fonte única de estado), dividido por assunto:
+    │   ├── state.ts, types.ts        O formato do estado, e as ações do reducer (`Action`) e dos componentes (`RealtimeActions`)
+    │   ├── reducer/                  session.ts (conexão, espaços, canais), messages.ts, voice.ts; index.ts encaminha cada ação
+    │   ├── actions/                  navigation.ts, messages.ts, voice.ts (reunidas em index.ts; faltar uma é erro de compilação)
+    │   ├── socket-events.ts          Cada evento do servidor vira uma ação do reducer ou uma notificação
+    │   ├── effects.ts                Não lidas, título da janela e sincronia da voz
+    │   └── provider.tsx, context.ts  O `RealtimeProvider`, `useRealtime` e o que as ações compartilham
     ├── state/selectors.ts
     ├── lib/voice.ts         Malha WebRTC (voz e tela) + medidor de quem está falando
     ├── lib/uploads.ts       Envio de anexos (imagens e arquivos) com progresso
