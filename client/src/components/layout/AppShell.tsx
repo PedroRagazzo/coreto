@@ -10,6 +10,7 @@ import { ChatPanel } from '../ChatPanel';
 import { ConnectionBanner } from '../ConnectionBanner';
 import { DirectMessagesPanel, DirectMessagesSidebar } from '../DirectMessages';
 import { CallView } from '../CallView';
+import { WhatsNew } from '../Changelog';
 import { SpaceRail } from '../SpaceRail';
 import { StreamStage } from '../StreamStage';
 import { UpdateBanner } from '../UpdateBanner';
@@ -26,6 +27,7 @@ export function AppShell() {
     <div className="flex h-dvh overflow-hidden bg-panel text-fg">
       <CallSounds />
       <Shortcuts />
+      <WhatsNew />
       {/* Coluna 1: espaços */}
       <SpaceRail />
 

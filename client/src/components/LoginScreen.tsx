@@ -2,6 +2,7 @@ import { isValidPin, MAX_DISPLAY_NAME, normalizeDisplayName } from '@shared/name
 import { useState, type FormEvent } from 'react';
 import { desktop } from '../lib/desktop';
 import { login, type Identity } from '../lib/identity';
+import { markNewsSeen } from '../lib/news';
 import { DownloadApp } from './DownloadApp';
 
 export function LoginScreen({ onLogin }: { onLogin: (identity: Identity) => void }) {
@@ -17,7 +18,11 @@ export function LoginScreen({ onLogin }: { onLogin: (identity: Identity) => void
     setBusy(true);
     const res = await login({ name, pin });
     setBusy(false);
-    if (res.ok) onLogin({ token: res.token });
+    if (res.ok) {
+      // Conta nova: tudo é novidade para quem acabou de chegar, então não há o que mostrar.
+      if (res.created) markNewsSeen();
+      onLogin({ token: res.token });
+    }
     else {
       setError(res.error);
       if (res.code === 'wrong_pin') setPin('');

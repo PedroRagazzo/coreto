@@ -535,6 +535,12 @@ guardado no aparelho (`localStorage`), porque o microfone do notebook não é o 
 - **App de desktop** (só no app): versão, estado da atualização com "Verificar agora" e "Reiniciar e atualizar", e
   "Abrir o Coreto ao ligar o computador". O site fala com o app por uma ponte mínima (`desktop/src/preload.cjs`), e o
   app confere em cada pedido se ele veio do servidor do Coreto.
+- **Novidades:** depois que o site atualiza, uma janelinha "O que há de novo" mostra, **uma vez só**, o que a pessoa ainda não
+  viu (até 3 entradas, da mais nova para a mais antiga). Não aparece no meio de uma chamada (espera ela acabar), nem para quem
+  acabou de criar a conta (tudo é novidade para ela). O que já foi visto fica no navegador (`coreto.news.seen`), e a seção
+  **Novidades** das configurações guarda o histórico. **A lista é escrita à mão em `shared/src/changelog.ts`**: a cada mudança
+  que as pessoas notam, ponha uma entrada nova no começo, com um `id` novo (a data), em linguagem de quem usa. Um teste confere
+  o formato (ids únicos, em ordem, textos curtos).
 
 ## Busca
 
