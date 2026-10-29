@@ -7,3 +7,7 @@ server/uploads
 
 # Ferramentas baixadas só para testes locais (yt-dlp.exe).
 .tools
+
+# Resultados dos testes do site (Playwright).
+e2e/test-results
+e2e/playwright-report

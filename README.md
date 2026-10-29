@@ -243,6 +243,31 @@ Os testes de integração **apagam o banco** a cada arquivo, por isso só aceita
 O CI (`.github/workflows/ci.yml`) roda a cada push e pull request no GitHub Actions, com PostgreSQL 17: checagem de tipos,
 todos os testes e o build de produção do client.
 
+## Testes do site
+
+Os testes acima não abrem o site. Estes sim: o Playwright sobe o **servidor de verdade** com o **site já compilado**
+(`client/dist`) e um banco de teste zerado, abre navegadores de verdade e faz o que uma pessoa faria. Cada pessoa do
+teste é uma janela própria, então dá para conferir o que *outra* pessoa vê: a mensagem que chega, a enquete que todos
+votam, a voz que chega do outro lado da chamada, a transmissão de tela, o mosaico numa janela em pé.
+
+```bash
+npm run e2e
+```
+
+- Precisa de `TEST_DATABASE_URL` com um banco cujo nome termine em `_test` (o mesmo cuidado dos testes de integração; use
+  outro banco, como `coreto_e2e_test`, para não misturar). O banco é apagado a cada rodada.
+- A primeira vez precisa do navegador: `npx playwright install chromium`. Para usar o Edge ou o Chrome que já estão no
+  computador, sem baixar nada: `E2E_BROWSER=msedge npm run e2e` (ou `chrome`).
+- Para rodar um arquivo só, sem recompilar o site: `npm run test -w e2e -- tests/chat.spec.ts`. Depois de mudar o
+  client, rode `npm run build` antes (o `npm run e2e` já faz isso).
+- Não há microfone, tela nem internet de verdade: o microfone é o falso do Chromium (um tom), a tela transmitida é um
+  canvas desenhado (`e2e/support/app.ts`), e a pré-visualização de links responde "nada" (`e2e/start-server.ts`). A
+  transmissão vai pela malha P2P, como numa instalação sem LiveKit.
+- Quando um teste falha, o Playwright guarda uma captura de tela e o trace em `e2e/test-results`
+  (`npx playwright show-trace <trace.zip>` mostra passo a passo). No CI, essa pasta sobe como artefato da execução.
+
+O job "Testes do site" do CI roda isso a cada push, ao lado dos testes de integração.
+
 ## Estrutura
 
 ```
@@ -257,6 +282,7 @@ coreto/
 ├── deploy/coturn/           TURN para o Dokploy (compose) e verificador sem segredo (check.mjs)
 ├── deploy/livekit/          Servidor de mídia (LiveKit) para as transmissões de tela, e verificador (check.mjs)
 ├── desktop/                 App de desktop (Electron) e instalador do Windows
+├── e2e/                     Testes do site no navegador (Playwright): servidor real, várias pessoas, voz e telas
 ├── server/
 │   ├── prisma/              Esquema (schema.prisma) e migrations do PostgreSQL
 │   ├── prisma.config.ts     Configuração do Prisma (lê DATABASE_URL de server/.env)
