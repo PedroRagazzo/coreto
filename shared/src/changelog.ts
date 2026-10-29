@@ -22,6 +22,16 @@ export interface ChangelogEntry {
 /** Da mais nova para a mais antiga. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-10-28-3',
+    title: 'Transmissões e câmeras se ajustam à janela',
+    items: [
+      {
+        title: 'Monitor em pé e janelas estreitas',
+        text: 'As transmissões e as câmeras agora escolhem sozinhas como se organizar para ficarem o maior possível: lado a lado numa janela larga, uma sobre a outra numa janela em pé.',
+      },
+    ],
+  },
+  {
     id: '2026-10-28-2',
     title: 'Arquivos expiram em 20 dias',
     items: [

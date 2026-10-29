@@ -1,3 +1,4 @@
+import { bestGrid } from '@shared/grid';
 import type { Id, VoiceParticipant } from '@shared/models';
 import {
   Activity,
@@ -15,6 +16,7 @@ import {
   X,
 } from 'lucide-react';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useElementSize } from '../lib/useElementSize';
 import type { StreamStats } from '../lib/voice';
 import { useRealtime } from '../state/realtime';
 import { displayNameOf } from '../state/selectors';
@@ -38,14 +40,21 @@ function findParticipant(voice: Record<Id, VoiceParticipant[]>, userId: Id) {
 
 /** Largura da coluna das transmissões pequenas, no modo com uma em destaque. */
 const SIDE_COLUMN = '16rem';
+/** Altura da fileira das transmissões pequenas quando a janela é mais alta que larga. */
+const STACKED_STRIP = '9rem';
+/** Espaço entre as transmissões (`gap-1`) e altura do cabeçalho de cada uma (`h-10`), em pixels, para a conta do arranjo. */
+const GAP = 4;
+const TILE_HEADER = 40;
 
 /**
  * Como cada transmissão ocupa o painel. As telas ficam sempre na mesma ordem no mesmo contêiner (só muda o
  * lugar na grade), então trocar a que está em destaque não recria os vídeos nem tira ninguém da tela cheia.
  */
-function placement(layout: 'focus' | 'grid', count: number, isFocus: boolean, order: number): CSSProperties {
+function placement(layout: 'focus' | 'grid', count: number, isFocus: boolean, order: number, stacked: boolean): CSSProperties {
   if (count === 1) return { gridColumn: 1, gridRow: 1 };
   if (layout === 'grid') return {};
+  // Janela em pé: a grande ocupa a largura toda em cima; as pequenas ficam lado a lado numa fileira embaixo.
+  if (stacked) return isFocus ? { gridColumn: `1 / span ${count - 1}`, gridRow: 1 } : { gridColumn: order + 1, gridRow: 2 };
   // Em destaque: a grande ocupa toda a altura à esquerda; as pequenas empilham à direita, na ordem em que abriram.
   return isFocus ? { gridColumn: 1, gridRow: `1 / span ${count}` } : { gridColumn: 2, gridRow: order + 1 };
 }
@@ -65,15 +74,27 @@ export function StreamStage() {
   // A posição entre as pequenas (a grande não conta).
   const smallOrder = new Map(stages.filter((id) => id !== focus).map((id, i) => [id, i]));
 
+  // O arranjo segue o formato do espaço: janela larga põe as transmissões lado a lado, monitor em pé empilha.
+  const areaRef = useRef<HTMLDivElement>(null);
+  const area = useElementSize(areaRef);
+  const stacked = many && area !== null && area.width < area.height;
+  const gridColumns = area
+    ? bestGrid({ ...area, count, gap: GAP, extraHeight: TILE_HEADER }).columns
+    : count === 1
+      ? 1
+      : 2;
+
   const grid: CSSProperties =
     layout === 'grid'
       ? {
-          gridTemplateColumns: `repeat(${count === 1 ? 1 : 2}, minmax(0, 1fr))`,
-          gridTemplateRows: `repeat(${Math.ceil(count / (count === 1 ? 1 : 2))}, minmax(0, 1fr))`,
+          gridTemplateColumns: `repeat(${gridColumns}, minmax(0, 1fr))`,
+          gridTemplateRows: `repeat(${Math.ceil(count / gridColumns)}, minmax(0, 1fr))`,
         }
-      : many
-        ? { gridTemplateColumns: `minmax(0, 1fr) ${SIDE_COLUMN}`, gridTemplateRows: `repeat(${count - 1}, auto) minmax(0, 1fr)` }
-        : { gridTemplateColumns: 'minmax(0, 1fr)', gridTemplateRows: 'minmax(0, 1fr)' };
+      : stacked
+        ? { gridTemplateColumns: `repeat(${count - 1}, minmax(0, 1fr))`, gridTemplateRows: `minmax(0, 1fr) ${STACKED_STRIP}` }
+        : many
+          ? { gridTemplateColumns: `minmax(0, 1fr) ${SIDE_COLUMN}`, gridTemplateRows: `repeat(${count - 1}, auto) minmax(0, 1fr)` }
+          : { gridTemplateColumns: 'minmax(0, 1fr)', gridTemplateRows: 'minmax(0, 1fr)' };
 
   return (
     <>
@@ -104,7 +125,7 @@ export function StreamStage() {
           </button>
         </header>
       )}
-      <div className="grid min-h-0 flex-1 gap-1 bg-black/60" style={grid} data-layout={layout}>
+      <div ref={areaRef} className="grid min-h-0 flex-1 gap-1 bg-black/60" style={grid} data-layout={layout} data-stacked={stacked}>
         {stages.map((userId) => {
           const isFocus = userId === focus;
           const variant = !many ? 'main' : layout === 'grid' ? 'cell' : isFocus ? 'main' : 'small';
@@ -115,7 +136,7 @@ export function StreamStage() {
               variant={variant}
               isFocus={isFocus}
               many={many}
-              style={placement(layout, count, isFocus, smallOrder.get(userId) ?? 0)}
+              style={placement(layout, count, isFocus, smallOrder.get(userId) ?? 0, stacked)}
             />
           );
         })}

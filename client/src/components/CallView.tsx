@@ -1,6 +1,8 @@
+import { bestGrid } from '@shared/grid';
 import type { Id, VoiceParticipant } from '@shared/models';
 import { AudioLines, HeadphoneOff, Mic, MicOff, MonitorUp, Music2, PhoneOff, Settings2, Video, VideoOff, Volume2, X } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useElementSize } from '../lib/useElementSize';
 import { useRealtime } from '../state/realtime';
 import { displayNameOf } from '../state/selectors';
 import { Avatar } from './Avatar';
@@ -11,6 +13,10 @@ import { ConnectionIndicator } from './ConnectionIndicator';
 import { StreamSettingsDialog } from './StreamSettingsDialog';
 import { LiveBadge } from './StreamStage';
 import { useUserVolumeMenu } from './UserVolumeMenu';
+
+/** Espaço entre os quadros (`gap-3`) e o menor quadro aceitável antes de o mosaico passar a rolar, em pixels. */
+const TILE_GAP = 12;
+const MIN_TILE_WIDTH = 220;
 
 /**
  * Mosaico da chamada, como a visão de canal de voz do Discord: um quadro por
@@ -28,8 +34,12 @@ export function CallView() {
   const room = voice.channelId ? (state.voice[voice.channelId] ?? []) : [];
   const me = state.me?.id;
   const tiles = room.length + room.filter((p) => p.streaming).length;
-  // Colunas para os quadros ficarem grandes: 1, 2 ou 3 por linha.
-  const columns = tiles <= 1 ? 'grid-cols-1' : tiles <= 4 ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-2 xl:grid-cols-3';
+  // Colunas para os quadros ficarem o maior possível no espaço que sobra (janela larga ou monitor em pé). Antes de
+  // medir, e se o navegador não medir, vale uma regra pelo número de quadros.
+  const areaRef = useRef<HTMLDivElement>(null);
+  const area = useElementSize(areaRef);
+  const plan = area ? bestGrid({ ...area, count: tiles, gap: TILE_GAP, minTileWidth: MIN_TILE_WIDTH }) : null;
+  const fallbackColumns = tiles <= 1 ? 'grid-cols-1' : tiles <= 4 ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-2 xl:grid-cols-3';
 
   return (
     <>
@@ -48,8 +58,17 @@ export function CallView() {
         </button>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto bg-rail p-4">
-        <ul className={`grid gap-3 ${columns}`} aria-label="Pessoas na chamada">
+      <div ref={areaRef} className="min-h-0 flex-1 overflow-y-auto bg-rail p-4">
+        <ul
+          className={`grid gap-3 ${plan ? 'min-h-full' : fallbackColumns}`}
+          // Colunas de largura exata: os quadros ficam no maior tamanho que cabe e o conjunto fica centralizado.
+          style={
+            plan
+              ? { gridTemplateColumns: `repeat(${plan.columns}, ${plan.tileWidth}px)`, justifyContent: 'center', alignContent: plan.scrolls ? 'start' : 'center' }
+              : undefined
+          }
+          aria-label="Pessoas na chamada"
+        >
           {room.map((p) => (
             <ParticipantTile key={p.userId} participant={p} isMe={p.userId === me} />
           ))}
