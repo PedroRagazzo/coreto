@@ -22,6 +22,16 @@ export interface ChangelogEntry {
 /** Da mais nova para a mais antiga. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-10-30-4',
+    title: 'Audio Democrático',
+    items: [
+      {
+        title: 'O painel de música agora se chama Audio Democrático',
+        text: 'É o áudio que todo mundo na sala pode pedir e controlar. Só o nome do painel mudou; tudo funciona como antes.',
+      },
+    ],
+  },
+  {
     id: '2026-10-30-3',
     title: 'App de desktop 0.7.1',
     items: [

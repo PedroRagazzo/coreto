@@ -73,7 +73,7 @@ export function MusicDialog({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <Modal title="Música" description="O Coreto Música toca na sua sala de voz. Todo mundo na sala pode pedir e controlar." onClose={onClose}>
+    <Modal title="Audio Democrático" description="O Coreto Música toca na sua sala de voz. Todo mundo na sala pode pedir e controlar." onClose={onClose}>
       <NowPlaying
         music={music?.state ?? null}
         positionMs={position}
