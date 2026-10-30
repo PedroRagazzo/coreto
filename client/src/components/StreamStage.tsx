@@ -1,5 +1,6 @@
 import { bestGrid } from '@shared/grid';
 import type { Id, VoiceParticipant } from '@shared/models';
+import { diagnoseStream, type StreamAdvice } from '@shared/stream-quality';
 import {
   Activity,
   Eye,
@@ -462,24 +463,27 @@ function useStreamStats(userId: Id, enabled: boolean, read: (userId: Id) => Prom
 
 const mbps = (kbps: number) => `${(kbps / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1, minimumFractionDigits: 1 })} Mb/s`;
 
-/** O que fazer, em palavras, a partir dos números. */
+/** O que fazer, em palavras, para cada causa que o diagnóstico (shared/stream-quality.ts) aponta. */
+const ADVICE: Record<StreamAdvice, string> = {
+  'cpu-software':
+    'O processador está codificando o vídeo e no limite: em Configurações da transmissão, escolha H.264 (placa de vídeo), ou uma resolução menor ou menos quadros por segundo.',
+  cpu: 'Seu computador está no limite: o jogo e a transmissão disputam a máquina. Escolha uma resolução menor ou menos quadros por segundo.',
+  'bandwidth-sfu':
+    'A sua internet de envio está no limite: a imagem é reduzida para caber. Escolha uma resolução menor ou menos quadros por segundo.',
+  'bandwidth-p2p': 'A sua internet de envio está no limite: a imagem é reduzida para caber. Menos gente assistindo melhora.',
+  'path-limit':
+    'O caminho até o servidor só comporta uma parte do que a qualidade pede: a imagem fica com menos detalhe para caber. Um upload maior ou uma resolução menor ajuda; Wi-Fi fraco e downloads em paralelo também pesam.',
+  'loss-far':
+    'Há perda de pacotes e o servidor está longe (a ida e volta é longa): cada pacote perdido demora a ser reenviado, e aparece como travada. Cabo de rede em vez de Wi-Fi ajuda.',
+  loss: 'Há perda de pacotes no caminho: a imagem pode travar ou ficar com blocos. Cabo de rede em vez de Wi-Fi ajuda.',
+  'freezes-loss': 'A imagem travou algumas vezes por perda de pacotes entre o servidor e você: veja o Wi-Fi ou o que mais usa a sua internet.',
+  'freezes-source':
+    'A imagem travou algumas vezes sem perda de pacotes aqui: quem transmite está mandando poucos quadros. Peça para ele abrir as estatísticas dele e ver se é o computador ou a internet.',
+};
+
 function advice(stats: StreamStats): string | null {
-  if (stats.role === 'sending') {
-    if (stats.limit === 'cpu') {
-      return stats.encoder === 'software' && stats.via === 'sfu'
-        ? 'O processador está codificando o vídeo e no limite: em Configurações da transmissão, escolha H.264 (placa de vídeo), ou uma resolução menor ou menos quadros por segundo.'
-        : 'Seu computador está no limite: escolha uma resolução menor ou menos quadros por segundo.';
-    }
-    if (stats.limit === 'bandwidth') {
-      return stats.via === 'sfu'
-        ? 'A sua internet de envio está no limite: a imagem é reduzida para caber. Escolha uma resolução menor ou menos quadros por segundo.'
-        : 'A sua internet de envio está no limite: a imagem é reduzida para caber. Menos gente assistindo melhora.';
-    }
-    if (stats.lossPercent > 3) return 'Há perda de pacotes no caminho até quem assiste.';
-    return null;
-  }
-  if (stats.lossPercent > 3) return 'Perda alta de pacotes: a internet de quem transmite ou a sua está instável.';
-  return null;
+  const code = diagnoseStream(stats);
+  return code ? ADVICE[code] : null;
 }
 
 function StatsPanel({ stats }: { stats: StreamStats | null }) {
@@ -507,6 +511,17 @@ function StatsPanel({ stats }: { stats: StreamStats | null }) {
             {stats.encoder ? `${stats.encoder === 'hardware' ? 'placa de vídeo' : 'processador'} · ` : ''}perda {stats.lossPercent.toFixed(1)}%
             {stats.rttMs !== null ? ` · ${Math.round(stats.rttMs)} ms` : ''}
           </p>
+          {stats.role === 'sending' && stats.capKbps !== null && (
+            <p>
+              teto {mbps(stats.capKbps)}
+              {stats.availableKbps !== null ? ` · a rede comporta ${mbps(stats.availableKbps)}` : ''}
+            </p>
+          )}
+          {stats.role === 'receiving' && stats.freezes > 0 && (
+            <p>
+              travou {stats.freezes} {stats.freezes === 1 ? 'vez' : 'vezes'} nos últimos 30 s
+            </p>
+          )}
           {tip && <p className="mt-1 text-idle">{tip}</p>}
         </>
       )}

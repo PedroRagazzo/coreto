@@ -57,11 +57,46 @@ export function saveScreenOptions(options: ScreenShareOptions): void {
   }
 }
 
+type Preset = 'game' | 'screen';
+
+/** Jogo e vídeo pedem 60 quadros e fluidez; tela e texto, nitidez com menos quadros. O upload e o som seguem como estão. */
+function presetPatch(preset: Preset): Partial<ScreenQuality> {
+  return preset === 'game'
+    ? { height: 1080, frameRate: 60, priority: 'smooth', ...(supportsH264() && { codec: 'h264' as const }) }
+    : { height: 720, frameRate: 30, priority: 'sharp' };
+}
+
+/** Qual receita as escolhas atuais formam; `null` se foram mexidas uma a uma. O codec fica de fora: não muda o tipo de conteúdo. */
+function matchingPreset(value: ScreenQuality): Preset | null {
+  for (const preset of ['game', 'screen'] as const) {
+    const { height, frameRate, priority } = presetPatch(preset);
+    if (value.height === height && value.frameRate === frameRate && value.priority === priority) return preset;
+  }
+  return null;
+}
+
 /** Resolução, quadros, prioridade e upload: os mesmos controles ao começar e durante a transmissão. */
 export function ScreenQualityFields({ value, onChange }: { value: ScreenQuality; onChange: (patch: Partial<ScreenQuality>) => void }) {
+  const preset = matchingPreset(value);
   return (
     <>
       <fieldset>
+        <legend className={labelClass}>O que você vai transmitir</legend>
+        <Segmented
+          name="receita"
+          options={[
+            { key: 'game', label: 'Jogo ou vídeo', selected: preset === 'game' },
+            { key: 'screen', label: 'Tela e texto', selected: preset === 'screen' },
+          ]}
+          onSelect={(key) => onChange(presetPatch(key as Preset))}
+        />
+        <p className="mt-1.5 text-xs text-faint">
+          Jogo ou vídeo: 1080p, 60 fps e Fluidez, com a placa de vídeo codificando. Tela e texto: 720p, 30 fps e Nitidez. Você pode
+          ajustar cada item abaixo.
+        </p>
+      </fieldset>
+
+      <fieldset className="mt-4">
         <legend className={labelClass}>Resolução</legend>
         <Segmented
           name="resolucao"

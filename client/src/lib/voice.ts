@@ -395,6 +395,12 @@ export interface StreamStats {
   via: 'sfu' | 'p2p';
   /** Só ao transmitir: quem codifica o vídeo, a placa de vídeo ou o processador (`null` se o navegador não diz). */
   encoder: 'hardware' | 'software' | null;
+  /** Só ao transmitir: o teto de bitrate pedido ao codificador, para cada espectador (kbps). */
+  capKbps: number | null;
+  /** Só ao transmitir: quanto a rede estima que comporta até o servidor (ou até o espectador), em kbps; `null` se o navegador não diz. */
+  availableKbps: number | null;
+  /** Só ao assistir: quantas vezes a imagem congelou nos últimos 30 segundos. */
+  freezes: number;
 }
 
 function codecName(report: RTCStatsReport, codecId: unknown): string | null {
@@ -408,6 +414,17 @@ function encoderKind(outbound: Record<string, unknown>): StreamStats['encoder'] 
   const impl = String(outbound['encoderImplementation'] ?? '');
   if (!impl) return null;
   return /MediaFoundation|VideoToolbox|Nvenc|NVENC|VAAPI|V4L2|Hardware|External/i.test(impl) ? 'hardware' : 'software';
+}
+
+/** Quanto a rede estima que comporta para enviar (kbps), do par de rede em uso; `null` se o navegador não diz. */
+function availableOutgoing(report: RTCStatsReport): number | null {
+  let available: number | null = null;
+  report.forEach((stat) => {
+    if (stat.type === 'candidate-pair' && stat.nominated && stat.state === 'succeeded' && Number.isFinite(stat.availableOutgoingBitrate)) {
+      available = stat.availableOutgoingBitrate / 1000;
+    }
+  });
+  return available;
 }
 
 /** Ida e volta (ms) do par de rede em uso. */
@@ -793,7 +810,7 @@ export class VoiceManager {
 
   private sfuPublishOptions(options: ScreenShareOptions): ScreenPublishOptions {
     return {
-      maxBitrate: viewerBitrate(options, 1),
+      maxBitrate: viewerBitrate(options, 1, 'sfu'),
       maxFramerate: options.frameRate,
       priority: options.priority,
       codec: options.codec === 'h264' && supportsH264() ? 'h264' : 'vp8',
@@ -980,14 +997,14 @@ export class VoiceManager {
     const p2pViewers = direct ? this.screenViewers : new Set<Id>();
     const viewers = [...this.peers.keys()].filter((id) => p2pViewers.has(id)).length;
     // Na malha o upload se divide entre os espectadores; no servidor de mídia sai uma cópia só.
-    const bitrate = options ? viewerBitrate(options, direct ? viewers : 1) : 0;
+    const bitrate = options ? viewerBitrate(options, direct ? viewers : 1, direct ? 'p2p' : 'sfu') : 0;
     const encodings: RTCRtpEncodingParameters[] =
       options && video
         ? [
             {
               maxBitrate: bitrate,
               maxFramerate: options.frameRate,
-              scaleResolutionDownBy: resolutionScale(video.getSettings().height ?? 0, bitrate, options.frameRate),
+              scaleResolutionDownBy: resolutionScale(video.getSettings().height ?? 0, bitrate, options.frameRate, options.priority),
             },
           ]
         : [];
@@ -1060,6 +1077,18 @@ export class VoiceManager {
     return { kbps: Math.max(0, ((bytes - before.bytes) * 8) / 1000 / seconds), fps: Math.max(0, (frames - before.frames) / seconds) };
   }
 
+  /** Janelas de leituras de um contador que só cresce, para saber quanto ele subiu nos últimos segundos. */
+  private readonly counterWindows = new Map<string, { at: number; value: number }[]>();
+
+  private recentIncrease(key: string, value: number, windowMs = 30_000): number {
+    const now = performance.now();
+    const window = this.counterWindows.get(key) ?? [];
+    window.push({ at: now, value });
+    while (window.length > 1 && now - window[1].at >= windowMs) window.shift();
+    this.counterWindows.set(key, window);
+    return Math.max(0, value - window[0].value);
+  }
+
   private async receivingStats(userId: Id): Promise<StreamStats | null> {
     // Pelo servidor de mídia a imagem não vem da conexão com a pessoa, mas da conexão com o servidor.
     const sfuReceiver = this.sfuInterruptedForViewing ? null : (this.sfuSession?.receiverFor(userId) ?? null);
@@ -1092,6 +1121,9 @@ export class VoiceManager {
       viewers: 0,
       via: sfuReceiver ? 'sfu' : 'p2p',
       encoder: null,
+      capKbps: null,
+      availableKbps: null,
+      freezes: this.recentIncrease(`freeze:${userId}`, Number(inbound['freezeCount'] ?? 0)),
     };
   }
 
@@ -1107,6 +1139,7 @@ export class VoiceManager {
     let encoder: StreamStats['encoder'] = null;
     let worst = 0; // índice em `limits`: o pior limite entre os espectadores
     let viewers = 0;
+    let available: number | null = null; // a menor estimativa da rede entre os caminhos
     const limits = ['none', 'other', 'bandwidth', 'cpu'] as const;
 
     // Pelo servidor de mídia há um emissor só; pela malha, um por espectador.
@@ -1141,6 +1174,8 @@ export class VoiceManager {
       encoder ??= encoderKind(outbound);
       const reason = String(outbound['qualityLimitationReason'] ?? 'none');
       worst = Math.max(worst, reason === 'none' ? 0 : reason === 'cpu' ? 3 : reason === 'bandwidth' ? 2 : 1);
+      const estimate = availableOutgoing(report);
+      if (estimate !== null) available = Math.min(available ?? estimate, estimate);
       if (remote) {
         const sent = Number(outbound['packetsSent'] ?? 0);
         const lost = Number(remote['packetsLost'] ?? 0);
@@ -1151,7 +1186,24 @@ export class VoiceManager {
     }
     // No servidor de mídia o emissor é um só, então quem assiste vem da lista da sala.
     if (via === 'sfu' && viewers > 0) viewers = [...this.screenViewers].filter((id) => id !== this.selfId).length;
-    return { role: 'sending', width, height, fps, kbps, lossPercent: loss, rttMs: rtt, codec, limit: limits[worst], viewers, via, encoder };
+    const capKbps = viewers > 0 ? viewerBitrate(this.screen.options, via === 'sfu' ? 1 : viewers, via) / 1000 : null;
+    return {
+      role: 'sending',
+      width,
+      height,
+      fps,
+      kbps,
+      lossPercent: loss,
+      rttMs: rtt,
+      codec,
+      limit: limits[worst],
+      viewers,
+      via,
+      encoder,
+      capKbps,
+      availableKbps: available,
+      freezes: 0,
+    };
   }
 
   // ── Câmera ─────────────────────────────────────────────────────────────────

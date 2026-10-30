@@ -22,6 +22,24 @@ export interface ChangelogEntry {
 /** Da mais nova para a mais antiga. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-10-30',
+    title: 'Transmissão melhor para jogos',
+    items: [
+      {
+        title: 'Receita "Jogo ou vídeo"',
+        text: 'Ao compartilhar a tela, um botão escolhe de uma vez 1080p, 60 fps e Fluidez, o que deixa o jogo rápido muito mais suave. "Tela e texto" volta para o modo de leitura.',
+      },
+      {
+        title: 'Mais qualidade na imagem',
+        text: 'O vídeo agora pode usar mais da sua internet de envio, o que reduz os blocos e a imagem borrada quando o jogo tem muito movimento.',
+      },
+      {
+        title: 'Estatísticas que explicam o problema',
+        text: 'No botão de estatísticas da transmissão, quem assiste vê quantas vezes a imagem travou e quem transmite vê quanto a rede comporta, com uma dica do que fazer.',
+      },
+    ],
+  },
+  {
     id: '2026-10-28-3',
     title: 'Transmissões e câmeras se ajustam à janela',
     items: [

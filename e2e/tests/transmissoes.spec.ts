@@ -74,3 +74,42 @@ test.describe('transmissões de tela', () => {
     await Promise.all([ana, bruno].map((p) => p.context.close()));
   });
 });
+
+test.describe('qualidade para jogos', () => {
+  test('a receita "Jogo ou vídeo" escolhe 1080p, 60 fps e Fluidez, e as estatísticas mostram o teto e a travada', async ({ browser }) => {
+    const ana = await openPerson(browser, 'Ana');
+    const bruno = await openPerson(browser, 'Bruno', { screen: { color: '#1f7a4d', width: 1920, height: 1080 } });
+    await joinCall(ana.page);
+    await joinCall(bruno.page);
+
+    await bruno.page.getByRole('button', { name: 'Tela', exact: true }).click();
+    const dialog = bruno.page.getByRole('dialog', { name: 'Compartilhar tela' });
+    // Começa na receita de tela e texto (o padrão).
+    await expect(dialog.getByRole('radio', { name: 'Tela e texto' })).toBeChecked();
+    await dialog.getByText('Jogo ou vídeo', { exact: true }).click();
+    await expect(dialog.getByRole('radio', { name: 'Jogo ou vídeo' })).toBeChecked();
+    await expect(dialog.getByRole('radio', { name: '1080p' })).toBeChecked();
+    await expect(dialog.getByRole('radio', { name: '60 fps' })).toBeChecked();
+    await expect(dialog.getByRole('radio', { name: 'Fluidez' })).toBeChecked();
+
+    // Mexer em um item solta a receita.
+    await dialog.getByText('30 fps', { exact: true }).click();
+    await expect(dialog.getByRole('radio', { name: 'Jogo ou vídeo' })).not.toBeChecked();
+    await dialog.getByText('Jogo ou vídeo', { exact: true }).click();
+
+    await dialog.getByRole('button', { name: 'Escolher tela' }).click();
+    await expect(bruno.page.getByRole('region', { name: 'Sua tela' })).toBeVisible();
+
+    await ana.page.getByRole('button', { name: `Assistir à tela de ${bruno.name}` }).click();
+    await expect(ana.page.getByRole('region', { name: `Tela de ${bruno.name}` }).locator('video')).toBeVisible();
+
+    // Quem transmite vê o teto pedido ao codificador (1080p a 60 fps, dividido pelo upload de 10 Mbps).
+    await bruno.page.getByRole('region', { name: 'Sua tela' }).getByRole('button', { name: 'Estatísticas da transmissão' }).click();
+    await expect(bruno.page.getByRole('status', { name: 'Estatísticas da transmissão' })).toContainText(/teto \d/, { timeout: 15_000 });
+
+    // A escolha fica guardada para a próxima transmissão, e a receita continua marcada.
+    await bruno.page.getByRole('button', { name: 'Configurações da transmissão' }).first().click();
+    await expect(bruno.page.getByRole('dialog').getByRole('radio', { name: 'Jogo ou vídeo' })).toBeChecked();
+    await Promise.all([ana, bruno].map((p) => p.context.close()));
+  });
+});

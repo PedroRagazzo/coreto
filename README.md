@@ -720,6 +720,17 @@ transmite codifica uma vez por espectador. Para a imagem não ficar borrada quan
 - **Estatísticas** (botão com o ícone de atividade no cabeçalho da transmissão): resolução, quadros por segundo, bitrate,
   codec, perda de pacotes e latência, lidos de `getStats()`. Para quem transmite mostra também o que está limitando a
   qualidade (seu computador ou sua internet).
+- **Receita "Jogo ou vídeo"** (ao compartilhar e nas configurações da transmissão): escolhe 1080p, 60 fps, Fluidez e H.264
+  de uma vez; "Tela e texto" volta para 720p, 30 fps e Nitidez. Jogo rápido troca a imagem inteira a cada quadro, e a
+  prioridade Nitidez (que trata a imagem como texto) deixa os quadros caírem: parece travar.
+- **Teto de bitrate maior pelo servidor de mídia** (`maxBitrate(…, 'sfu')`): sai uma cópia só, então o upload não se
+  divide e 1080p a 60 fps pode usar até ~9,75 Mb/s (sempre limitado a 70% do upload informado). Na malha P2P os tetos
+  seguem os de antes. Na prioridade Fluidez a imagem encolhe antes de virar blocos (`MOTION_FACTOR`: movimento pede 40%
+  mais bits por pixel que texto). Quem assiste precisa de download à altura, pois não há versão menor do vídeo.
+- **Diagnóstico em palavras** (`diagnoseStream`, em `shared/src/stream-quality.ts`, com testes): o painel de estatísticas
+  mostra o teto pedido, quanto a rede estima que comporta (`availableOutgoingBitrate`) e, para quem assiste, quantas
+  vezes a imagem travou nos últimos 30 s (`freezeCount`), e explica a causa provável: computador, internet de envio,
+  caminho até o servidor, perda de pacotes com ida e volta longa (cada retransmissão demora) ou poucos quadros na origem.
 
 Para transmitir bem para muita gente de uma vez, o caminho é um servidor de mídia (SFU): quem transmite envia uma cópia só.
 
