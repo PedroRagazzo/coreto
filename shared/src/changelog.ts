@@ -22,6 +22,16 @@ export interface ChangelogEntry {
 /** Da mais nova para a mais antiga. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-10-30-3',
+    title: 'App de desktop 0.7.1',
+    items: [
+      {
+        title: 'Trocar de janela sempre abre o seletor',
+        text: 'No app do Windows, trocar a janela transmitida logo depois de começar, com o som desligado, agora sempre mostra o seletor. Atualize o app para usar.',
+      },
+    ],
+  },
+  {
     id: '2026-10-30-2',
     title: 'Trocar a janela sem parar a transmissão',
     items: [

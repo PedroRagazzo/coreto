@@ -1,7 +1,7 @@
 {
   "name": "coreto-desktop",
   "productName": "Coreto",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "App de desktop do Coreto: abre o servidor configurado em coreto.config.json",
   "author": "PedroRagazzo",
   "license": "MIT",
