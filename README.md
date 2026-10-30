@@ -260,6 +260,9 @@ npm run e2e
   computador, sem baixar nada: `E2E_BROWSER=msedge npm run e2e` (ou `chrome`).
 - Para rodar um arquivo só, sem recompilar o site: `npm run test -w e2e -- tests/chat.spec.ts`. Depois de mudar o
   client, rode `npm run build` antes (o `npm run e2e` já faz isso).
+- Para conferir também a transmissão pelo servidor de mídia (LiveKit), suba um `livekit-server --dev --node-ip 127.0.0.1`
+  local e rode com `E2E_LIVEKIT_URL=ws://localhost:7880`: os testes de transmissão passam a usá-lo e um teste a mais
+  (trocar a janela com a transmissão no ar) roda. Sem a variável, e no CI, a tela vai pela malha P2P.
 - Não há microfone, tela nem internet de verdade: o microfone é o falso do Chromium (um tom), a tela transmitida é um
   canvas desenhado (`e2e/support/app.ts`), e a pré-visualização de links responde "nada" (`e2e/start-server.ts`). A
   transmissão vai pela malha P2P, como numa instalação sem LiveKit.
@@ -694,6 +697,13 @@ prévia sem som e o contador "N assistindo" na barra de voz. Parar pelo botão d
 saindo da chamada mostra "A transmissão terminou" para quem assistia.
 
 **Várias transmissões ao mesmo tempo.** Dá para assistir a até 4 (`MAX_WATCHED_STREAMS`) de uma vez: cada clique num nome abre mais uma no painel, e `watching` na lista da sala é uma lista. Com mais de uma aberta, uma fica **em destaque** (grande, com o som) e as outras viram miniaturas ao lado; o botão de ampliar numa miniatura troca quem é a grande, e o seletor do topo muda para a **grade**, com todas do mesmo tamanho. Cada tela tem seu próprio botão de tela cheia e de fechar (`stream:unwatch` com `userId` para só a escolhida). Só a que está em destaque toca som, e o ícone de alto-falante de cada uma liga ou desliga o dela. As telas ficam sempre no mesmo lugar do documento e só mudam de posição na grade (CSS), então trocar o destaque não reinicia os vídeos.
+
+**Trocar a janela ou tela durante a transmissão:** o botão de trocar (dois quadradinhos, no palco da própria tela, na
+faixa da chamada e no rodapé da visão da chamada) abre o seletor do navegador de novo (`VoiceManager.switchScreen`).
+A nova captura entra no lugar da antiga: na malha P2P cada espectador recebe a faixa nova por `replaceTrack` (sem
+renegociar) e, pelo servidor de mídia, `SfuSession.replaceScreen` troca a faixa na mesma publicação, então quem assiste
+não vê a transmissão acabar nem recomeçar. O som e a miniatura da prévia acompanham a janela nova, o nome na lista da sala
+é atualizado (`stream:start` de novo) e, se o seletor for cancelado, nada muda.
 
 **Mudar a qualidade durante a transmissão:** quem transmite abre as **Configurações da transmissão** (engrenagem no
 palco da própria tela, na faixa da chamada ou no rodapé da visão da chamada) e troca resolução, quadros, prioridade e

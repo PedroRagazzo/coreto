@@ -737,6 +737,65 @@ export class VoiceManager {
    */
   async startScreen(options: ScreenShareOptions): Promise<{ stream: MediaStream; audioFailed: boolean; title: string }> {
     if (!this.localStream) throw new Error('Entre em um canal de voz para compartilhar a tela.');
+    const { stream, feed, audioFailed } = await this.captureScreen(options);
+    this.stopScreen();
+    const [video] = stream.getVideoTracks();
+    this.prepareScreenVideo(video, stream, options);
+    const preview = new PreviewCapture(stream, (image) => this.socket.emit('stream:preview', { image }));
+    const screen = { stream, options, feed, preview, transport: this.sfuAvailable ? ('pending' as const) : ('p2p' as const) };
+    this.screen = screen;
+    this.applyScreenViewers();
+    if (this.sfuAvailable) void this.publishViaSfu(screen);
+    return { stream, audioFailed, title: await captureTitle(video) };
+  }
+
+  /** Dica de prioridade para o codificador e o aviso de que o usuário parou pelo botão do próprio navegador. */
+  private prepareScreenVideo(video: MediaStreamTrack, stream: MediaStream, options: ScreenShareOptions): void {
+    // Dica para o codificador: "text" mantém a resolução e cai nos quadros; "motion" faz o contrário.
+    video.contentHint = options.priority === 'sharp' ? 'text' : 'motion';
+    video.addEventListener('ended', () => {
+      if (this.screen?.stream === stream) this.events.onScreenEnded?.();
+    });
+  }
+
+  /**
+   * Troca a janela ou a tela que está sendo transmitida sem parar a transmissão: abre o seletor, e a nova imagem
+   * entra no lugar da antiga. Quem assiste não renegocia nada, a imagem só muda. Se o seletor for cancelado, nada
+   * muda (a promessa rejeita, como em `startScreen`). Chame direto do clique.
+   */
+  async switchScreen(): Promise<{ stream: MediaStream; audioFailed: boolean; title: string }> {
+    const screen = this.screen;
+    if (!screen) throw new Error('Não há transmissão no ar.');
+    const captured = await this.captureScreen(screen.options);
+    if (this.screen !== screen) {
+      // A transmissão acabou enquanto o seletor estava aberto.
+      captured.stream.getTracks().forEach((track) => track.stop());
+      captured.feed?.close();
+      throw new Error('A transmissão terminou.');
+    }
+    const previous = { stream: screen.stream, feed: screen.feed, preview: screen.preview };
+    const { stream } = captured;
+    const [video] = stream.getVideoTracks();
+    const [audio] = stream.getAudioTracks();
+    this.prepareScreenVideo(video, stream, screen.options);
+    screen.stream = stream;
+    screen.feed = captured.feed;
+    screen.preview = new PreviewCapture(stream, (image) => this.socket.emit('stream:preview', { image }));
+    // Malha P2P: troca a faixa de cada espectador (sem renegociar). Servidor de mídia: troca a faixa publicada.
+    this.applyScreenViewers();
+    if (screen.transport === 'sfu' && this.sfuSession) {
+      await this.sfuSession
+        .replaceScreen(video, audio ?? null, this.sfuPublishOptions(screen.options))
+        .catch((err: unknown) => console.warn('[voz] trocar a tela no servidor de mídia', err));
+    }
+    previous.stream.getTracks().forEach((track) => track.stop());
+    previous.feed?.close();
+    previous.preview.stop();
+    return { stream, audioFailed: captured.audioFailed, title: await captureTitle(video) };
+  }
+
+  /** Abre o seletor de tela do navegador e devolve a captura (imagem e, se pedido, som). */
+  private async captureScreen(options: ScreenShareOptions): Promise<{ stream: MediaStream; feed: AppAudioFeed | null; audioFailed: boolean }> {
     const constraints: MediaTrackConstraints = {
       frameRate: { ideal: options.frameRate, max: options.frameRate },
       ...(options.height && { height: { ideal: options.height, max: options.height } }),
@@ -767,20 +826,7 @@ export class VoiceManager {
         stream.addTrack(await feed.track());
       }
     }
-    this.stopScreen();
-    const [video] = stream.getVideoTracks();
-    // Dica para o codificador: "text" mantém a resolução e cai nos quadros; "motion" faz o contrário.
-    video.contentHint = options.priority === 'sharp' ? 'text' : 'motion';
-    // O usuário pode parar pelo aviso do próprio navegador.
-    video.addEventListener('ended', () => {
-      if (this.screen?.stream === stream) this.events.onScreenEnded?.();
-    });
-    const preview = new PreviewCapture(stream, (image) => this.socket.emit('stream:preview', { image }));
-    const screen = { stream, options, feed, preview, transport: this.sfuAvailable ? ('pending' as const) : ('p2p' as const) };
-    this.screen = screen;
-    this.applyScreenViewers();
-    if (this.sfuAvailable) void this.publishViaSfu(screen);
-    return { stream, audioFailed, title: await captureTitle(video) };
+    return { stream, feed, audioFailed };
   }
 
   /**
@@ -798,6 +844,11 @@ export class VoiceManager {
       if (!stillMine()) {
         void session.unpublishScreen();
         return;
+      }
+      // A janela foi trocada enquanto publicava: a faixa publicada já parou, então publica a nova.
+      const [current] = screen.stream.getVideoTracks();
+      if (current && current !== video) {
+        await session.replaceScreen(current, screen.stream.getAudioTracks()[0] ?? null, this.sfuPublishOptions(screen.options));
       }
       screen.transport = 'sfu';
     } catch (err) {

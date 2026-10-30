@@ -113,3 +113,56 @@ test.describe('qualidade para jogos', () => {
     await Promise.all([ana, bruno].map((p) => p.context.close()));
   });
 });
+
+test.describe('trocar a janela com a transmissão no ar', () => {
+  test('quem assiste continua na mesma transmissão, só a imagem muda', async ({ browser }) => {
+    const ana = await openPerson(browser, 'Ana');
+    // A primeira "janela" é 1280×720; a segunda, 960×540.
+    const bruno = await openPerson(browser, 'Bruno', { screen: { width: 1280, height: 720, after: { width: 960, height: 540 } } });
+    await joinCall(ana.page);
+    await joinCall(bruno.page);
+    await startScreen(bruno.page);
+
+    await ana.page.getByRole('button', { name: `Assistir à tela de ${bruno.name}` }).click();
+    const video = ana.page.getByRole('region', { name: `Tela de ${bruno.name}` }).locator('video');
+    await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.videoWidth), { timeout: 20_000 }).toBe(1280);
+
+    await bruno.page.getByRole('button', { name: 'Trocar a janela ou tela transmitida' }).first().click();
+
+    // A mesma transmissão passa a mostrar a janela nova, sem aviso de que acabou.
+    await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.videoWidth), { timeout: 20_000 }).toBe(960);
+    await expect(ana.page.getByText('A transmissão terminou.')).toHaveCount(0);
+    await expect(bruno.page.getByRole('region', { name: 'Sua tela' })).toBeVisible();
+    await expect(bruno.page.getByRole('button', { name: 'Parar de transmitir' }).first()).toBeVisible();
+    await Promise.all([ana, bruno].map((p) => p.context.close()));
+  });
+});
+
+test.describe('trocar a janela pelo servidor de mídia', () => {
+  // Precisa de um livekit-server local (README, "Testes do site"); no CI não há, e a tela vai pela malha P2P.
+  test.skip(!process.env.E2E_LIVEKIT_URL, 'sem E2E_LIVEKIT_URL');
+
+  test('a faixa é trocada na mesma publicação e quem assiste continua recebendo', async ({ browser }) => {
+    const ana = await openPerson(browser, 'Ana');
+    const bruno = await openPerson(browser, 'Bruno', { screen: { width: 1280, height: 720, after: { width: 960, height: 540 } } });
+    await joinCall(ana.page);
+    await joinCall(bruno.page);
+    await startScreen(bruno.page);
+    await ana.page.getByRole('button', { name: `Assistir à tela de ${bruno.name}` }).click();
+    const video = ana.page.getByRole('region', { name: `Tela de ${bruno.name}` }).locator('video');
+    await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.videoWidth), { timeout: 30_000 }).toBe(1280);
+
+    // Pelo servidor de mídia: o painel de quem assiste diz isso.
+    await ana.page.getByRole('region', { name: `Tela de ${bruno.name}` }).getByRole('button', { name: 'Estatísticas da transmissão' }).click();
+    await expect(ana.page.getByRole('status', { name: 'Estatísticas da transmissão' })).toContainText('servidor de mídia', { timeout: 15_000 });
+
+    // Quem transmite vê quanto a rede comporta até o servidor de mídia.
+    await bruno.page.getByRole('region', { name: 'Sua tela' }).getByRole('button', { name: 'Estatísticas da transmissão' }).click();
+    await expect(bruno.page.getByRole('status', { name: 'Estatísticas da transmissão' })).toContainText(/a rede comporta \d/, { timeout: 15_000 });
+
+    await bruno.page.getByRole('button', { name: 'Trocar a janela ou tela transmitida' }).first().click();
+    await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.videoWidth), { timeout: 30_000 }).toBe(960);
+    await expect(ana.page.getByText('A transmissão terminou.')).toHaveCount(0);
+    await Promise.all([ana, bruno].map((p) => p.context.close()));
+  });
+});

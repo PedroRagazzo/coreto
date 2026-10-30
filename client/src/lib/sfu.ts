@@ -122,6 +122,26 @@ export class SfuSession {
     }
   }
 
+  /**
+   * Troca a imagem (e o som) que já está no ar por faixas novas, na mesma publicação: quem assiste não vê a transmissão
+   * acabar nem recomeçar. Se o som aparece ou some (ou a troca falha), publica de novo.
+   */
+  async replaceScreen(video: MediaStreamTrack, audio: MediaStreamTrack | null, options: ScreenPublishOptions): Promise<void> {
+    const { localParticipant } = this.room;
+    const videoTrack = localParticipant.getTrackPublication(Track.Source.ScreenShare)?.track;
+    const audioTrack = localParticipant.getTrackPublication(Track.Source.ScreenShareAudio)?.track;
+    if (!this.published || !videoTrack || Boolean(audio) !== Boolean(audioTrack)) return this.publishScreen(video, audio, options);
+    try {
+      // `userProvidedTrack`: as faixas são de quem chamou, que as para por conta própria.
+      await videoTrack.replaceTrack(video, { userProvidedTrack: true });
+      if (audio && audioTrack) await audioTrack.replaceTrack(audio, { userProvidedTrack: true });
+      this.published = { video, audio };
+    } catch (err) {
+      console.warn('[voz] trocar a faixa falhou; publicando de novo', err);
+      await this.publishScreen(video, audio, options);
+    }
+  }
+
   /** Tira a tela do ar sem parar as faixas (quem chama é dono delas). */
   async unpublishScreen(): Promise<void> {
     const published = this.published;

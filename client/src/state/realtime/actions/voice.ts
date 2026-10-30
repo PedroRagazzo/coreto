@@ -142,6 +142,25 @@ export function createVoiceActions(ctx: ActionContext) {
       return !res ? 'Sem conexão com o servidor.' : res.ok ? null : res.error;
     },
 
+    async switchScreenShare() {
+      const voice = voiceRef.current;
+      const socket = socketRef.current;
+      if (!voice || !socket) return;
+      try {
+        const { stream, audioFailed, title } = await voice.switchScreen();
+        // O nome novo vai para a lista da sala; o servidor só atualiza o título, quem assiste não percebe.
+        await socket.emitWithAck('stream:start', { title });
+        dispatch({ type: 'screen:mine', stream });
+        if (audioFailed) {
+          dispatch({ type: 'voice:self', patch: { error: 'O sistema não liberou o som: a tela está indo sem áudio.' } });
+        }
+      } catch (err) {
+        // Cancelar o seletor não é erro: a transmissão segue como estava.
+        const message = describeScreenError(err);
+        if (message) dispatch({ type: 'voice:self', patch: { error: message } });
+      }
+    },
+
     stopScreenShare() {
       voiceRef.current?.stopScreen();
       socketRef.current?.emit('stream:stop');

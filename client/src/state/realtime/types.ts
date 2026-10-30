@@ -170,6 +170,8 @@ export interface RealtimeActions {
   /** Abre o seletor de tela e começa a transmitir. Resolve com erro ou `null` (também se a pessoa cancelar). */
   startScreenShare(options: ScreenShareOptions): Promise<string | null>;
   stopScreenShare(): void;
+  /** Troca a janela ou tela da transmissão que está no ar, sem parar. Chame direto do clique. */
+  switchScreenShare(): Promise<void>;
   /** Pede uma música ao bot (link do YouTube/Spotify ou busca). Devolve o aviso para mostrar, ou o motivo da recusa. */
   musicPlay(input: string, next?: boolean): Promise<{ message: string } | { error: string }>;
   /** Controla o bot de música (pular, pausar, volume...). Devolve o motivo da recusa, ou `null`. */

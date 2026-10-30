@@ -11,6 +11,7 @@ import {
   Monitor,
   MonitorOff,
   PanelRight,
+  Replace,
   Settings2,
   Volume2,
   VolumeX,
@@ -287,10 +288,21 @@ function StreamTile({
           {live && isMe && (
             <button
               type="button"
+              onClick={() => void actions.switchScreenShare()}
+              title="Trocar a janela ou tela transmitida"
+              aria-label="Trocar a janela ou tela transmitida"
+              className="ml-auto rounded p-1.5 text-muted hover:bg-hover hover:text-fg"
+            >
+              <Replace size={18} />
+            </button>
+          )}
+          {live && isMe && (
+            <button
+              type="button"
               onClick={() => setConfiguring(true)}
               title="Configurações da transmissão"
               aria-label="Configurações da transmissão"
-              className="ml-auto rounded p-1.5 text-muted hover:bg-hover hover:text-fg"
+              className="rounded p-1.5 text-muted hover:bg-hover hover:text-fg"
             >
               <Settings2 size={18} />
             </button>

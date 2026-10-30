@@ -612,7 +612,7 @@ function configureSession() {
   ses.setPermissionCheckHandler((_webContents, permission, origin) => isOurs(origin) && ALLOWED_PERMISSIONS.has(permission));
 
   /** Última escolha: se a captura com som falhar, o site pede de novo sem som e não precisa escolher outra vez. */
-  /** @type {{ id: string; at: number } | null} */
+  /** @type {{ id: string; at: number; audio: boolean } | null} */
   let lastChoice = null;
   const REUSE_CHOICE_MS = 10_000;
 
@@ -626,9 +626,10 @@ function configureSession() {
       }
     };
     if (!mainWindow || !isOurs(request.securityOrigin)) return deny();
-    const reuse = lastChoice && !request.audioRequested && Date.now() - lastChoice.at < REUSE_CHOICE_MS;
+    // Só depois de um pedido com som: trocar de janela no meio da transmissão (também sem som) tem de abrir o seletor.
+    const reuse = lastChoice && lastChoice.audio && !request.audioRequested && Date.now() - lastChoice.at < REUSE_CHOICE_MS;
     const id = reuse && lastChoice ? lastChoice.id : await pickSource(mainWindow);
-    lastChoice = id ? { id, at: Date.now() } : null;
+    lastChoice = id ? { id, at: Date.now(), audio: Boolean(request.audioRequested) } : null;
     if (!id) return deny();
     const [source] = (await desktopCapturer.getSources({ types: ['screen', 'window'] })).filter((s) => s.id === id);
     if (!source) return deny();

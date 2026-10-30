@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { startServer } from '../server/src/app.js';
 import { createDb } from '../server/src/db/client.js';
 import { seedIfEmpty } from '../server/src/seed.js';
+import { sfuConfigFromEnv } from '../server/src/sfu.js';
 import { Store } from '../server/src/store.js';
 import { iceConfigFromEnv } from '../server/src/turn.js';
 import { assertTestDatabase } from '../server/test/support/database.js';
@@ -38,8 +39,15 @@ const server = await startServer(await Store.load(db), {
   uploadDir: await mkdtemp(join(tmpdir(), 'coreto-e2e-uploads-')),
   clientDist: join(root, 'client', 'dist'),
   ice: iceConfigFromEnv({}),
-  // Sem servidor de mídia: a tela vai pela malha P2P, como numa instalação sem LiveKit.
-  sfu: null,
+  // Sem servidor de mídia (o padrão): a tela vai pela malha P2P, como numa instalação sem LiveKit. Com
+  // E2E_LIVEKIT_URL (e a chave e o segredo de um livekit-server local), a tela passa por ele, como em produção.
+  sfu: process.env.E2E_LIVEKIT_URL
+    ? sfuConfigFromEnv({
+        LIVEKIT_URL: process.env.E2E_LIVEKIT_URL,
+        LIVEKIT_API_KEY: process.env.E2E_LIVEKIT_KEY ?? 'devkey',
+        LIVEKIT_API_SECRET: process.env.E2E_LIVEKIT_SECRET ?? 'secret',
+      })
+    : null,
   // Nenhum teste visita a internet: a pré-visualização de links responde sempre "nada para mostrar".
   embeds: { preview: async () => null, image: async () => null },
 });

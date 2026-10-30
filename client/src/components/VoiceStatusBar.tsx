@@ -1,4 +1,4 @@
-import { AudioLines, Eye, Headphones, HeadphoneOff, Mic, MicOff, MonitorUp, MonitorX, Music2, Pause, PhoneOff, Play, Settings2, SkipForward, Video, VideoOff, X } from 'lucide-react';
+import { AudioLines, Eye, Headphones, HeadphoneOff, Mic, MicOff, MonitorUp, MonitorX, Music2, Pause, PhoneOff, Play, Replace, Settings2, SkipForward, Video, VideoOff, X } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { useRealtime } from '../state/realtime';
 import { MusicDialog, useMusic } from './MusicDialog';
@@ -82,6 +82,15 @@ export function VoiceStatusBar() {
                 <LiveBadge />
                 <Eye size={14} aria-hidden />
                 <span className="truncate">{viewers === 1 ? '1 assistindo' : `${viewers} assistindo`}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => void actions.switchScreenShare()}
+                title="Trocar a janela ou tela transmitida"
+                aria-label="Trocar a janela ou tela transmitida"
+                className="rounded-md p-1.5 text-muted hover:bg-hover hover:text-fg"
+              >
+                <Replace size={18} />
               </button>
               <button
                 type="button"

@@ -1,6 +1,6 @@
 import { bestGrid } from '@shared/grid';
 import type { Id, VoiceParticipant } from '@shared/models';
-import { AudioLines, HeadphoneOff, Mic, MicOff, MonitorUp, Music2, PhoneOff, Settings2, Video, VideoOff, Volume2, X } from 'lucide-react';
+import { AudioLines, HeadphoneOff, Mic, MicOff, MonitorUp, Music2, PhoneOff, Replace, Settings2, Video, VideoOff, Volume2, X } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useElementSize } from '../lib/useElementSize';
 import { useRealtime } from '../state/realtime';
@@ -97,6 +97,11 @@ export function CallView() {
         >
           <MonitorUp size={20} />
         </CallButton>
+        {voice.streaming && (
+          <CallButton label="Trocar a janela ou tela transmitida" onClick={() => void actions.switchScreenShare()}>
+            <Replace size={20} />
+          </CallButton>
+        )}
         {voice.streaming && (
           <CallButton label="Configurações da transmissão" onClick={() => setConfiguring(true)}>
             <Settings2 size={20} />

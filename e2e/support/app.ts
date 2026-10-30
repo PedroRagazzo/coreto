@@ -19,21 +19,36 @@ export interface Person {
  * `getDisplayMedia` falso: uma tela de `width`×`height` desenhada num canvas, no lugar do seletor de tela do sistema,
  * que um teste automático não consegue operar.
  */
-const FAKE_SCREEN = ({ label, color, width, height }: { label: string; color: string; width: number; height: number }) => {
+const FAKE_SCREEN = ({
+  label,
+  color,
+  width,
+  height,
+  after,
+}: {
+  label: string;
+  color: string;
+  width: number;
+  height: number;
+  after?: { width: number; height: number };
+}) => {
+  let captures = 0;
   navigator.mediaDevices.getDisplayMedia = async () => {
+    // Da segunda captura em diante (trocar de janela no meio da transmissão), o tamanho pode ser outro.
+    const size = captures++ > 0 && after ? after : { width, height };
     const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
+    canvas.width = size.width;
+    canvas.height = size.height;
     const ctx = canvas.getContext('2d')!;
     let tick = 0;
     const draw = () => {
       tick++;
       ctx.fillStyle = color;
-      ctx.fillRect(0, 0, width, height);
+      ctx.fillRect(0, 0, size.width, size.height);
       ctx.fillStyle = '#fff';
       ctx.font = '64px sans-serif';
       ctx.fillText(label, 60, 140);
-      ctx.fillRect((tick * 8) % (width - 100), height - 140, 100, 100);
+      ctx.fillRect((tick * 8) % (size.width - 100), size.height - 140, 100, 100);
     };
     draw();
     setInterval(draw, 66);
@@ -60,6 +75,8 @@ export interface FakeScreen {
   color?: string;
   width?: number;
   height?: number;
+  /** O tamanho da tela a partir da segunda captura: simula trocar de janela com a transmissão no ar. */
+  after?: { width: number; height: number };
 }
 
 /** Abre o site numa janela nova, cria a conta (ou entra nela) e espera o app abrir. */
@@ -76,8 +93,8 @@ export async function openPerson(
   });
   await context.addInitScript(TRACK_PEERS);
   if (options.screen) {
-    const { label: screenLabel = `Tela de ${name}`, color = '#7a2d9e', width = 1280, height = 720 } = options.screen;
-    await context.addInitScript(FAKE_SCREEN, { label: screenLabel, color, width, height });
+    const { label: screenLabel = `Tela de ${name}`, color = '#7a2d9e', width = 1280, height = 720, after } = options.screen;
+    await context.addInitScript(FAKE_SCREEN, { label: screenLabel, color, width, height, after });
   }
   const page = await context.newPage();
   await signIn(page, name);

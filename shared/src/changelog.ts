@@ -22,6 +22,16 @@ export interface ChangelogEntry {
 /** Da mais nova para a mais antiga. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-10-30-2',
+    title: 'Trocar a janela sem parar a transmissão',
+    items: [
+      {
+        title: 'Trocar a janela ou tela transmitida',
+        text: 'Com a transmissão no ar, o botão de trocar (dois quadradinhos) abre o seletor de novo: escolha outra janela ou tela e a transmissão continua, sem cortar para quem está assistindo.',
+      },
+    ],
+  },
+  {
     id: '2026-10-30',
     title: 'Transmissão melhor para jogos',
     items: [
