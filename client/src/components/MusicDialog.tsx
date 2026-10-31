@@ -73,7 +73,7 @@ export function MusicDialog({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <Modal title="Audio Democrático" description="O Coreto Música toca na sua sala de voz. Todo mundo na sala pode pedir e controlar." onClose={onClose}>
+    <Modal title="Música" description="O Coreto Música toca na sua sala de voz. Todo mundo na sala pode pedir e controlar." onClose={onClose}>
       <NowPlaying
         music={music?.state ?? null}
         positionMs={position}
@@ -214,19 +214,21 @@ function NowPlaying({
         <button type="button" onClick={() => onControl({ action: 'stop' })} aria-label="Parar e tirar o bot da chamada" title="Parar e tirar o bot da chamada" className={iconButton}>
           <Square size={16} />
         </button>
-        <label className="ml-auto flex items-center gap-2 text-muted">
-          <Volume2 size={18} aria-hidden />
-          <span className="sr-only">Volume do bot para todos</span>
-          <input
-            type="range"
-            min={0}
-            max={150}
-            step={5}
-            value={volume}
-            onChange={(e) => changeVolume(Number(e.target.value))}
-            className="w-28 accent-accent"
-          />
-          <span className="w-9 text-right text-xs tabular-nums">{volume}%</span>
+        <label className="ml-auto flex flex-col gap-0.5 text-muted" title="O volume muda para todos na chamada">
+          <span className="text-xs font-medium text-faint">Áudio Democrático</span>
+          <span className="flex items-center gap-2">
+            <Volume2 size={18} aria-hidden />
+            <input
+              type="range"
+              min={0}
+              max={150}
+              step={5}
+              value={volume}
+              onChange={(e) => changeVolume(Number(e.target.value))}
+              className="w-28 accent-accent"
+            />
+            <span className="w-9 text-right text-xs tabular-nums">{volume}%</span>
+          </span>
         </label>
       </div>
     </div>
