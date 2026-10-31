@@ -1,12 +1,15 @@
 name: Monitor
 
-# De 10 em 10 minutos, confere se o servidor do Coreto responde e avisa quando ele cai e quando volta (uma vez cada).
+# De 10 em 10 minutos, confere se o servidor do Coreto responde e avisa quando ele cai e quando volta (uma vez cada). Também
+# avisa quando o disco da VPS passa de 80% (aviso) e de 90% (urgente), e quando volta ao normal: o servidor informa o uso do
+# disco em /health.
 # O aviso vem de fora do servidor, porque um servidor fora do ar não consegue avisar. Como avisa (ver README, "Alerta de
 # servidor fora do ar"):
 #   - sempre: esta execução fica vermelha quando o servidor cai, e o GitHub manda e-mail (e notificação no app do GitHub);
 #   - se existir o segredo NTFY_TOPIC: notificação no celular pelo app ntfy;
 #   - se existir o segredo DISCORD_WEBHOOK: mensagem num canal do Discord.
-# O estado ("já avisei que caiu") fica na execução anterior: ela conta como "fora do ar" se o passo "Registrar queda" rodou.
+# O estado ("já avisei que caiu", "já avisei do disco") fica na execução anterior: ela conta como "fora do ar" se o passo
+# "Registrar queda" rodou, e como "disco alto" se rodou "Registrar disco alto" (ou "Registrar disco critico").
 
 on:
   schedule:
@@ -79,19 +82,27 @@ jobs:
         if: ${{ !inputs.teste }}
         run: node deploy/monitor/check.ts "$(node -p "require('./desktop/coreto.config.json').url")"
 
-      # O estado vem da execução anterior (concluída): ela estava "fora do ar" se rodou o passo "Registrar queda".
+      # O estado vem da execução anterior (concluída): ela estava "fora do ar" se rodou o passo "Registrar queda", e com o
+      # disco alto (ou crítico) se rodou o passo "Registrar disco alto" (ou "Registrar disco critico").
       - name: Ver o estado anterior
         id: before
         if: ${{ !inputs.teste }}
         run: |
           run_id=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/monitor.yml/runs?status=completed&per_page=1&event=schedule" --jq '.workflow_runs[0].id // empty')
-          was_down=false
+          was_down=false; was_disk_warn=false; was_disk_critical=false
           if [ -n "$run_id" ]; then
-            ran=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/jobs" --jq '[.jobs[0].steps[] | select(.name == "Registrar queda") | .conclusion] | first // "skipped"')
-            [ "$ran" != "skipped" ] && was_down=true
+            steps=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/jobs" --jq '.jobs[0].steps')
+            ran() { echo "$steps" | jq -r --arg name "$1" '[.[] | select(.name == $name) | .conclusion] | first // "skipped"'; }
+            [ "$(ran 'Registrar queda')" != "skipped" ] && was_down=true
+            [ "$(ran 'Registrar disco alto')" != "skipped" ] && was_disk_warn=true
+            [ "$(ran 'Registrar disco critico')" != "skipped" ] && was_disk_critical=true
           fi
-          echo "Execução anterior: ${run_id:-nenhuma}; estava fora do ar: $was_down"
-          echo "was_down=$was_down" >> "$GITHUB_OUTPUT"
+          echo "Execução anterior: ${run_id:-nenhuma}; fora do ar: $was_down; disco alto: $was_disk_warn; disco crítico: $was_disk_critical"
+          {
+            echo "was_down=$was_down"
+            echo "was_disk_warn=$was_disk_warn"
+            echo "was_disk_critical=$was_disk_critical"
+          } >> "$GITHUB_OUTPUT"
 
       # Só roda (e portanto só conta como "fora do ar" na próxima vez) quando o servidor está fora do ar.
       - name: Registrar queda
@@ -114,6 +125,47 @@ jobs:
           . "${{ steps.notify.outputs.script }}"
           notify "Coreto voltou" "O servidor voltou a responder." default "white_check_mark"
 
+      # Disco: um aviso por faixa. De alto para crítico avisa de novo; de crítico para alto não (já foi dito), e quando volta
+      # ao normal avisa uma vez. Sem número (servidor que ainda não informa o disco), nada acontece.
+      - name: Registrar disco alto
+        id: disk_warn
+        if: ${{ !inputs.teste && steps.check.outputs.disk_level == 'warn' }}
+        env:
+          DETAIL: ${{ steps.check.outputs.disk_detail }}
+          WAS_WARN: ${{ steps.before.outputs.was_disk_warn }}
+          WAS_CRITICAL: ${{ steps.before.outputs.was_disk_critical }}
+        run: |
+          . "${{ steps.notify.outputs.script }}"
+          if [ "$WAS_WARN" = "true" ] || [ "$WAS_CRITICAL" = "true" ]; then
+            echo "Disco continua alto ($DETAIL); o aviso já foi dado."
+          else
+            notify "Coreto: disco enchendo" "O disco da VPS esta com $DETAIL. Apague backups ou anexos antigos, ou aumente o disco, antes que encha." high "floppy_disk"
+            echo "alerted=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Registrar disco critico
+        id: disk_critical
+        if: ${{ !inputs.teste && steps.check.outputs.disk_level == 'critical' }}
+        env:
+          DETAIL: ${{ steps.check.outputs.disk_detail }}
+          WAS_CRITICAL: ${{ steps.before.outputs.was_disk_critical }}
+        run: |
+          . "${{ steps.notify.outputs.script }}"
+          if [ "$WAS_CRITICAL" = "true" ]; then
+            echo "Disco continua crítico ($DETAIL); o aviso já foi dado."
+          else
+            notify "Coreto: disco quase cheio" "O disco da VPS esta com $DETAIL. Se encher, o banco e os anexos param de gravar. Libere espaco agora." urgent "rotating_light"
+            echo "alerted=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Disco normalizou
+        if: ${{ !inputs.teste && steps.check.outputs.disk_level == 'ok' && (steps.before.outputs.was_disk_warn == 'true' || steps.before.outputs.was_disk_critical == 'true') }}
+        env:
+          DETAIL: ${{ steps.check.outputs.disk_detail }}
+        run: |
+          . "${{ steps.notify.outputs.script }}"
+          notify "Coreto: disco normalizou" "O disco da VPS voltou ao normal: $DETAIL." default "white_check_mark"
+
       # Vermelho só na primeira vez que cai: o e-mail do GitHub avisa uma vez, e não a cada 10 minutos.
       - name: Falhar (primeira queda)
         if: ${{ !inputs.teste && steps.check.outputs.up == 'false' && steps.before.outputs.was_down != 'true' }}
@@ -121,4 +173,13 @@ jobs:
           DETAIL: ${{ steps.check.outputs.detail }}
         run: |
           echo "::error title=Coreto fora do ar::O servidor nao responde: $DETAIL"
+          exit 1
+
+      # Como na queda: a execução fica vermelha na primeira vez que o disco enche, e o GitHub manda e-mail.
+      - name: Falhar (disco enchendo)
+        if: ${{ !inputs.teste && (steps.disk_warn.outputs.alerted == 'true' || steps.disk_critical.outputs.alerted == 'true') }}
+        env:
+          DETAIL: ${{ steps.check.outputs.disk_detail }}
+        run: |
+          echo "::error title=Disco do Coreto enchendo::O disco da VPS esta com $DETAIL"
           exit 1

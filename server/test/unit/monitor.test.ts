@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { checkHealth } from '../../../deploy/monitor/health.js';
+import { checkHealth, diskLevel, parseDisk } from '../../../deploy/monitor/health.js';
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 const noWait = { sleep: () => Promise.resolve(), waitMs: 0 };
@@ -52,5 +52,39 @@ describe('checkHealth', () => {
     expect(result).toEqual({ up: false, attempts: 1, detail: 'resposta inesperada de /health' });
     const notOk = await checkHealth('https://x', { fetch: async () => json({ ok: false }), tries: 1, ...noWait });
     expect(notOk.up).toBe(false);
+  });
+});
+
+describe('uso do disco', () => {
+  const disk = { usedPercent: 83.4, freeBytes: 8_000_000_000, totalBytes: 50_000_000_000 };
+
+  it('traz o uso do disco que o servidor informa em /health', async () => {
+    const result = await checkHealth('https://x', { fetch: async () => json({ ok: true, disk }), tries: 1, ...noWait });
+    expect(result).toEqual({ up: true, attempts: 1, detail: '', disk });
+  });
+
+  it('um servidor que ainda não informa o disco continua no ar, só sem o número', async () => {
+    const result = await checkHealth('https://x', { fetch: async () => json({ ok: true }), tries: 1, ...noWait });
+    expect(result.up).toBe(true);
+    expect(result.disk).toBeUndefined();
+  });
+
+  it('um disco malformado é ignorado, sem derrubar a checagem', () => {
+    expect(parseDisk({ usedPercent: 'muito', freeBytes: 1, totalBytes: 2 })).toBeUndefined();
+    expect(parseDisk({ usedPercent: 120, freeBytes: 1, totalBytes: 2 })).toBeUndefined();
+    expect(parseDisk({ usedPercent: 50, freeBytes: -1, totalBytes: 2 })).toBeUndefined();
+    expect(parseDisk({ usedPercent: 50 })).toBeUndefined();
+    expect(parseDisk(null)).toBeUndefined();
+    expect(parseDisk(disk)).toEqual(disk);
+  });
+
+  it('avisa a partir de 80% e fica urgente a partir de 90%', () => {
+    expect(diskLevel(79.9)).toBe('ok');
+    expect(diskLevel(80)).toBe('warn');
+    expect(diskLevel(89.9)).toBe('warn');
+    expect(diskLevel(90)).toBe('critical');
+    expect(diskLevel(100)).toBe('critical');
+    expect(diskLevel(70, 60, 75)).toBe('warn'); // faixas ajustáveis
+    expect(diskLevel(76, 60, 75)).toBe('critical');
   });
 });

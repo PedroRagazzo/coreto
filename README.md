@@ -161,6 +161,13 @@ rodou ou não), sem issue pública nem arquivo no repositório, então um servid
   `DISCORD_WEBHOOK`.
 - **Conferir:** em Actions → Monitor → Run workflow, marque "teste": ele só manda um aviso de teste e diz se nenhum segredo está
   configurado. Os segredos ficam só no GitHub; nunca no código.
+- **Disco enchendo:** o `/health` também informa quanto do disco da VPS está ocupado (`server/src/disk.ts`, lido da pasta dos
+  anexos, que num volume do Docker fica no disco da própria VPS). O monitor avisa **uma vez** quando passa de **80%** (aviso),
+  de novo quando passa de **90%** (urgente) e uma vez quando volta ao normal, e a execução fica vermelha na primeira vez (e-mail
+  do GitHub). Os avisos dizem quantos GB sobram. As faixas mudam com `DISK_WARN_PERCENT` e `DISK_CRITICAL_PERCENT` no passo
+  "Conferir o servidor" do workflow. Quando o disco enche, o jeito mais rápido de liberar espaço é apagar anexos antigos e
+  backups velhos (`BACKUP_KEEP`) ou aumentar o disco da VPS. Um servidor de versão anterior, que ainda não informa o disco,
+  segue sendo monitorado só quanto a estar no ar.
 - O GitHub desliga workflows agendados em repositórios sem nenhuma atividade por 60 dias; um commit reativa. Os horários dos
   agendamentos podem atrasar alguns minutos.
 

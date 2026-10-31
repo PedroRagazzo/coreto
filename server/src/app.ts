@@ -4,6 +4,7 @@ import { Server } from 'socket.io';
 import { isValidPin, loginKey, normalizeDisplayName } from '../../shared/src/names.js';
 import { INVALID_SESSION, type LoginRequest, type LoginResponse } from '../../shared/src/protocol.js';
 import { LoginThrottle } from './auth.js';
+import { diskUsage } from './disk.js';
 import { LatestInstaller } from './download.js';
 import type { MusicBot, MusicFactory } from './music/index.js';
 import { registerMusic } from './music/socket.js';
@@ -67,7 +68,7 @@ export async function startServer(
 
   const httpServer = createServer((req, res) => {
     const path = (req.url ?? '').split('?')[0];
-    if (path === '/health') return sendJson(res, 200, { ok: true });
+    if (path === '/health') return void diskUsage(uploads.path).then((disk) => sendJson(res, 200, disk ? { ok: true, disk } : { ok: true }));
     if (path === '/download' && (req.method === 'GET' || req.method === 'HEAD')) {
       return void installer.get().then((url) => res.writeHead(302, { location: url, 'cache-control': 'no-store' }).end());
     }

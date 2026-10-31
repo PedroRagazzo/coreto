@@ -26,6 +26,16 @@ describe.skipIf(!hasTestDatabase)('login, sessão e presença', () => {
     expect(again.body.token).not.toBe(first.body.token);
   });
 
+  it('/health responde ok e informa o uso do disco, para o monitor avisar antes de encher', async () => {
+    const res = await fetch(`${server.url}/health`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; disk?: { usedPercent: number; freeBytes: number; totalBytes: number } };
+    expect(body.ok).toBe(true);
+    expect(body.disk?.totalBytes).toBeGreaterThan(0);
+    expect(body.disk?.usedPercent).toBeGreaterThanOrEqual(0);
+    expect(body.disk?.usedPercent).toBeLessThanOrEqual(100);
+  });
+
   it('recusa PIN errado, nome vazio e PIN fora do formato', async () => {
     await server.login('Otávio', '1111');
     expect(await server.login('Otávio', '2222')).toMatchObject({ status: 401, body: { ok: false, code: 'wrong_pin' } });
