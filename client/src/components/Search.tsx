@@ -3,7 +3,7 @@ import { Permission } from '@shared/permissions';
 import type { SearchRequest, SearchScope } from '@shared/protocol';
 import { searchWords } from '@shared/search';
 import { Hash, ImageIcon, Link2, Paperclip, Search as SearchIcon, X } from 'lucide-react';
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { formatMessageTime } from '../lib/format';
 import { useRealtime } from '../state/realtime';
 import { can, displayNameOf } from '../state/selectors';
@@ -82,14 +82,20 @@ export function SearchPanel({ scope, query, onClose }: SearchPanelProps) {
     ...(before && { before }),
   });
 
+  // Uma busca que volta depois de outra mais nova (texto ou filtro mudou no meio) não pode sobrescrever o resultado.
+  const latest = useRef(0);
+
   const run = async (before?: Id) => {
+    const id = ++latest.current;
     if (!submitted.trim() && !authorId && !channelId && !has) {
       setResults(null);
       setError(null);
+      setLoading(false);
       return;
     }
     setLoading(true);
     const res = await actions.search(request(before));
+    if (id !== latest.current) return;
     setLoading(false);
     if (!res.ok) {
       setError(res.error);

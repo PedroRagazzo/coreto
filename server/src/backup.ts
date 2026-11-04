@@ -72,7 +72,7 @@ export function pgConnection(databaseUrl: string): { args: string[]; env: Record
 }
 
 /** Roda o pg_dump e grava em `file`. Se falha, a mensagem é só o que o pg_dump disse (sem a linha de comando). */
-export function pgDump(databaseUrl: string, file: string): Promise<void> {
+function pgDump(databaseUrl: string, file: string): Promise<void> {
   const { args, env } = pgConnection(databaseUrl);
   return new Promise((resolve, reject) => {
     execFile(
@@ -198,7 +198,14 @@ export async function runBackup(config: BackupConfig, deps: BackupDeps = {}): Pr
 
   // Uma falha ao espelhar as imagens não desfaz a cópia do banco, que já está guardada.
   let uploads: BackupResult['uploads'] = null;
-  if (config.uploadDir) uploads = await mirrorUploads(config.uploadDir, join(config.dir, UPLOADS_SUBDIR), now());
+  if (config.uploadDir) {
+    try {
+      uploads = await mirrorUploads(config.uploadDir, join(config.dir, UPLOADS_SUBDIR), now());
+    } catch (err) {
+      // Sem isto a rodada contaria como falha e seria repetida a cada hora, e cada repetição gira as cópias do banco.
+      console.error('[backup] o espelho das imagens falhou (o banco foi copiado):', err);
+    }
+  }
 
   return { file, bytes: (await stat(file)).size, kept: Math.min(all.length, config.keep), uploads };
 }

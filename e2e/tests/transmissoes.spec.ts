@@ -76,7 +76,7 @@ test.describe('transmissões de tela', () => {
 });
 
 test.describe('qualidade para jogos', () => {
-  test('a receita "Jogo ou vídeo" escolhe 1080p, 60 fps e Fluidez, e as estatísticas mostram o teto e a travada', async ({ browser }) => {
+  test('a receita "Jogo ou vídeo" escolhe 1080p, 60 fps e Fluidez, e as estatísticas de quem transmite mostram o teto', async ({ browser }) => {
     const ana = await openPerson(browser, 'Ana');
     const bruno = await openPerson(browser, 'Bruno', { screen: { color: '#1f7a4d', width: 1920, height: 1080 } });
     await joinCall(ana.page);

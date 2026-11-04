@@ -6,6 +6,7 @@
 .github
 .claude
 desktop
+.tools
 server/src/generated
 server/uploads
 e2e/test-results

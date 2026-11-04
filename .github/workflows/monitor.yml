@@ -91,11 +91,13 @@ jobs:
           run_id=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/monitor.yml/runs?status=completed&per_page=1&event=schedule" --jq '.workflow_runs[0].id // empty')
           was_down=false; was_disk_warn=false; was_disk_critical=false
           if [ -n "$run_id" ]; then
-            steps=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/jobs" --jq '.jobs[0].steps')
-            ran() { echo "$steps" | jq -r --arg name "$1" '[.[] | select(.name == $name) | .conclusion] | first // "skipped"'; }
-            [ "$(ran 'Registrar queda')" != "skipped" ] && was_down=true
-            [ "$(ran 'Registrar disco alto')" != "skipped" ] && was_disk_warn=true
-            [ "$(ran 'Registrar disco critico')" != "skipped" ] && was_disk_critical=true
+            steps=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/jobs" --jq '.jobs[0].steps // []') || steps='[]'
+            # Só um passo que terminou com sucesso conta como "rodou": numa execução cancelada ou que estourou o tempo,
+            # o estado fica como "nada avisado" em vez de "tudo avisado" (o que engoliria o próximo alerta).
+            ran() { echo "$steps" | jq -r --arg name "$1" '[.[] | select(.name == $name) | .conclusion] | first // "skipped"' 2>/dev/null || echo skipped; }
+            [ "$(ran 'Registrar queda')" = "success" ] && was_down=true
+            [ "$(ran 'Registrar disco alto')" = "success" ] && was_disk_warn=true
+            [ "$(ran 'Registrar disco critico')" = "success" ] && was_disk_critical=true
           fi
           echo "Execução anterior: ${run_id:-nenhuma}; fora do ar: $was_down; disco alto: $was_disk_warn; disco crítico: $was_disk_critical"
           {

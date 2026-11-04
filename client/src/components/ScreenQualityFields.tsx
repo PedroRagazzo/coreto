@@ -5,7 +5,7 @@ import { labelClass } from './Modal';
 export type ScreenQuality = Pick<ScreenShareOptions, 'height' | 'frameRate' | 'priority' | 'uploadMbps' | 'codec'>;
 
 const STORAGE_KEY = 'coreto.screenShare';
-export const DEFAULT_SCREEN_OPTIONS: ScreenShareOptions = {
+const DEFAULT_SCREEN_OPTIONS: ScreenShareOptions = {
   height: 720,
   frameRate: 30,
   audio: true,

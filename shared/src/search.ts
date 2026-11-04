@@ -2,7 +2,7 @@
 // menções. O servidor grava essa versão ao lado do conteúdo e compara as
 // palavras da busca com ela, então "acao" encontra "Ação".
 
-export const MAX_SEARCH_LENGTH = 200;
+const MAX_SEARCH_LENGTH = 200;
 export const MAX_SEARCH_WORDS = 10;
 export const SEARCH_PAGE_SIZE = 25;
 

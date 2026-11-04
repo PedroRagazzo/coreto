@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import type { SignalPayload } from '../../../shared/src/protocol.js';
 import { BotVoice, loadWrtc } from '../../src/music/bot-voice.js';
 import { makeHuman, type Human } from '../support/voice-peer.js';
 

@@ -2,5 +2,4 @@
 // veja o comentário de provider.tsx.
 
 export { RealtimeProvider, useRealtime } from './provider';
-export type { MyVoiceState, RealtimeState } from './state';
-export type { RealtimeActions } from './types';
+export type { RealtimeState } from './state';

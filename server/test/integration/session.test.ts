@@ -58,6 +58,15 @@ describe.skipIf(!hasTestDatabase)('login, sessão e presença', () => {
     expect((await server.login('Quitéria', '1234')).status).toBe(200);
   });
 
+  it('o bloqueio vale também para PINs errados chegando todos ao mesmo tempo', async () => {
+    await server.login('Rita', '1234');
+    // Antes de contar a tentativa antes de conferir o PIN, os 40 pedidos passavam pelo bloqueio com o contador em zero.
+    const answers = await Promise.all(Array.from({ length: 40 }, () => server.login('Rita', '9999')));
+    expect(answers.filter((a) => a.status === 401).length).toBeLessThanOrEqual(5);
+    expect(answers.filter((a) => a.status === 429).length).toBeGreaterThanOrEqual(35);
+    expect(await server.login('Rita', '1234')).toMatchObject({ status: 429 });
+  });
+
   it('mantém a pessoa logada: o token continua valendo depois de reiniciar o servidor', async () => {
     const ana = await server.connect('Ana');
     await server.restart();

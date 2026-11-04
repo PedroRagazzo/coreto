@@ -5,11 +5,14 @@ import type { Db } from './db/client.js';
 
 /**
  * Cria os dados de demonstração (dois espaços públicos mantidos por um
- * usuário-robô) se o banco ainda não tiver nenhum espaço.
+ * usuário-robô) se o banco ainda não tiver nenhum espaço nem o robô.
  * Devolve `true` quando criou alguma coisa.
  */
 export async function seedIfEmpty(db: Db): Promise<boolean> {
   if ((await db.space.count()) > 0) return false;
+  // Se o robô já existe, os espaços foram apagados de propósito: recriar a conta dele falharia (nome único) e o servidor
+  // não subiria mais.
+  if (await db.user.findFirst({ where: { loginName: 'coreto' }, select: { id: true } })) return false;
 
   const id = () => randomUUID();
   const bot = id();

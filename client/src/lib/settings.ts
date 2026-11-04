@@ -113,7 +113,7 @@ const deviceId = (value: unknown) => (typeof value === 'string' && value ? value
 const MAX_KEYBIND_KEYS = 4;
 
 /** Uma combinação válida: de 1 a 4 códigos de tecla, sem repetição, em ordem fixa. */
-export function sanitizeKeybind(value: unknown): string[] | null {
+function sanitizeKeybind(value: unknown): string[] | null {
   if (!Array.isArray(value)) return null;
   const keys = [...new Set(value.filter((k): k is string => typeof k === 'string' && k.length > 0 && k.length <= 24))];
   return keys.length > 0 && keys.length <= MAX_KEYBIND_KEYS ? orderKeys(keys) : null;

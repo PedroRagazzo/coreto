@@ -29,7 +29,7 @@ export interface GridPlan {
   scrolls: boolean;
 }
 
-export const VIDEO_ASPECT = 16 / 9;
+const VIDEO_ASPECT = 16 / 9;
 
 /** O arranjo (colunas × linhas) em que o maior vídeo possível cabe no espaço; em empate, o de menos colunas. */
 export function bestGrid({ width, height, count, aspect = VIDEO_ASPECT, gap = 0, extraHeight = 0, minTileWidth = 0 }: GridInput): GridPlan {

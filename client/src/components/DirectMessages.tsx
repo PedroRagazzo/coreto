@@ -19,7 +19,7 @@ function sortedDirects(state: RealtimeState): DirectConversation[] {
   return Object.values(state.directs).sort((a, b) => (b.lastMessageAt ?? '').localeCompare(a.lastMessageAt ?? ''));
 }
 
-export function UnreadBadge({ count }: { count: number }) {
+function UnreadBadge({ count }: { count: number }) {
   return (
     <span
       aria-label={`${count} não lidas`}

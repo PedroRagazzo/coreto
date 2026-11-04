@@ -329,7 +329,7 @@ function LiveRow({
 }
 
 /** Contador discreto de mensagens não lidas (as menções, que chamam mais atenção, têm o vermelho). */
-export function UnreadPill({ count }: { count: number }) {
+function UnreadPill({ count }: { count: number }) {
   return (
     <span
       aria-hidden
@@ -341,7 +341,7 @@ export function UnreadPill({ count }: { count: number }) {
 }
 
 /** Contador vermelho de menções. */
-export function CountBadge({ count }: { count: number }) {
+function CountBadge({ count }: { count: number }) {
   return (
     <span
       aria-hidden

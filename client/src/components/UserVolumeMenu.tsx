@@ -34,25 +34,31 @@ function UserVolumeMenu({ target, onClose }: { target: Target; onClose: () => vo
   const ref = useRef<HTMLDivElement>(null);
   const current = settings.voice.userVolumes[target.userId] ?? DEFAULT_USER_VOLUME;
 
+  // O dono recria `onClose` a cada renderização (e numa chamada ele renderiza o tempo todo): se o efeito dependesse dela,
+  // refaria tudo e devolveria o foco ao controle de volume a cada vez.
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+
   useEffect(() => {
+    const close = () => closeRef.current();
     const away = (e: Event) => {
-      if (!ref.current?.contains(e.target as Node)) onClose();
+      if (!ref.current?.contains(e.target as Node)) close();
     };
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && close();
     document.addEventListener('mousedown', away, true);
     document.addEventListener('contextmenu', away, true);
     document.addEventListener('keydown', onKey);
-    window.addEventListener('blur', onClose);
-    window.addEventListener('resize', onClose);
+    window.addEventListener('blur', close);
+    window.addEventListener('resize', close);
     ref.current?.querySelector('input')?.focus();
     return () => {
       document.removeEventListener('mousedown', away, true);
       document.removeEventListener('contextmenu', away, true);
       document.removeEventListener('keydown', onKey);
-      window.removeEventListener('blur', onClose);
-      window.removeEventListener('resize', onClose);
+      window.removeEventListener('blur', close);
+      window.removeEventListener('resize', close);
     };
-  }, [onClose]);
+  }, []);
 
   const set = (patch: Partial<UserVolume>) =>
     update((s) => {

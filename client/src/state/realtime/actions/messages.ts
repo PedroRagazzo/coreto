@@ -4,7 +4,7 @@ import { firstLink } from '@shared/links';
 import type { Id } from '@shared/models';
 import { HISTORY_PAGE_SIZE } from '@shared/protocol';
 import { uploadFile } from '../../../lib/uploads';
-import { ask, type ActionContext } from '../context';
+import { ask, settle, type ActionContext } from '../context';
 import type { RealtimeActions } from '../types';
 
 const TYPING_THROTTLE_MS = 3_000;
@@ -54,7 +54,7 @@ export function createMessageActions(ctx: ActionContext, loadHistory: (channelId
     async editMessage(messageId, content) {
       const socket = socketRef.current;
       if (!socket) return 'Sem conexão com o servidor.';
-      const res = await socket.emitWithAck('message:edit', { messageId, content });
+      const res = await settle(socket.timeout(10_000).emitWithAck('message:edit', { messageId, content }));
       if (!res.ok) return res.error;
       dispatch({ type: 'message:updated', message: res.data });
       return null;
@@ -64,7 +64,7 @@ export function createMessageActions(ctx: ActionContext, loadHistory: (channelId
       const socket = socketRef.current;
       if (!socket) return 'Sem conexão com o servidor.';
       // O estado é atualizado pelo evento `message:deleted`, que chega para todos que veem a conversa.
-      const res = await socket.emitWithAck('message:delete', { messageId });
+      const res = await settle(socket.timeout(10_000).emitWithAck('message:delete', { messageId }));
       return res.ok ? null : res.error;
     },
 

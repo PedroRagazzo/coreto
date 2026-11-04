@@ -6,7 +6,9 @@ test.describe('acesso', () => {
     const ana = await openPerson(browser, 'Ana');
     await expect(ana.page.getByRole('button', { name: 'Coreto Dev' })).toBeVisible();
     await expect(ana.page.getByText('Boas-vindas a #geral')).toBeVisible();
-    // Conta nova não recebe a janelinha de novidades: tudo é novidade para quem chegou agora.
+    // Conta nova não recebe a janelinha de novidades: tudo é novidade para quem chegou agora. Ela só abriria depois de
+    // 1,5 s (Changelog.tsx): sem esperar, a checagem passaria mesmo se o site a mostrasse.
+    await ana.page.waitForTimeout(2_000);
     await expect(ana.page.getByRole('dialog', { name: 'O que há de novo' })).toHaveCount(0);
     await ana.context.close();
   });

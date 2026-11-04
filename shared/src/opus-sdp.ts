@@ -5,7 +5,7 @@
 // emissor quanto ele pode usar (o padrão do WebRTC, 32 kbps por canal, é pouco para música).
 
 /** Bitrate médio máximo pedido ao bot de música: 128 kbps em estéreo é qualidade de música. */
-export const MUSIC_MAX_AVERAGE_BITRATE = 128_000;
+const MUSIC_MAX_AVERAGE_BITRATE = 128_000;
 
 /** Devolve o SDP pedindo estéreo no Opus (e o bitrate máximo); o resto fica como está. */
 export function withStereoOpus(sdp: string, maxAverageBitrate: number = MUSIC_MAX_AVERAGE_BITRATE): string {

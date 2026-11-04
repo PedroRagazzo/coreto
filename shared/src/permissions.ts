@@ -18,7 +18,6 @@ export const Permission = {
   ADMINISTRATOR: 1 << 30,
 } as const;
 
-export type PermissionName = keyof typeof Permission;
 
 export const ALL_PERMISSIONS = Object.values(Permission).reduce((acc, flag) => acc | flag, 0);
 

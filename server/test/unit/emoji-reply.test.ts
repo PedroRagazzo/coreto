@@ -29,6 +29,8 @@ describe('resumo da mensagem respondida', () => {
     expect(cut).toHaveLength(100);
     expect(cut.endsWith('…')).toBe(true);
     expect(replyExcerpt('c'.repeat(100))).toBe('c'.repeat(100));
+    // O corte no meio de um emoji (dois códigos) não deixa meio emoji para trás.
+    expect(replyExcerpt('a'.repeat(98) + '😀' + 'b'.repeat(50))).toBe('a'.repeat(98) + '…');
   });
 
   it('marca se a original tinha imagens e como fica quando ela some', () => {

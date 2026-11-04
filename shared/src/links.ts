@@ -3,7 +3,7 @@
 
 import { parseMarkup, type MarkupNode } from './markup.js';
 
-export const MAX_LINK_LENGTH = 2000;
+const MAX_LINK_LENGTH = 2000;
 
 function find(nodes: MarkupNode[]): string | null {
   for (const node of nodes) {

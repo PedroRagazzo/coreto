@@ -894,7 +894,8 @@ export class Store {
         WHERE d."id" = ANY(${directIds}::text[])
       ) p
       LEFT JOIN "ReadState" r ON r."userId" = ${userId} AND r."channelId" = p.id
-      JOIN "Message" m ON COALESCE(m."channelId", m."directId") = p.id
+      -- Sem COALESCE no JOIN: com ele o banco não usa os índices de Message e varre a tabela toda a cada conexão.
+      JOIN "Message" m ON m."channelId" = p.id OR m."directId" = p.id
       WHERE m."createdAt" > COALESCE(r."lastReadAt", p.since)
         AND m."authorId" <> ${userId}
       GROUP BY p.id`;

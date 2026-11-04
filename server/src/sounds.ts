@@ -100,5 +100,7 @@ export async function serveSound(id: string, res: ServerResponse, store: Store, 
   stream.once('open', () => {
     res.writeHead(200, headers);
     stream.pipe(res);
+    // O navegador desistiu no meio (rolou o chat, fechou a aba): sem isto o arquivo ficaria aberto até reiniciar.
+    res.once('close', () => stream.destroy());
   });
 }

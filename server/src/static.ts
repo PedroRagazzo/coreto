@@ -71,5 +71,10 @@ export async function serveClient(
     ...(isHtml && { 'content-security-policy': contentSecurityPolicy(connectOrigins) }),
   });
   if (req.method === 'HEAD') return void res.end();
-  createReadStream(target).pipe(res);
+  const stream = createReadStream(target);
+  // Erro de leitura depois do stat (arquivo trocado no meio de um deploy) não pode derrubar o servidor; e se o navegador
+  // desiste no meio, o arquivo é fechado.
+  stream.once('error', () => res.destroy());
+  res.once('close', () => stream.destroy());
+  stream.pipe(res);
 }

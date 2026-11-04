@@ -2,7 +2,7 @@ import { Download } from 'lucide-react';
 import { SERVER_URL } from '../lib/socket';
 
 /** O servidor redireciona /download para o instalador da última release (ver server/src/download.ts). */
-export const DOWNLOAD_URL = `${SERVER_URL}/download`;
+const DOWNLOAD_URL = `${SERVER_URL}/download`;
 
 export function DownloadApp({ variant = 'primary' }: { variant?: 'primary' | 'subtle' }) {
   return (

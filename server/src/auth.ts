@@ -40,6 +40,11 @@ export class LoginThrottle {
     return Math.max(0, (this.entries.get(key)?.lockedUntil ?? 0) - Date.now());
   }
 
+  /**
+   * Conta a tentativa já ANTES de conferir o PIN (a conferência leva tempo): se só os erros contassem, depois que a
+   * conferência terminasse, milhares de pedidos simultâneos passariam todos pelo bloqueio com o contador ainda em zero.
+   * Quem acerta chama `recordSuccess`; um pedido que acaba sem conferir o PIN devolve a tentativa com `forgive`.
+   */
   recordFailure(key: string): void {
     const entry = this.entries.get(key) ?? { failures: 0, lockedUntil: 0 };
     entry.failures += 1;
@@ -48,6 +53,12 @@ export class LoginThrottle {
       entry.lockedUntil = Date.now() + this.lockMs;
     }
     this.entries.set(key, entry);
+  }
+
+  /** Devolve uma tentativa contada que não chegou a testar um PIN (nome reservado, erro do servidor). */
+  forgive(key: string): void {
+    const entry = this.entries.get(key);
+    if (entry && entry.failures > 0) entry.failures -= 1;
   }
 
   recordSuccess(key: string): void {

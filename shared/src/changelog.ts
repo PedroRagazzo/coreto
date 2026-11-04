@@ -22,6 +22,20 @@ export interface ChangelogEntry {
 /** Da mais nova para a mais antiga. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-04',
+    title: 'Revisão geral e correções',
+    items: [
+      {
+        title: 'Chamada mais estável',
+        text: 'Abrir outro espaço durante uma chamada não faz mais tocar o som de "saiu" para todo mundo, e se a entrada na chamada falhar o microfone é solto na hora (a luz dele não fica acesa).',
+      },
+      {
+        title: 'Menos travadas em diálogos',
+        text: 'Se a conexão cair no meio de salvar ou apagar algo (canal, espaço, mensagem), o botão não fica mais preso: aparece o aviso e dá para tentar de novo.',
+      },
+    ],
+  },
+  {
     id: '2026-10-30-4',
     title: 'Áudio Democrático',
     items: [

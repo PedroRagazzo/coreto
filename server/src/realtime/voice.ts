@@ -51,7 +51,10 @@ function isSignal(value: unknown): value is SignalPayload {
 
 export function broadcastRoster(io: IO, store: Store, spaceId: Id, channelId: Id): void {
   const participants = store.voiceIn(channelId).map(toParticipant);
-  io.to(rooms.space(spaceId)).emit('voice:update', { channelId, participants });
+  // Quem está na chamada recebe também pela sala de voz: ao abrir outro espaço, o socket sai da sala do espaço da chamada
+  // e, sem isto, a lista de quem está nela (e de quem assiste à sua tela) pararia de chegar. O Socket.IO não repete o aviso
+  // para quem está nas duas salas.
+  io.to(rooms.space(spaceId)).to(rooms.voice(channelId)).emit('voice:update', { channelId, participants });
 }
 
 /**

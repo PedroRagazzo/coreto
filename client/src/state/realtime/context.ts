@@ -34,3 +34,15 @@ export async function ask(ctx: ActionContext, send: (socket: AppSocket) => Promi
     return 'O servidor não respondeu. Tente de novo.';
   }
 }
+
+/**
+ * Espera a resposta de um pedido; se o socket cair ou o servidor não responder a tempo, devolve um erro em vez de
+ * rejeitar. Sem isto, um diálogo que espera o resultado (salvar, apagar) ficaria com o botão travado.
+ */
+export async function settle<R extends Ack<unknown>>(pending: Promise<R>): Promise<R | { ok: false; error: string }> {
+  try {
+    return await pending;
+  } catch {
+    return { ok: false, error: 'O servidor não respondeu. Tente de novo.' };
+  }
+}

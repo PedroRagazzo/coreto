@@ -11,7 +11,7 @@ import { sweepUploads, UploadDir } from './uploads.js';
 
 // SERVER_PORT, e não PORT: ferramentas de dev costumam definir PORT para o front-end.
 const PORT = Number(process.env.SERVER_PORT ?? 3001);
-const CLIENT_ORIGINS = (process.env.CLIENT_ORIGIN ?? 'http://localhost:5173,http://127.0.0.1:5173').split(',');
+const CLIENT_ORIGINS = (process.env.CLIENT_ORIGIN ?? 'http://localhost:5173,http://127.0.0.1:5173').split(',').map((origin) => origin.trim()).filter(Boolean);
 /** Pasta das imagens enviadas; relativa à pasta server/. */
 const UPLOAD_DIR = resolve(process.env.UPLOAD_DIR ?? 'uploads');
 const SWEEP_INTERVAL_MS = 60 * 60_000;

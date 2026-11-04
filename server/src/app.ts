@@ -226,18 +226,21 @@ async function handleLogin(req: IncomingMessage, res: ServerResponse, store: Sto
     });
   }
 
+  // A tentativa conta antes de conferir o PIN, para pedidos em paralelo não escaparem do bloqueio.
+  throttle.recordFailure(key);
   try {
     const result = await store.login(name, pin);
     if (result.status === 'reserved_name') {
+      throttle.forgive(key);
       return sendLogin(res, 403, { ok: false, code: 'reserved_name', error: 'Esse nome é reservado. Escolha outro.' });
     }
     if (result.status === 'wrong_pin') {
-      throttle.recordFailure(key);
       return sendLogin(res, 401, { ok: false, code: 'wrong_pin', error: 'PIN incorreto para esse nome.' });
     }
     throttle.recordSuccess(key);
     sendLogin(res, 200, { ok: true, token: result.token, user: result.user, created: result.created });
   } catch (err) {
+    throttle.forgive(key);
     console.error('[login]', err);
     sendJson(res, 500, { ok: false, error: 'Não foi possível entrar agora. Tente de novo.' });
   }

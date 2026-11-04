@@ -21,7 +21,7 @@ export async function askNotificationAccess(): Promise<NotificationAccess> {
 }
 
 /** Traz a janela do Coreto para a frente (no desktop ela pode estar na bandeja ou minimizada). */
-export function bringWindowToFront(): void {
+function bringWindowToFront(): void {
   desktop?.focusWindow?.();
   window.focus();
 }

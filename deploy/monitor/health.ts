@@ -20,8 +20,8 @@ export interface HealthResult {
 export type DiskLevel = 'ok' | 'warn' | 'critical';
 
 /** Percentuais de ocupação a partir dos quais o disco merece aviso e aviso urgente. */
-export const DISK_WARN_PERCENT = 80;
-export const DISK_CRITICAL_PERCENT = 90;
+const DISK_WARN_PERCENT = 80;
+const DISK_CRITICAL_PERCENT = 90;
 
 export function diskLevel(usedPercent: number, warn = DISK_WARN_PERCENT, critical = DISK_CRITICAL_PERCENT): DiskLevel {
   if (usedPercent >= critical) return 'critical';

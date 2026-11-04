@@ -3,14 +3,18 @@
 
 import type { Message, ReplyPreview } from './models.js';
 
-export const REPLY_EXCERPT_LENGTH = 100;
+const REPLY_EXCERPT_LENGTH = 100;
 
 /** Começo do texto, numa linha só e sem espaços sobrando. */
 export function replyExcerpt(content: string): string {
   const oneLine = content.replace(/\s+/g, ' ').trim();
   if (oneLine.length <= REPLY_EXCERPT_LENGTH) return oneLine;
   // O corte não pode deixar uma menção `<@id>` pela metade: o pedaço apareceria como texto solto.
-  const cut = oneLine.slice(0, REPLY_EXCERPT_LENGTH - 1).replace(/<@[^>]*$/, '');
+  // Também não pode deixar metade de um emoji (par substituto): ele apareceria como "�".
+  const cut = oneLine
+    .slice(0, REPLY_EXCERPT_LENGTH - 1)
+    .replace(/[\uD800-\uDBFF]$/, '')
+    .replace(/<@[^>]*$/, '');
   return `${cut.trimEnd()}…`;
 }
 

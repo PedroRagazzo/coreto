@@ -19,7 +19,7 @@ export function keyOf(event: { code: string }): string {
   return code;
 }
 
-export const isModifier = (key: string) => (MODIFIERS as readonly string[]).includes(key);
+const isModifier = (key: string) => (MODIFIERS as readonly string[]).includes(key);
 
 /** Modificadores primeiro (Ctrl, Alt, Shift, Win), depois as demais teclas em ordem alfabética. */
 export function orderKeys(keys: Iterable<string>): string[] {
@@ -69,7 +69,7 @@ const SPECIAL_NAMES: Record<string, string> = {
   NumpadEnter: 'Num Enter',
 };
 
-export function keyLabel(key: string): string {
+function keyLabel(key: string): string {
   if (SPECIAL_NAMES[key]) return SPECIAL_NAMES[key];
   if (/^Key[A-Z]$/.test(key)) return key.slice(3);
   if (/^Digit\d$/.test(key)) return key.slice(5);

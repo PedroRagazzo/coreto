@@ -41,7 +41,12 @@ test.describe('conversa', () => {
     await ana.page.getByRole('button', { name: /ajuda/ }).first().click();
     await send(ana.page, text);
     await expect(messageRow(ana.page, text)).toBeVisible();
-    // Bruno está no #geral: não vê a mensagem da ajuda.
+    // Bruno está no #geral: não vê a mensagem da ajuda. A Ana manda uma mensagem de controle no #geral e, quando o Bruno a
+    // vê, tudo que o servidor ia entregar já chegou: só então a ausência da outra vale como prova.
+    const marker = uniqueName('controle no geral');
+    await ana.page.getByRole('button', { name: /geral/ }).first().click();
+    await send(ana.page, marker);
+    await expect(messageRow(bruno.page, marker)).toBeVisible();
     await expect(messageRow(bruno.page, text)).toHaveCount(0);
     await Promise.all([ana, bruno].map((p) => p.context.close()));
   });

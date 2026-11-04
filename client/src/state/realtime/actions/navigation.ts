@@ -2,7 +2,7 @@
 
 import type { Id, SpaceSnapshot } from '@shared/models';
 import { HISTORY_PAGE_SIZE } from '@shared/protocol';
-import type { ActionContext } from '../context';
+import { settle, type ActionContext } from '../context';
 import type { RealtimeActions } from '../types';
 
 export function createNavigation({ dispatch, stateRef, socketRef }: ActionContext) {
@@ -61,7 +61,7 @@ export function createNavigation({ dispatch, stateRef, socketRef }: ActionContex
     async createSpace(name) {
       const socket = socketRef.current;
       if (!socket) return 'Sem conexão com o servidor.';
-      const res = await socket.emitWithAck('space:create', { name });
+      const res = await settle(socket.timeout(10_000).emitWithAck('space:create', { name }));
       if (!res.ok) return res.error;
       dispatch({ type: 'space:created', space: res.data });
       void selectSpace(res.data.id);
@@ -72,7 +72,7 @@ export function createNavigation({ dispatch, stateRef, socketRef }: ActionContex
       const socket = socketRef.current;
       const spaceId = stateRef.current.snapshot?.space.id;
       if (!socket || !spaceId) return 'Sem conexão com o servidor.';
-      const res = await socket.emitWithAck('space:update', { spaceId, name });
+      const res = await settle(socket.timeout(10_000).emitWithAck('space:update', { spaceId, name }));
       if (!res.ok) return res.error;
       dispatch({ type: 'space:updated', space: res.data });
       return null;
@@ -83,7 +83,7 @@ export function createNavigation({ dispatch, stateRef, socketRef }: ActionContex
       const spaceId = stateRef.current.snapshot?.space.id;
       if (!socket || !spaceId) return 'Sem conexão com o servidor.';
       // O estado é atualizado pelo evento `space:deleted`, que chega para todos.
-      const res = await socket.emitWithAck('space:delete', { spaceId });
+      const res = await settle(socket.timeout(10_000).emitWithAck('space:delete', { spaceId }));
       return res.ok ? null : res.error;
     },
 
@@ -91,7 +91,7 @@ export function createNavigation({ dispatch, stateRef, socketRef }: ActionContex
       const socket = socketRef.current;
       const snapshot = stateRef.current.snapshot;
       if (!socket || !snapshot) return 'Sem conexão com o servidor.';
-      const res = await socket.emitWithAck('channel:create', { ...req, spaceId: snapshot.space.id });
+      const res = await settle(socket.timeout(10_000).emitWithAck('channel:create', { ...req, spaceId: snapshot.space.id }));
       if (!res.ok) return res.error;
       dispatch({ type: 'channel:created', payload: res.data });
       if (res.data.channel.kind === 'text') {
@@ -103,7 +103,7 @@ export function createNavigation({ dispatch, stateRef, socketRef }: ActionContex
     async updateChannel(req) {
       const socket = socketRef.current;
       if (!socket) return 'Sem conexão com o servidor.';
-      const res = await socket.emitWithAck('channel:update', req);
+      const res = await settle(socket.timeout(10_000).emitWithAck('channel:update', req));
       if (!res.ok) return res.error;
       dispatch({ type: 'channel:updated', channel: res.data });
       return null;
@@ -113,14 +113,14 @@ export function createNavigation({ dispatch, stateRef, socketRef }: ActionContex
       const socket = socketRef.current;
       if (!socket) return 'Sem conexão com o servidor.';
       // O estado é atualizado pelo evento `channel:deleted`, que chega para todos no espaço.
-      const res = await socket.emitWithAck('channel:delete', { channelId });
+      const res = await settle(socket.timeout(10_000).emitWithAck('channel:delete', { channelId }));
       return res.ok ? null : res.error;
     },
 
     async openDirect(userId) {
       const socket = socketRef.current;
       if (!socket) return 'Sem conexão com o servidor.';
-      const res = await socket.emitWithAck('dm:open', { userId });
+      const res = await settle(socket.timeout(10_000).emitWithAck('dm:open', { userId }));
       if (!res.ok) return res.error;
       dispatch({ type: 'dm:upsert', payload: res.data });
       selectDirect(res.data.conversation.id);
@@ -130,7 +130,7 @@ export function createNavigation({ dispatch, stateRef, socketRef }: ActionContex
     async jumpToMessage(message) {
       const socket = socketRef.current;
       if (!socket) return 'Sem conexão com o servidor.';
-      const res = await socket.emitWithAck('message:context', { messageId: message.id });
+      const res = await settle(socket.timeout(10_000).emitWithAck('message:context', { messageId: message.id }));
       if (!res.ok) return res.error;
       const { channelId, messages, reachedStart, reachedEnd } = res.data;
       dispatch({ type: 'messages:context', channelId, messages, reachedStart, reachedEnd, focusId: message.id });

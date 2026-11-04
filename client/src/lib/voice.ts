@@ -12,7 +12,7 @@
 import { assess, type ConnectionQuality, ownLevel, type QualitySample } from '@shared/connection-quality';
 import type { Id } from '@shared/models';
 import { withStereoOpus } from '@shared/opus-sdp';
-import type { IceServer, SignalPayload } from '@shared/protocol';
+import type { IceServer, SignalPayload, VoiceJoinResult } from '@shared/protocol';
 import type { ScreenPublishOptions, SfuSession } from './sfu';
 import { resolutionScale, viewerBitrate } from '@shared/stream-quality';
 import {
@@ -97,8 +97,8 @@ class SpeakingDetector {
 }
 
 /** Decibéis (0 = volume máximo) para amplitude linear, e de volta. */
-export const dbToLinear = (db: number) => 10 ** (db / 20);
-export const linearToDb = (linear: number) => (linear > 0 ? 20 * Math.log10(linear) : -Infinity);
+const dbToLinear = (db: number) => 10 ** (db / 20);
+const linearToDb = (linear: number) => (linear > 0 ? 20 * Math.log10(linear) : -Infinity);
 
 /** O que o microfone está captando agora, para o medidor da sensibilidade. */
 export interface MicLevel {
@@ -123,7 +123,6 @@ export class MicPipeline {
   private readonly output = this.context.createMediaStreamDestination();
   private gate: AudioWorkletNode | null = null;
   private suppressor: AudioWorkletNode | null = null;
-  private aiEnabled = false;
   private source: MediaStreamAudioSourceNode | null = null;
   private raw: MediaStream | null = null;
   /** O que vai para as conexões e para o medidor de fala. */
@@ -176,7 +175,6 @@ export class MicPipeline {
         enabled = false;
       }
     }
-    this.aiEnabled = enabled;
     this.gain.disconnect();
     this.suppressor?.disconnect();
     if (enabled && this.suppressor) {
@@ -576,19 +574,30 @@ export class VoiceManager {
   }
 
   async join(channelId: Id, startMuted: boolean, selfId: Id): Promise<void> {
+    // Trocar de sala: o servidor ainda lista a pessoa na anterior, e se esta entrada falhar (microfone negado, sem
+    // conexão) ela ficaria "fantasma" lá. Sair avisa o servidor; ele encerra a sessão antiga de qualquer jeito ao entrar.
+    if (this.localStream) this.socket.emit('voice:leave');
     this.teardown();
     const raw = await openMicrophone(this.prefs);
     // Tudo que leva tempo fica antes de entrar na sala: depois do aviso ao servidor, quem
     // chega já pode ligar para nós, e sinais recebidos antes de estarmos prontos se perderiam.
-    const mic = await MicPipeline.create(this.prefs);
-    mic.use(raw);
-    const playback = new AudioContext();
-    void playback.resume();
-    const res = await this.socket.emitWithAck('voice:join', { channelId });
-    if (!res.ok) {
-      mic.close();
-      void playback.close();
-      throw new Error(res.error);
+    let mic: MicPipeline | null = null;
+    let playback: AudioContext | null = null;
+    let data: VoiceJoinResult;
+    try {
+      mic = await MicPipeline.create(this.prefs);
+      mic.use(raw);
+      playback = new AudioContext();
+      void playback.resume();
+      const res = await this.socket.emitWithAck('voice:join', { channelId });
+      if (!res.ok) throw new Error(res.error);
+      data = res.data;
+    } catch (err) {
+      // Qualquer falha antes de entrar solta o microfone (a luz dele não pode ficar acesa) e os contextos de áudio.
+      raw.getTracks().forEach((track) => track.stop());
+      mic?.close();
+      void playback?.close();
+      throw err;
     }
     this.mic = mic;
     mic.setMonitorDevice(this.prefs.outputDeviceId);
@@ -597,15 +606,15 @@ export class VoiceManager {
     this.localStream = stream;
     this.cameraCarrier = new MediaStream();
     this.screenCarrier = new MediaStream();
-    this.iceServers = res.data.iceServers;
-    this.iceTransportPolicy = res.data.iceTransportPolicy;
-    this.sfuAvailable = res.data.sfu;
+    this.iceServers = data.iceServers;
+    this.iceTransportPolicy = data.iceTransportPolicy;
+    this.sfuAvailable = data.sfu;
     this.selfId = selfId;
     this.setMuted(startMuted);
     // Microfone desativado manda silêncio, então você deixa de "falar" sozinho.
     this.detector.watch(selfId, stream);
     // Quem chega liga para quem já estava: adicionar o microfone dispara a primeira oferta.
-    for (const peerId of res.data.peers) this.addLocalAudio(this.createPeer(peerId));
+    for (const peerId of data.peers) this.addLocalAudio(this.createPeer(peerId));
     this.qualityTimer = setInterval(() => void this.measureQuality(), QUALITY_POLL_MS);
   }
 
@@ -658,7 +667,13 @@ export class VoiceManager {
       if (next.autoSensitivity !== prev.autoSensitivity || next.inputSensitivity !== prev.inputSensitivity) {
         this.mic.setSensitivity(next);
       }
-      if (micChanged(prev, next)) this.mic.use(await openMicrophone(next));
+      if (micChanged(prev, next)) {
+        // Se a chamada acabou enquanto o microfone novo abria, ele não tem onde entrar: solta as faixas.
+        const mic = this.mic;
+        const raw = await openMicrophone(next);
+        if (this.mic === mic) mic.use(raw);
+        else raw.getTracks().forEach((track) => track.stop());
+      }
     }
     if (next.outputDeviceId !== prev.outputDeviceId) this.mic?.setMonitorDevice(next.outputDeviceId);
     if (next.outputDeviceId !== prev.outputDeviceId || next.outputVolume !== prev.outputVolume) {
@@ -669,7 +684,13 @@ export class VoiceManager {
     }
     if (this.camera && next.cameraDeviceId !== prev.cameraDeviceId) {
       const old = this.camera;
-      this.camera = await openCamera(next.cameraDeviceId);
+      const fresh = await openCamera(next.cameraDeviceId);
+      if (this.camera !== old) {
+        // A câmera foi desligada enquanto a nova abria: não a deixe ligada fora da chamada.
+        fresh.getTracks().forEach((track) => track.stop());
+        return { camera: null };
+      }
+      this.camera = fresh;
       this.applyCamera();
       old.getTracks().forEach((track) => track.stop());
       return { camera: this.camera };
@@ -816,14 +837,21 @@ export class VoiceManager {
       audioFailed = true;
     }
     if (feed) {
-      const session = stream.getAudioTracks().length === 0 ? await desktop?.appAudio?.active() : null;
-      if (session == null) {
-        feed.close();
-        feed = null;
-        audioFailed = true;
-      } else {
-        feed.sessionId = session;
-        stream.addTrack(await feed.track());
+      try {
+        const session = stream.getAudioTracks().length === 0 ? await desktop?.appAudio?.active() : null;
+        if (session == null) {
+          feed.close();
+          feed = null;
+          audioFailed = true;
+        } else {
+          feed.sessionId = session;
+          stream.addTrack(await feed.track());
+        }
+      } catch (err) {
+        // A captura já abriu: sem isto ela ficaria ativa (a borda amarela do Windows) sem ninguém para parar.
+        stream.getTracks().forEach((track) => track.stop());
+        feed?.close();
+        throw err;
       }
     }
     return { stream, feed, audioFailed };

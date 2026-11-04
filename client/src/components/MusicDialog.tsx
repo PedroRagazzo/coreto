@@ -5,7 +5,7 @@ import { useRealtime } from '../state/realtime';
 import { Modal } from './Modal';
 
 /** "3:35" ou "1:02:05"; vazio quando a duração não é conhecida. */
-export function formatClock(seconds: number | null): string {
+function formatClock(seconds: number | null): string {
   if (seconds === null || !Number.isFinite(seconds)) return '';
   const total = Math.max(0, Math.round(seconds));
   const h = Math.floor(total / 3600);
@@ -22,7 +22,7 @@ export function useMusic(): { state: MusicState; receivedAt: number } | null {
 }
 
 /** A posição da música agora: a que o servidor mandou mais o tempo que passou aqui (se não está pausada). */
-export function usePosition(music: { state: MusicState; receivedAt: number } | null): number {
+function usePosition(music: { state: MusicState; receivedAt: number } | null): number {
   const [now, setNow] = useState(() => Date.now());
   const running = Boolean(music?.state.current) && !music?.state.paused;
   useEffect(() => {

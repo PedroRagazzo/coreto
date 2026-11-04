@@ -11,7 +11,7 @@ export interface QualityOptions {
 }
 
 /** 60 quadros pedem mais bits; 15, menos. */
-export const fpsFactor = (frameRate: number) => (frameRate === 60 ? 1.5 : frameRate === 15 ? 0.6 : 1);
+const fpsFactor = (frameRate: number) => (frameRate === 60 ? 1.5 : frameRate === 15 ? 0.6 : 1);
 
 /** Por onde a imagem vai: pelo servidor de mídia (uma cópia só) ou direto entre os navegadores (uma por espectador). */
 export type StreamRoute = 'sfu' | 'p2p';
@@ -29,7 +29,7 @@ export function maxBitrate({ height, frameRate }: Pick<QualityOptions, 'height' 
 }
 
 /** Fração do upload usada pela transmissão: o resto fica para voz, câmera e o resto da casa. */
-export const UPLOAD_SHARE = 0.7;
+const UPLOAD_SHARE = 0.7;
 export const MIN_VIEWER_BITRATE = 400_000;
 
 /**
@@ -43,7 +43,7 @@ export function viewerBitrate(options: QualityOptions, viewers: number, via: Str
 }
 
 /** Quanto de bitrate cada altura pede para ficar nítida a 30 quadros por segundo (texto e telas). */
-export const HEIGHT_LADDER = [
+const HEIGHT_LADDER = [
   { height: 1440, bitrate: 6_000_000 },
   { height: 1080, bitrate: 3_500_000 },
   { height: 900, bitrate: 2_600_000 },
@@ -53,7 +53,7 @@ export const HEIGHT_LADDER = [
 ] as const;
 
 /** Imagem em movimento (jogo, vídeo) pede mais bits por pixel que tela parada: a escada acima vale para texto. */
-export const MOTION_FACTOR = 1.4;
+const MOTION_FACTOR = 1.4;
 
 /**
  * Quanto reduzir a imagem para ela caber no bitrate disponível. Com pouco bitrate, uma imagem
@@ -99,13 +99,13 @@ export type StreamAdvice =
   | 'freezes-source';
 
 /** Perda de pacotes a partir da qual vale avisar. */
-export const LOSS_ALERT_PERCENT = 3;
+const LOSS_ALERT_PERCENT = 3;
 /** Ida e volta (ms) a partir da qual uma retransmissão já aparece como travada. */
-export const FAR_RTT_MS = 150;
+const FAR_RTT_MS = 150;
 /** A rede comporta menos que esta fração do teto pedido: o caminho é o gargalo, não o computador. */
-export const PATH_LIMIT_RATIO = 0.75;
+const PATH_LIMIT_RATIO = 0.75;
 /** Travadas em 30 s a partir das quais vale avisar (uma só passa despercebida). */
-export const FREEZE_ALERT = 2;
+const FREEZE_ALERT = 2;
 
 /** A principal causa de uma imagem ruim, a partir dos números; `null` se está tudo bem. */
 export function diagnoseStream(input: StreamDiagnosisInput): StreamAdvice | null {

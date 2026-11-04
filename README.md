@@ -238,7 +238,7 @@ gerada pelo `npm run dist` e rode o app com `CORETO_UPDATE_TEST=<url da pasta>` 
 npm test
 ```
 
-- **Unitários** (`server/test/unit`): regras de permissão e de nomes. Rodam sempre, sem banco.
+- **Unitários** (`server/test/unit`): regras puras (permissões, nomes, texto e menções, enquetes, qualidade da transmissão, backup, monitor, bot de música…). Rodam sempre, sem banco.
 - **Integração** (`server/test/integration`): sobem o servidor de verdade numa porta livre e conversam com ele por
   clientes socket.io, cobrindo sessão, presença, mensagens, permissões, conversas diretas, voz, gestão de espaços e
   canais e persistência após reinício. Precisam de `TEST_DATABASE_URL` (em `server/.env` ou no ambiente); sem ela, são
@@ -805,7 +805,7 @@ como com qualquer pessoa.
 
 **Como funciona.** A chamada é ponto a ponto, então o robô é um participante de verdade: o servidor mantém uma conexão
 WebRTC (`@roamhq/wrtc`) com cada pessoa da sala, negociada pelos mesmos sinais e pela mesma regra de colisão do navegador
-(`server/src/music/bot-voice.ts`). O áudio sai do `yt-dlp` pelo `ffmpeg` (PCM de 48 kHz, mono) e um relógio de 10 ms
+(`server/src/music/bot-voice.ts`). O áudio sai do `yt-dlp` pelo `ffmpeg` (PCM de 48 kHz, estéreo) e um relógio de 10 ms
 (`pacer.ts`) o entrega no ritmo certo; o download espera quando já há áudio de sobra. Os links são lidos em `links.ts`:
 só ids validados e buscas chegam ao `yt-dlp` (nunca o texto digitado), então outros sites e `file://` são recusados.
 O Spotify não entrega áudio (é protegido): o robô lê só o nome, o artista e a duração da página pública de
@@ -862,14 +862,14 @@ log. O áudio do robô atravessa a rede como o de qualquer pessoa, então a cham
   cargos pela interface.
 - Todo espaço é público: quem conecta vira membro de todos, inclusive dos criados por outras pessoas.
 - Mensagens diretas só entre duas pessoas (sem grupos) e sem lista para buscar usuários: comece pela lista de membros.
-- Mensagens não lidas só são contadas nas conversas diretas, e a contagem zera ao recarregar a página. Menções, ao
-  contrário, ficam guardadas até serem vistas.
+- Mensagens não lidas são contadas por canal e por conversa direta e ficam guardadas no servidor (veja "Mensagens não
+  lidas"); sobrevivem a recarregar a página e a reiniciar o servidor.
 - Anexos de até 50 MB, sem limite de envios por pessoa (só a cota de espaço total), apagados 20 dias depois do envio e guardados no disco do servidor (para
   várias instâncias, troque por um armazenamento de objetos como S3). Não há como retomar um envio interrompido, nem
   tocar vídeo ou áudio direto na conversa: o arquivo é baixado.
 - O anel de quem está falando só aparece para quem está na mesma chamada.
 - Na malha P2P, cada câmera vai para todos da chamada e cada tela vai para cada pessoa que assiste. Com vídeo, a
-  chamada aguenta umas 4 ou 5 pessoas, conforme a internet de cada uma. Cada pessoa assiste a uma transmissão por vez.
+  chamada aguenta umas 4 ou 5 pessoas, conforme a internet de cada uma. Cada pessoa assiste a até 4 transmissões ao mesmo tempo.
 - A busca compara trechos de palavras (sem português "inteligente": "correr" não encontra "corri"). Com milhões de
   mensagens, troque por busca de texto completo (`tsvector`) ou um serviço de busca.
 

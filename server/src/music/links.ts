@@ -10,7 +10,7 @@ export type MusicRequest =
 
 export type ParsedRequest = MusicRequest | { kind: 'invalid'; reason: string };
 
-export const MAX_QUERY_LENGTH = 200;
+const MAX_QUERY_LENGTH = 200;
 
 const YOUTUBE_HOSTS = new Set(['youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com', 'youtu.be', 'www.youtu.be']);
 const VIDEO_ID = /^[\w-]{11}$/;

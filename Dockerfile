@@ -69,5 +69,5 @@ USER node
 EXPOSE 3000
 VOLUME ["/data/uploads", "/data/backups"]
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
-  CMD node -e "fetch('http://localhost:3000/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
+  CMD node -e "fetch('http://localhost:' + (process.env.SERVER_PORT || 3000) + '/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
 CMD ["sh", "-c", "npm run db:deploy -w server && exec node --import tsx server/src/index.ts"]

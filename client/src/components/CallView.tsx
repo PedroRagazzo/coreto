@@ -230,7 +230,7 @@ function CallButton({ label, onClick, active = false, danger = false, disabled =
       type="button"
       title={label}
       aria-label={label}
-      aria-pressed={active || danger}
+      aria-pressed={danger ? undefined : active}
       disabled={disabled}
       onClick={onClick}
       className={`flex h-11 w-11 items-center justify-center rounded-full disabled:cursor-not-allowed disabled:opacity-40 ${

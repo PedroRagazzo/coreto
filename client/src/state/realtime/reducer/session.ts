@@ -158,6 +158,10 @@ export function spaceSnapshot(state: RealtimeState, action: ActionOf<'space:snap
   for (const user of action.snapshot.users) users[user.id] = user;
   const voice: Record<Id, VoiceParticipant[]> = {};
   for (const p of action.snapshot.voice) (voice[p.channelId] ??= []).push(p);
+  // A chamada em que você está pode ser de outro espaço: o retrato só traz a voz do espaço aberto, e sem a sala dela os sons
+  // de saída tocariam e quem assiste a sua tela deixaria de receber (o servidor segue mandando a lista pela sala de voz).
+  const mine = state.myVoice.channelId;
+  if (mine && !voice[mine] && state.voice[mine]) voice[mine] = state.voice[mine];
   return { ...state, snapshot: action.snapshot, users, voice };
 }
 

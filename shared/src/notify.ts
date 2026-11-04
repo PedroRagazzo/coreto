@@ -57,5 +57,5 @@ function previewOf(message: Message, nameOf: (userId: Id) => string | null): str
   if (!text) {
     return `Enviou ${sentAttachments(message.attachments)}`;
   }
-  return text.length > NOTIFICATION_BODY_LENGTH ? `${text.slice(0, NOTIFICATION_BODY_LENGTH - 1).trimEnd()}…` : text;
+  return text.length > NOTIFICATION_BODY_LENGTH ? `${text.slice(0, NOTIFICATION_BODY_LENGTH - 1).replace(/[\uD800-\uDBFF]$/, '').trimEnd()}…` : text;
 }

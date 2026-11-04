@@ -36,6 +36,19 @@ describe.skipIf(!hasTestDatabase)('salas de voz', () => {
     );
   });
 
+  it('quem abre outro espaço durante a chamada continua recebendo a lista de quem está nela', async () => {
+    const ana = await inRoom('Ana', 'Sala de estar');
+    // A Ana sai da vista do espaço da chamada (o socket deixa as salas dele), mas segue na chamada.
+    const club = ana.client.spaces.find((s) => s.name === 'Clube do Livro');
+    ok(await ana.client.socket.emitWithAck('space:join', club!.id));
+
+    const roster = nextEvent(ana.client.socket, 'voice:update', (p) => p.participants.length === 2);
+    const bruno = await inRoom('Bruno', 'Sala de estar');
+    expect((await roster).participants.map((p) => p.userId).sort()).toEqual(
+      [ana.client.user.id, bruno.client.user.id].sort(),
+    );
+  });
+
   it('entrega os servidores ICE e a política de transporte ao entrar', async () => {
     const client = await server.connect('Ana');
     const sala = channelNamed(await joinDemoSpace(client), 'Sala de estar');
