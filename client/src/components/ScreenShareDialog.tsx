@@ -2,18 +2,19 @@ import { useState, type FormEvent } from 'react';
 import { desktop } from '../lib/desktop';
 import { useRealtime } from '../state/realtime';
 import { DialogActions, Modal } from './Modal';
-import { loadScreenOptions, saveScreenOptions, ScreenQualityFields } from './ScreenQualityFields';
+import { bestScreenQuality, loadScreenOptions, saveScreenOptions } from './ScreenQualityFields';
 
-/** Qualidade da transmissão; depois, o próprio navegador pergunta qual tela, janela ou aba. */
+/** Só o som: a qualidade é sempre a melhor (ajusta-se com a transmissão no ar); depois, o próprio navegador pergunta qual tela, janela ou aba. */
 export function ScreenShareDialog({ onClose }: { onClose: () => void }) {
   const { state, actions } = useRealtime();
-  const [options, setOptions] = useState(loadScreenOptions);
+  const [audio, setAudio] = useState(() => loadScreenOptions().audio);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (busy) return;
+    const options = { ...bestScreenQuality(), audio };
     saveScreenOptions(options);
     setBusy(true);
     // Chamado direto do clique: o navegador só abre o seletor de tela a partir de um gesto.
@@ -30,13 +31,11 @@ export function ScreenShareDialog({ onClose }: { onClose: () => void }) {
       onClose={onClose}
     >
       <form onSubmit={submit}>
-        <ScreenQualityFields value={options} onChange={(patch) => setOptions((o) => ({ ...o, ...patch }))} />
-
-        <label className="mt-4 flex items-center gap-2 text-sm">
+        <label className="flex items-center gap-2 text-sm">
           <input
             type="checkbox"
-            checked={options.audio}
-            onChange={(e) => setOptions((o) => ({ ...o, audio: e.target.checked }))}
+            checked={audio}
+            onChange={(e) => setAudio(e.target.checked)}
             className="h-4 w-4 accent-accent"
           />
           {desktop?.appAudio

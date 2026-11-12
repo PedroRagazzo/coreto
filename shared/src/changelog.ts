@@ -22,6 +22,16 @@ export interface ChangelogEntry {
 /** Da mais nova para a mais antiga. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-12-2',
+    title: 'Compartilhar tela mais simples',
+    items: [
+      {
+        title: 'Só o som é perguntado ao compartilhar',
+        text: 'A janela de compartilhar tela não pede mais resolução, quadros, prioridade, codificação nem upload: toda transmissão começa na melhor qualidade (1080p, 60 fps, fluida e pela placa de vídeo). Se precisar de menos, o botão de configurações da transmissão continua lá, com ela no ar.',
+      },
+    ],
+  },
+  {
     id: '2026-11-12',
     title: 'Transmissão pela placa de vídeo',
     items: [

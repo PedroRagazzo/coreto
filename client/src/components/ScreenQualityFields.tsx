@@ -4,6 +4,19 @@ import { labelClass } from './Modal';
 /** A parte da qualidade que dá para mudar com a transmissão no ar (o som só se escolhe ao começar). */
 export type ScreenQuality = Pick<ScreenShareOptions, 'height' | 'frameRate' | 'priority' | 'uploadMbps' | 'codec'>;
 
+/**
+ * Com esta qualidade toda transmissão começa: a melhor (1080p, 60 fps, Fluidez e, onde o navegador sabe, a placa de vídeo
+ * codificando). Quem precisa de menos ajusta nas configurações da transmissão, com ela no ar. 20 Mbps de upload: o servidor
+ * de mídia usa o teto cheio e, na malha P2P, quem tem pouca internet não é sufocado.
+ */
+export const bestScreenQuality = (): ScreenQuality => ({
+  height: 1080,
+  frameRate: 60,
+  priority: 'smooth',
+  uploadMbps: 20,
+  codec: supportsH264() ? 'h264' : 'vp8',
+});
+
 const STORAGE_KEY = 'coreto.screenShare';
 const DEFAULT_SCREEN_OPTIONS: ScreenShareOptions = {
   height: 720,

@@ -1,15 +1,15 @@
 import { useState } from 'react';
 import { useRealtime } from '../state/realtime';
 import { Modal } from './Modal';
-import { loadScreenOptions, saveScreenOptions, ScreenQualityFields, type ScreenQuality } from './ScreenQualityFields';
+import { bestScreenQuality, ScreenQualityFields, type ScreenQuality } from './ScreenQualityFields';
 
 /**
  * Qualidade da transmissão que já está no ar: cada escolha vale na hora, sem parar nem escolher
- * a tela de novo. A última escolha também fica guardada para a próxima transmissão.
+ * a tela de novo. Toda transmissão nova volta a começar na melhor qualidade.
  */
 export function StreamSettingsDialog({ onClose }: { onClose: () => void }) {
   const { actions } = useRealtime();
-  const [quality, setQuality] = useState<ScreenQuality>(() => actions.screenOptions() ?? loadScreenOptions());
+  const [quality, setQuality] = useState<ScreenQuality>(() => actions.screenOptions() ?? bestScreenQuality());
   const [error, setError] = useState<string | null>(null);
 
   async function change(patch: Partial<ScreenQuality>) {
@@ -17,7 +17,6 @@ export function StreamSettingsDialog({ onClose }: { onClose: () => void }) {
     setError(null);
     const applied = await actions.updateScreenOptions(patch);
     if (!applied) return setError('A transmissão terminou. Comece de novo para mudar a qualidade.');
-    saveScreenOptions({ ...loadScreenOptions(), ...applied });
   }
 
   return (

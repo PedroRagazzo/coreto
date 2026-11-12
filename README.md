@@ -730,15 +730,17 @@ simultâneas. A permissão `STREAM` controla quem pode transmitir; o `@everyone`
 transmite codifica uma vez por espectador. Para a imagem não ficar borrada quando a internet aperta:
 
 - **Prioridade** (Nitidez ou Fluidez): Nitidez usa `contentHint = 'text'`, que mantém a resolução e deixa os quadros
-  caírem; Fluidez usa `'motion'`, que faz o contrário. O padrão é Nitidez, porque a maior parte das telas é texto.
+  caírem; Fluidez usa `'motion'`, que faz o contrário. Toda transmissão começa em Fluidez (ver "Qualidade ao começar", abaixo); Nitidez fica para quem muda nas configurações.
 - **Upload da sua internet** (5, 10, 20 ou 50 Mbps): 70% dele é dividido entre quem assiste, e o limite de cada
   espectador cai com o número de pessoas. Se o bitrate não dá para a resolução, a imagem é reduzida
   (`scaleResolutionDownBy`) em vez de ficar cheia de blocos. As contas ficam em `shared/src/stream-quality.ts`, com testes.
 - **Estatísticas** (botão com o ícone de atividade no cabeçalho da transmissão): resolução, quadros por segundo, bitrate,
   codec, perda de pacotes e latência, lidos de `getStats()`. Para quem transmite mostra também o que está limitando a
   qualidade (seu computador ou sua internet).
-- **Receita "Jogo ou vídeo"** (ao compartilhar e nas configurações da transmissão): escolhe 1080p, 60 fps, Fluidez e H.264
-  de uma vez; "Tela e texto" volta para 720p, 30 fps e Nitidez. Jogo rápido troca a imagem inteira a cada quadro, e a
+- **Qualidade ao começar**: o diálogo de compartilhar só pergunta pelo som. Toda transmissão começa na melhor qualidade
+  (`bestScreenQuality`: 1080p, 60 fps, Fluidez, H.264 onde há suporte e 20 Mbps de upload). Quem precisa de menos ajusta
+  nas configurações da transmissão, com ela no ar, onde a receita "Jogo ou vídeo" escolhe isso de uma vez e "Tela e texto"
+  volta para 720p, 30 fps e Nitidez. Jogo rápido troca a imagem inteira a cada quadro, e a
   prioridade Nitidez (que trata a imagem como texto) deixa os quadros caírem: parece travar.
 - **Teto de bitrate maior pelo servidor de mídia** (`maxBitrate(…, 'sfu')`): sai uma cópia só, então o upload não se
   divide e 1080p a 60 fps pode usar até ~9,75 Mb/s (sempre limitado a 70% do upload informado). Na malha P2P os tetos
