@@ -22,6 +22,20 @@ export interface ChangelogEntry {
 /** Da mais nova para a mais antiga. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-12',
+    title: 'Transmissão pela placa de vídeo',
+    items: [
+      {
+        title: 'H.264 agora usa a placa de vídeo de verdade',
+        text: 'Em muitos computadores, mesmo escolhendo H.264 (placa de vídeo), quem codificava era o processador, e a imagem saía menor e travando. Agora a placa é usada, o que deixa a transmissão mais nítida e fluida, principalmente em jogos. Vale no site e no app, sem precisar atualizar o app.',
+      },
+      {
+        title: 'Aviso mais certo nas estatísticas',
+        text: 'Se mesmo assim o processador estiver codificando em H.264, o painel de estatísticas agora diz que a placa não está sendo usada, em vez de mandar escolher H.264 de novo.',
+      },
+    ],
+  },
+  {
     id: '2026-11-04',
     title: 'Revisão geral e correções',
     items: [

@@ -6,6 +6,7 @@
 // (recebe) a tela de quem está assistindo.
 
 import type { Id } from '@shared/models';
+import { preferHardwareH264 } from '@shared/h264';
 import type { SfuAccess } from '@shared/protocol';
 import { AudioPresets, Room, RoomEvent, Track, type RemoteParticipant, type RemoteTrackPublication } from 'livekit-client';
 
@@ -30,6 +31,42 @@ export interface ScreenPublishOptions {
 }
 
 const isScreenSource = (source: Track.Source) => source === Track.Source.ScreenShare || source === Track.Source.ScreenShareAudio;
+
+// ── H.264 pela placa de vídeo ────────────────────────────────────────────────
+// O LiveKit não deixa escolher o perfil do H.264, e o que ele negocia sozinho (42e01f, "Constrained Baseline") o Chromium
+// codifica no processador (OpenH264), mesmo com uma placa de vídeo boa: 640x360 limitado, nas medições. Os perfis Baseline,
+// Main e High vão para a placa. Então, na hora em que o LiveKit cria o transceptor da tela, pedimos ao navegador que
+// ofereça esses perfis primeiro (`setCodecPreferences`); o servidor escolhe o primeiro que aceita. Só a faixa da tela é
+// tocada, reconhecida pelo id: a câmera do P2P usa o mesmo `addTransceiver` e não deve mudar.
+
+/** Ids das faixas de tela publicadas em H.264. Fica registrado enquanto a tela está no ar, para valer também se o LiveKit publicar de novo ao reconectar. */
+const hardwareH264Tracks = new Set<string>();
+let hardwareH264Installed = false;
+
+function installHardwareH264(): void {
+  if (hardwareH264Installed || typeof RTCPeerConnection === 'undefined') return;
+  hardwareH264Installed = true;
+  const original = RTCPeerConnection.prototype.addTransceiver as (this: RTCPeerConnection, trackOrKind: MediaStreamTrack | string, init?: RTCRtpTransceiverInit) => RTCRtpTransceiver;
+  RTCPeerConnection.prototype.addTransceiver = function (this: RTCPeerConnection, trackOrKind: MediaStreamTrack | string, init?: RTCRtpTransceiverInit) {
+    const transceiver = original.call(this, trackOrKind, init);
+    if (typeof trackOrKind !== 'string' && hardwareH264Tracks.has(trackOrKind.id)) {
+      try {
+        const ordered = preferHardwareH264(RTCRtpSender.getCapabilities?.('video')?.codecs ?? []);
+        if (ordered) transceiver.setCodecPreferences(ordered);
+      } catch (err) {
+        // Sem a preferência, o navegador negocia como antes (pelo processador): pior, mas funciona.
+        console.warn('[voz] não deu para preferir o H.264 da placa de vídeo', err);
+      }
+    }
+    return transceiver;
+  } as typeof RTCPeerConnection.prototype.addTransceiver;
+}
+
+function preferHardwareFor(video: MediaStreamTrack, codec: ScreenPublishOptions['codec']): void {
+  if (codec !== 'h264') return;
+  installHardwareH264();
+  hardwareH264Tracks.add(video.id);
+}
 
 export class SfuSession {
   private watching: ReadonlySet<Id> = new Set();
@@ -98,6 +135,7 @@ export class SfuSession {
     await this.unpublishScreen();
     const encoding = { maxBitrate: options.maxBitrate, maxFramerate: options.maxFramerate };
     const { localParticipant } = this.room;
+    preferHardwareFor(video, options.codec);
     await localParticipant.publishTrack(video, {
       source: Track.Source.ScreenShare,
       simulcast: false,
@@ -135,6 +173,8 @@ export class SfuSession {
       // `userProvidedTrack`: as faixas são de quem chamou, que as para por conta própria.
       await videoTrack.replaceTrack(video, { userProvidedTrack: true });
       if (audio && audioTrack) await audioTrack.replaceTrack(audio, { userProvidedTrack: true });
+      hardwareH264Tracks.delete(this.published.video.id);
+      preferHardwareFor(video, options.codec);
       this.published = { video, audio };
     } catch (err) {
       console.warn('[voz] trocar a faixa falhou; publicando de novo', err);
@@ -147,6 +187,7 @@ export class SfuSession {
     const published = this.published;
     if (!published) return;
     this.published = null;
+    hardwareH264Tracks.delete(published.video.id);
     const { localParticipant } = this.room;
     await localParticipant.unpublishTrack(published.video, false).catch(() => undefined);
     if (published.audio) await localParticipant.unpublishTrack(published.audio, false).catch(() => undefined);
@@ -174,6 +215,7 @@ export class SfuSession {
 
   close(): void {
     this.closed = true;
+    if (this.published) hardwareH264Tracks.delete(this.published.video.id);
     this.dropAll();
     // `false`: as faixas da captura são de quem chamou, que as para por conta própria.
     void this.room.disconnect(false);

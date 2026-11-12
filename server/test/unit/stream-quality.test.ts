@@ -125,6 +125,13 @@ describe('diagnoseStream', () => {
     expect(diagnoseStream(sending({ limit: 'cpu', encoder: 'software', via: 'p2p' }))).toBe('cpu');
   });
 
+  it('já em H.264 e ainda no processador: não manda trocar de codec, avisa que a placa não está sendo usada', () => {
+    expect(diagnoseStream(sending({ limit: 'cpu', encoder: 'software', codec: 'H264' }))).toBe('cpu-software-h264');
+    expect(diagnoseStream(sending({ limit: 'cpu', encoder: 'software', codec: 'VP8' }))).toBe('cpu-software');
+    expect(diagnoseStream(sending({ limit: 'cpu', encoder: 'software', codec: null }))).toBe('cpu-software');
+    expect(diagnoseStream(sending({ limit: 'cpu', encoder: 'hardware', codec: 'H264' }))).toBe('cpu');
+  });
+
   it('a internet no limite, pelo servidor ou direto', () => {
     expect(diagnoseStream(sending({ limit: 'bandwidth' }))).toBe('bandwidth-sfu');
     expect(diagnoseStream(sending({ limit: 'bandwidth', via: 'p2p' }))).toBe('bandwidth-p2p');

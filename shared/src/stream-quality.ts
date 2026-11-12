@@ -77,6 +77,8 @@ export interface StreamDiagnosisInput {
   limit: 'none' | 'bandwidth' | 'cpu' | 'other' | null;
   /** Só ao transmitir: quem codifica o vídeo. */
   encoder: 'hardware' | 'software' | null;
+  /** O codec em uso (H264, VP8...), se o navegador diz. */
+  codec?: string | null;
   lossPercent: number;
   rttMs: number | null;
   /** Só ao transmitir: o teto de bitrate pedido ao codificador, para cada espectador (kbps). */
@@ -89,6 +91,7 @@ export interface StreamDiagnosisInput {
 
 export type StreamAdvice =
   | 'cpu-software'
+  | 'cpu-software-h264'
   | 'cpu'
   | 'bandwidth-sfu'
   | 'bandwidth-p2p'
@@ -110,7 +113,11 @@ const FREEZE_ALERT = 2;
 /** A principal causa de uma imagem ruim, a partir dos números; `null` se está tudo bem. */
 export function diagnoseStream(input: StreamDiagnosisInput): StreamAdvice | null {
   if (input.role === 'sending') {
-    if (input.limit === 'cpu') return input.encoder === 'software' && input.via === 'sfu' ? 'cpu-software' : 'cpu';
+    if (input.limit === 'cpu') {
+      if (input.encoder !== 'software' || input.via !== 'sfu') return 'cpu';
+      // Já em H.264 e mesmo assim no processador: trocar de codec não adianta, o navegador não está usando a placa.
+      return input.codec?.toLowerCase() === 'h264' ? 'cpu-software-h264' : 'cpu-software';
+    }
     if (input.limit === 'bandwidth') return input.via === 'sfu' ? 'bandwidth-sfu' : 'bandwidth-p2p';
     if (input.availableKbps !== null && input.capKbps !== null && input.availableKbps < input.capKbps * PATH_LIMIT_RATIO) return 'path-limit';
     if (input.lossPercent > LOSS_ALERT_PERCENT) return input.rttMs !== null && input.rttMs > FAR_RTT_MS ? 'loss-far' : 'loss';

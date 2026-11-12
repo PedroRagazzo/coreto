@@ -479,6 +479,8 @@ const mbps = (kbps: number) => `${(kbps / 1000).toLocaleString('pt-BR', { maximu
 const ADVICE: Record<StreamAdvice, string> = {
   'cpu-software':
     'O processador está codificando o vídeo e no limite: em Configurações da transmissão, escolha H.264 (placa de vídeo), ou uma resolução menor ou menos quadros por segundo.',
+  'cpu-software-h264':
+    'O vídeo está sendo codificado pelo processador, não pela placa de vídeo, mesmo em H.264: atualize o driver da placa, feche programas que também gravam ou transmitem (gravadores, outros apps de chamada) e, se continuar, escolha uma resolução menor ou menos quadros por segundo.',
   cpu: 'Seu computador está no limite: o jogo e a transmissão disputam a máquina. Escolha uma resolução menor ou menos quadros por segundo.',
   'bandwidth-sfu':
     'A sua internet de envio está no limite: a imagem é reduzida para caber. Escolha uma resolução menor ou menos quadros por segundo.',
