@@ -22,8 +22,19 @@ import { seedIfEmpty } from '../../src/seed.js';
 import type { EmbedService } from '../../src/embeds/service.js';
 import type { SfuConfig } from '../../src/sfu.js';
 import { Store } from '../../src/store.js';
+import { createRateLimits, RateLimiter, type RateLimits } from '../../src/rate-limit.js';
 import { iceConfigFromEnv } from '../../src/turn.js';
 import { assertTestDatabase, TEST_DATABASE_URL } from './database.js';
+
+/**
+ * Os limites de verdade, menos o de mensagens novas: para os testes que mandam dezenas de mensagens seguidas só para ter
+ * o que paginar, buscar ou fixar (uma pessoa digitando nunca chega perto).
+ */
+export function limitsAllowingManyPosts(): RateLimits {
+  const limits = createRateLimits();
+  limits.post = new RateLimiter([{ max: 10_000, windowMs: 1000 }]);
+  return limits;
+}
 
 export type TestSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
@@ -62,18 +73,28 @@ export class TestServer {
     private readonly embeds?: EmbedService,
     /** Espaço máximo dos anexos, só nos testes da cota. */
     private readonly uploadQuotaBytes?: number,
+    /** Limites de ritmo; sem eles, os padrões do servidor. */
+    private readonly limits?: RateLimits,
   ) {}
 
   /** Apaga o banco de teste, recria os dados de demonstração e sobe o servidor. */
   static async start(
-    options: { music?: MusicFactory; sfu?: SfuConfig; embeds?: EmbedService; uploadQuotaBytes?: number } = {},
+    options: { music?: MusicFactory; sfu?: SfuConfig; embeds?: EmbedService; uploadQuotaBytes?: number; limits?: RateLimits } = {},
   ): Promise<TestServer> {
     if (!TEST_DATABASE_URL) throw new Error('TEST_DATABASE_URL não definida.');
     assertTestDatabase(TEST_DATABASE_URL);
     const db = createDb(TEST_DATABASE_URL);
     await resetDatabase(db);
     await seedIfEmpty(db);
-    const harness = new TestServer(db, await mkdtemp(join(tmpdir(), 'coreto-uploads-')), options.music, options.sfu ?? null, options.embeds, options.uploadQuotaBytes);
+    const harness = new TestServer(
+      db,
+      await mkdtemp(join(tmpdir(), 'coreto-uploads-')),
+      options.music,
+      options.sfu ?? null,
+      options.embeds,
+      options.uploadQuotaBytes,
+      options.limits,
+    );
     await harness.boot();
     return harness;
   }
@@ -102,11 +123,15 @@ export class TestServer {
     this.store?.setSuperAdmins(names);
   }
 
-  /** POST /login cru, para testar as respostas do servidor. */
-  async login(name: string, pin: string): Promise<{ status: number; body: LoginResponse }> {
+  /**
+   * POST /login cru, para testar as respostas do servidor. Com `address`, o pedido chega como se viesse desse endereço,
+   * por trás de um proxy (cabeçalho `X-Forwarded-For`): sem ele, vem do próprio computador, que os limites por
+   * endereço não contam.
+   */
+  async login(name: string, pin: string, address?: string): Promise<{ status: number; body: LoginResponse }> {
     const res = await fetch(`${this.url}/login`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...(address ? { 'x-forwarded-for': address } : {}) },
       body: JSON.stringify({ name, pin }),
     });
     return { status: res.status, body: (await res.json()) as LoginResponse };
@@ -191,6 +216,7 @@ export class TestServer {
       embeds: this.embeds,
       uploadQuotaBytes: this.uploadQuotaBytes,
       music: this.music,
+      limits: this.limits,
     });
   }
 }

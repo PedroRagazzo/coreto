@@ -10,6 +10,7 @@ import { MAX_WATCHED_STREAMS, type Id } from '../../../shared/src/models.js';
 import { Permission } from '../../../shared/src/permissions.js';
 import type { SignalPayload } from '../../../shared/src/protocol.js';
 import { toParticipant, type Store, type VoiceSession } from '../store.js';
+import { TOO_FAST, type RateLimits } from '../rate-limit.js';
 import type { SfuConfig } from '../sfu.js';
 import type { IceConfig } from '../turn.js';
 import { channelWithPermission, isFunction } from './guards.js';
@@ -78,8 +79,11 @@ function stopWatchersOf(store: Store, streamer: VoiceSession): void {
   }
 }
 
-export function registerVoice(io: IO, socket: AppSocket, store: Store, ice: IceConfig, sfu: SfuConfig | null = null): void {
+export function registerVoice(io: IO, socket: AppSocket, store: Store, ice: IceConfig, sfu: SfuConfig | null, limits: RateLimits): void {
   const { userId } = socket.data;
+  // Cada aviso de estado (mutar, câmera, transmitir, assistir) é repassado à sala inteira: o limite é por pessoa.
+  // Sair e parar de transmitir/assistir nunca são recusados: só diminuem o estado, e ficar preso nele seria pior.
+  const stateAllowed = () => limits.voiceState.take(userId);
   const endSession = (session: VoiceSession, reason?: string) => endVoiceSession(io, store, session, reason);
 
   /** Só o socket que abriu a sessão pode encerrá-la. */
@@ -90,6 +94,7 @@ export function registerVoice(io: IO, socket: AppSocket, store: Store, ice: IceC
 
   socket.on('voice:join', (req, ack) => {
     if (!isFunction(ack)) return;
+    if (!limits.voiceJoin.take(userId)) return ack(TOO_FAST);
     const channel = channelWithPermission(store, userId, req?.channelId, 'voice', Permission.CONNECT);
     if (!channel) return ack({ ok: false, error: 'Você não pode entrar neste canal de voz.' });
 
@@ -130,7 +135,7 @@ export function registerVoice(io: IO, socket: AppSocket, store: Store, ice: IceC
 
   socket.on('voice:state', (req) => {
     const session = store.voice.get(userId);
-    if (session?.socketId !== socket.id) return;
+    if (session?.socketId !== socket.id || !stateAllowed()) return;
     session.muted = Boolean(req?.muted);
     session.deafened = Boolean(req?.deafened);
     broadcastRoster(io, store, session.spaceId, session.channelId);
@@ -144,6 +149,7 @@ export function registerVoice(io: IO, socket: AppSocket, store: Store, ice: IceC
 
   socket.on('voice:video', (req, ack) => {
     if (!isFunction(ack)) return;
+    if (!stateAllowed()) return ack(TOO_FAST);
     const session = mySession();
     if (!session) return ack({ ok: false, error: 'Entre em um canal de voz para ligar a câmera.' });
     const enabled = Boolean(req?.enabled);
@@ -162,6 +168,7 @@ export function registerVoice(io: IO, socket: AppSocket, store: Store, ice: IceC
     const legacy = typeof req === 'function';
     const ack = (legacy ? req : maybeAck) as typeof maybeAck;
     if (!isFunction(ack)) return;
+    if (!stateAllowed()) return ack(TOO_FAST);
     const session = mySession();
     if (!session) return ack({ ok: false, error: 'Entre em um canal de voz para compartilhar a tela.' });
     const channel = channelWithPermission(store, userId, session.channelId, 'voice', Permission.STREAM);
@@ -189,6 +196,7 @@ export function registerVoice(io: IO, socket: AppSocket, store: Store, ice: IceC
   // transmitir (STREAM) recebe o direito de enviar vídeo.
   socket.on('sfu:token', (ack) => {
     if (!isFunction(ack)) return;
+    if (!limits.sfuToken.take(userId)) return ack(TOO_FAST);
     const session = mySession();
     if (!session) return ack({ ok: false, error: 'Entre em um canal de voz primeiro.' });
     if (!sfu?.ready()) return ack({ ok: false, error: 'O servidor de mídia não está disponível.' });
@@ -207,6 +215,7 @@ export function registerVoice(io: IO, socket: AppSocket, store: Store, ice: IceC
 
   socket.on('stream:preview:get', (req, ack) => {
     if (!isFunction(ack)) return;
+    if (!limits.read.take(userId)) return ack(TOO_FAST);
     const streamer = typeof req?.userId === 'string' ? store.voice.get(req.userId) : undefined;
     // Quem pode entrar no canal vê a prévia (a lista da sala já mostra quem está ao vivo), mesmo sem estar na chamada.
     if (!streamer?.streaming || !channelWithPermission(store, userId, streamer.channelId, 'voice', Permission.CONNECT)) {
@@ -217,6 +226,7 @@ export function registerVoice(io: IO, socket: AppSocket, store: Store, ice: IceC
 
   socket.on('stream:watch', (req, ack) => {
     if (!isFunction(ack)) return;
+    if (!stateAllowed()) return ack(TOO_FAST);
     const session = mySession();
     const streamer = typeof req?.userId === 'string' ? store.voice.get(req.userId) : undefined;
     if (!session) return ack({ ok: false, error: 'Entre no canal de voz para assistir.' });
@@ -246,6 +256,7 @@ export function registerVoice(io: IO, socket: AppSocket, store: Store, ice: IceC
 
   // Repasse de sinalização: apenas entre participantes da mesma sala.
   socket.on('voice:signal', (req) => {
+    if (!limits.voiceSignal.take(userId)) return;
     const me = store.voice.get(userId);
     const target = typeof req?.to === 'string' ? store.voice.get(req.to) : undefined;
     if (!me || me.socketId !== socket.id || !target || target.channelId !== me.channelId) return;

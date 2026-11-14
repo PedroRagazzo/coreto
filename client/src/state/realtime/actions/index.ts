@@ -3,6 +3,7 @@
 
 import type { ActionContext } from '../context';
 import type { RealtimeActions } from '../types';
+import { createDiagnosticsActions } from './diagnostics';
 import { createMessageActions } from './messages';
 import { createNavigation } from './navigation';
 import { createVoiceActions } from './voice';
@@ -13,5 +14,6 @@ export function createActions(ctx: ActionContext): RealtimeActions {
     ...navigation.actions,
     ...createMessageActions(ctx, navigation.loadHistory),
     ...createVoiceActions(ctx),
+    ...createDiagnosticsActions(ctx),
   };
 }

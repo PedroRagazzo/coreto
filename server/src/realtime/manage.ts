@@ -3,17 +3,20 @@
 import type { Id } from '../../../shared/src/models.js';
 import { normalizeChannelName, normalizeSpaceName, normalizeTopic } from '../../../shared/src/names.js';
 import { hasPermission, Permission } from '../../../shared/src/permissions.js';
+import { TOO_FAST, type RateLimits } from '../rate-limit.js';
 import type { Store } from '../store.js';
 import { isFunction, storageError } from './guards.js';
 import { rooms, type AppSocket, type IO } from './types.js';
 import { endVoiceSession } from './voice.js';
 
-export function registerManagement(io: IO, socket: AppSocket, store: Store): void {
+export function registerManagement(io: IO, socket: AppSocket, store: Store, limits: RateLimits): void {
   const { userId } = socket.data;
 
-  // Qualquer pessoa pode criar um espaço; quem cria vira dono.
+  // Qualquer pessoa pode criar um espaço; quem cria vira dono. Cada espaço novo é anunciado a todo mundo no servidor,
+  // então o limite é curto.
   socket.on('space:create', async (req, ack) => {
     if (!isFunction(ack)) return;
+    if (!limits.createSpace.take(userId)) return ack({ ok: false, error: 'Você criou espaços demais agora. Espere alguns minutos.' });
     const name = typeof req?.name === 'string' ? normalizeSpaceName(req.name) : '';
     if (!name) return ack({ ok: false, error: 'Dê um nome ao espaço.' });
     try {
@@ -28,6 +31,7 @@ export function registerManagement(io: IO, socket: AppSocket, store: Store): voi
 
   socket.on('space:update', async (req, ack) => {
     if (!isFunction(ack)) return;
+    if (!limits.manage.take(userId)) return ack(TOO_FAST);
     const spaceId = typeof req?.spaceId === 'string' ? req.spaceId : '';
     if (!hasPermission(store.spacePermissionsFor(userId, spaceId), Permission.ADMINISTRATOR)) {
       return ack({ ok: false, error: 'Só administradores podem editar o espaço.' });
@@ -46,6 +50,7 @@ export function registerManagement(io: IO, socket: AppSocket, store: Store): voi
   // Excluir apaga tudo de todo mundo: só o dono (ou o administrador geral) pode.
   socket.on('space:delete', async (req, ack) => {
     if (!isFunction(ack)) return;
+    if (!limits.manage.take(userId)) return ack(TOO_FAST);
     const space = typeof req?.spaceId === 'string' ? store.spaces.get(req.spaceId) : undefined;
     if (!space || (space.ownerId !== userId && !store.isSuperAdmin(userId))) {
       return ack({ ok: false, error: 'Só o dono pode excluir o espaço.' });
@@ -71,6 +76,7 @@ export function registerManagement(io: IO, socket: AppSocket, store: Store): voi
   // Criar canal exige MANAGE_CHANNELS no espaço.
   socket.on('channel:create', async (req, ack) => {
     if (!isFunction(ack)) return;
+    if (!limits.manage.take(userId)) return ack(TOO_FAST);
     const spaceId = typeof req?.spaceId === 'string' ? req.spaceId : '';
     if (!hasPermission(store.spacePermissionsFor(userId, spaceId), Permission.MANAGE_CHANNELS)) {
       return ack({ ok: false, error: 'Você não tem permissão para criar canais neste espaço.' });
@@ -111,6 +117,7 @@ export function registerManagement(io: IO, socket: AppSocket, store: Store): voi
 
   socket.on('channel:update', async (req, ack) => {
     if (!isFunction(ack)) return;
+    if (!limits.manage.take(userId)) return ack(TOO_FAST);
     const channel = manageableChannel(req?.channelId);
     if (!channel) return ack({ ok: false, error: 'Você não tem permissão para editar este canal.' });
 
@@ -146,6 +153,7 @@ export function registerManagement(io: IO, socket: AppSocket, store: Store): voi
 
   socket.on('channel:delete', async (req, ack) => {
     if (!isFunction(ack)) return;
+    if (!limits.manage.take(userId)) return ack(TOO_FAST);
     const channel = manageableChannel(req?.channelId);
     if (!channel) return ack({ ok: false, error: 'Você não tem permissão para excluir este canal.' });
     let mentioned: Id[];

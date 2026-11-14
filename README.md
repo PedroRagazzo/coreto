@@ -219,6 +219,20 @@ npm run dist                               # gera release/Coreto-Setup-<versão>
 Uma tag `v<versão>` (a mesma de `desktop/package.json`) faz o GitHub Actions gerar o instalador e publicar a
 release com ele. O instalador não é assinado, então o Windows mostra um aviso na primeira vez.
 
+**Robustez do app** (acrescentada depois da 0.7.1; chega aos amigos com a próxima release):
+- **Janela fora da tela:** a posição guardada (`window.json`) só vale se pelo menos 200×100 px da janela ainda aparecem
+  numa tela (`desktop/src/window-bounds.js`, `fitWindowState`). Sem o segundo monitor, a janela abre centralizada; um
+  tamanho maior que a tela principal é encolhido; arquivo estragado volta ao padrão. Conferido abrindo o app de verdade
+  com uma posição fora da tela e com uma no segundo monitor.
+- **Desligar o Windows com o app aberto:** o `before-quit` não dispara no desligamento, então o "fechar só esconde" da
+  bandeja impedia a janela de fechar. Agora `session-end` marca a saída e chama `app.quit()`, o que também para os helpers.
+  NÃO testado de verdade (exige desligar o Windows); a regra vem da documentação do Electron.
+- **Seletor de tela chamado duas vezes** (clique duplo, duas abas): o segundo pedido recebe a escolha do primeiro e o
+  seletor aberto vem para a frente, em vez de abrir outro e quebrar o registro dos canais.
+- **EPIPE nos helpers:** escrever na entrada de um helper que acabou de morrer não abre mais a janela de erro do Electron.
+- **Redirecionamento:** `will-redirect` passa pela mesma regra de `will-navigate`; o site não consegue levar a janela
+  (com a ponte do desktop) para outro endereço por um redirecionamento.
+
 **Bandeja do Windows** (a partir da 0.3.0): como o Discord, fechar a janela deixa o Coreto rodando na bandeja,
 inclusive no meio de uma chamada. Clicar no ícone traz a janela de volta; o botão direito tem "Abrir o Coreto",
 "Procurar atualizações" (ou "Reiniciar e atualizar", quando há versão baixada) e "Sair do Coreto". Na primeira vez
@@ -248,7 +262,8 @@ Os testes de integração **apagam o banco** a cada arquivo, por isso só aceita
 (por exemplo, `postgresql://postgres:SUA_SENHA@localhost:5432/coreto_test`). As migrations são aplicadas sozinhas.
 
 O CI (`.github/workflows/ci.yml`) roda a cada push e pull request no GitHub Actions, com PostgreSQL 17: checagem de tipos,
-todos os testes e o build de produção do client.
+todos os testes e o build de produção do client. Um job à parte checa os tipos e roda os testes do app de desktop
+(`cd desktop && npm run typecheck && npm test`: testes do Node, sem o binário do Electron).
 
 ## Testes do site
 
@@ -361,6 +376,29 @@ técnicas do socket.io por uma frase em português (`shared/src/connection-error
 | `user:{id}` | todas as abas de um usuário: mensagens diretas, menções, "digitando" e presença de quem conversa com ele |
 
 Todo evento do cliente é validado no servidor: tipo do payload, existência do canal e permissão.
+
+### Limites de ritmo
+
+O servidor segura quem manda eventos rápido demais (`server/src/rate-limit.ts`, janela deslizante por pessoa, não por
+aba: abrir várias abas não multiplica o limite). Os números ficam em `createRateLimits()`:
+
+| O quê | Limite |
+|---|---|
+| Mensagens, enquetes e roletas | 30 a cada 10 s e 200 a cada 5 min |
+| Edições / reações / votos | 30 a cada 10 s / 20 a cada 5 s / 30 a cada 5 s |
+| Buscas / histórico e leituras | 10 a cada 10 s / 40 a cada 10 s |
+| "Digitando" / presença / marcar como lido | 15 / 10 / 60 a cada 10 s |
+| Entrar em chamada / estado da voz | 10 a cada 30 s / 40 a cada 10 s |
+| Sinais WebRTC | 600 a cada 10 s |
+| Criar espaço | 5 a cada 10 min |
+| Contas novas | 15 por hora por endereço e 100 por hora no total |
+| Tentativas de login | 30 por minuto por endereço |
+| Janelas abertas | 20 por conta; 12 envios de arquivo em andamento por pessoa |
+
+Quem passa do limite recebe `{ ok: false, error: 'Devagar: …' }` nos eventos com resposta; "digitando", presença, lido,
+estado da voz e sinais são descartados em silêncio. Sair da chamada, parar de transmitir e deixar de assistir nunca são
+limitados. O endereço do cliente vem de `X-Forwarded-For` (o último item) quando a conexão chega de um proxy, como o
+Traefik do Dokploy; conexões de `localhost` (desenvolvimento e testes) não entram nos limites por endereço.
 
 ## Login
 
@@ -657,6 +695,20 @@ sobrescrita de `@everyone` → sobrescritas dos cargos → sobrescrita do membro
 
 Exemplos na seed: `#avisos` (todos leem, só a Moderação escreve) e `#moderação` (invisível para quem não é da Moderação).
 
+## Diagnóstico de conexão
+
+Configurações, **Diagnóstico**, **Rodar diagnóstico** (leva uns 10 segundos) testa, em ordem: o app (versão e plataforma),
+o servidor (5 pings pelo socket e 4 pedidos HTTP a `/health`), o microfone (abre com as suas configurações, mede o trecho
+mais alto em 3 s e avisa se está mudo, baixo ou estourando), a rede das chamadas (junta os caminhos locais, de STUN e de
+TURN, e diz se uma chamada direta é possível ou se só o TURN funcionaria), a transmissão de tela (se a placa de vídeo
+codifica H.264, via `mediaCapabilities`) e, se você estiver numa chamada, a conexão com cada pessoa. Cada teste dá uma
+frase, o que fazer e, em "Detalhes", os números. **Copiar diagnóstico** copia um texto para mandar a quem cuida do Coreto:
+ele não leva endereços IP (só a contagem de caminhos), token, nomes nem mensagens.
+
+O julgamento e o texto ficam em `shared/src/diagnostics.ts` (funções puras, com testes unitários); as medições no
+navegador, em `client/src/lib/diagnostics.ts`; o servidor só responde `net:ping` e `net:ice` (os servidores STUN/TURN, sem
+entrar numa sala de voz).
+
 ## Voz
 
 Um clique entra na sala; outro em "Sair da chamada" sai. O servidor guarda quem está em cada sala e só repassa a sinalização
@@ -766,6 +818,13 @@ transmite codifica uma vez por espectador. Para a imagem não ficar borrada quan
   nas configurações da transmissão, com ela no ar, onde a receita "Jogo ou vídeo" escolhe isso de uma vez e "Tela e texto"
   volta para 720p, 30 fps e Nitidez. Jogo rápido troca a imagem inteira a cada quadro, e a
   prioridade Nitidez (que trata a imagem como texto) deixa os quadros caírem: parece travar.
+- **Banda inicial alta na malha P2P** (`shared/src/video-sdp.ts`): o WebRTC começa a estimar a banda em ~300 kbps e a imagem
+  subia em degraus (320 → 480 → 640 → 960 → 1280 de largura) por ~18 s, borrada. Enquanto a tela sai pela malha, o SDP de
+  vídeo leva `x-google-start-bitrate` com 60% do bitrate-alvo de cada espectador (piso de 500 e teto de 2500 kbps, então
+  nunca passa de 60% do upload informado), tanto no que a pessoa envia quanto no que recebe (`VoiceManager.withVideoStart`:
+  quem transmite lê o valor da descrição que recebe). Medido no teste do site (localhost, Edge): a imagem chegava aos 1280
+  em 18,3 s nas três rodadas e agora chega em 0,23 s. Se a rede não aguenta, a estimativa cai em poucos segundos. NÃO medido
+  numa internet limitada de verdade. Pelo servidor de mídia nada muda (ele tem a própria estimativa).
 - **Teto de bitrate maior pelo servidor de mídia** (`maxBitrate(…, 'sfu')`): sai uma cópia só, então o upload não se
   divide e 1080p a 60 fps pode usar até ~9,75 Mb/s (sempre limitado a 70% do upload informado). Na malha P2P os tetos
   seguem os de antes. Na prioridade Fluidez a imagem encolhe antes de virar blocos (`MOTION_FACTOR`: movimento pede 40%
@@ -893,7 +952,7 @@ log. O áudio do robô atravessa a rede como o de qualquer pessoa, então a cham
 - Mensagens diretas só entre duas pessoas (sem grupos) e sem lista para buscar usuários: comece pela lista de membros.
 - Mensagens não lidas são contadas por canal e por conversa direta e ficam guardadas no servidor (veja "Mensagens não
   lidas"); sobrevivem a recarregar a página e a reiniciar o servidor.
-- Anexos de até 50 MB, sem limite de envios por pessoa (só a cota de espaço total), apagados 20 dias depois do envio e guardados no disco do servidor (para
+- Anexos de até 50 MB, sem limite de tamanho total por pessoa (só a cota de espaço total e 12 envios ao mesmo tempo), apagados 20 dias depois do envio e guardados no disco do servidor (para
   várias instâncias, troque por um armazenamento de objetos como S3). Não há como retomar um envio interrompido, nem
   tocar vídeo ou áudio direto na conversa: o arquivo é baixado.
 - O anel de quem está falando só aparece para quem está na mesma chamada.

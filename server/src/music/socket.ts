@@ -5,14 +5,12 @@
 import type { MusicControl } from '../../../shared/src/protocol.js';
 import { isFunction } from '../realtime/guards.js';
 import type { AppSocket } from '../realtime/types.js';
+import type { RateLimits } from '../rate-limit.js';
 import type { MusicBot } from './bot.js';
 
 const MAX_INPUT_LENGTH = 600;
 const MAX_ID_LENGTH = 100;
 const SIMPLE_ACTIONS = new Set(['skip', 'pause', 'resume', 'stop', 'clear', 'shuffle']);
-/** No máximo isto de pedidos por socket nesta janela: um clique nervoso passa, uma enxurrada não. */
-const BURST = 12;
-const BURST_WINDOW_MS = 5000;
 
 /** Confere o formato de um controle vindo do cliente. */
 export function readControl(raw: unknown): MusicControl | null {
@@ -25,15 +23,10 @@ export function readControl(raw: unknown): MusicControl | null {
   return null;
 }
 
-export function registerMusic(socket: AppSocket, getBot: () => MusicBot | null): void {
+export function registerMusic(socket: AppSocket, getBot: () => MusicBot | null, limits: RateLimits): void {
   const { userId } = socket.data;
-  const recent: number[] = [];
-  const tooFast = () => {
-    const now = Date.now();
-    while (recent.length > 0 && now - recent[0] > BURST_WINDOW_MS) recent.shift();
-    recent.push(now);
-    return recent.length > BURST;
-  };
+  // Um clique nervoso passa, uma enxurrada não (vale para a pessoa toda, não para cada janela dela).
+  const tooFast = () => !limits.music.take(userId);
   const NOT_ON = 'O bot de música não está ligado neste servidor.';
   const FAILED = 'Não consegui fazer isso agora. Tente de novo.';
 

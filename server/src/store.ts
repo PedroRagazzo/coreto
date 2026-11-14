@@ -184,6 +184,13 @@ export class Store {
     return session ? (this.users.get(session.userId) ?? null) : null;
   }
 
+  /** Se já existe uma conta com esse nome (maiúsculas, acentos e espaços não importam). */
+  accountExists(name: string): boolean {
+    const key = loginKey(name);
+    for (const user of this.users.values()) if (loginKey(user.displayName) === key) return true;
+    return false;
+  }
+
   /**
    * A conta de um robô: criada na primeira vez e reaproveitada depois. Não tem PIN, então ninguém
    * consegue entrar como ela (o nome fica reservado).

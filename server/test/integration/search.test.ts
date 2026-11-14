@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { Id } from '../../../shared/src/models.js';
 import { searchKey } from '../../../shared/src/search.js';
 import { hasTestDatabase } from '../support/database.js';
-import { channelNamed, fakePng, joinDemoSpace, ok, TestServer, type TestClient } from '../support/harness.js';
+import { channelNamed, fakePng, joinDemoSpace, limitsAllowingManyPosts, ok, TestServer, type TestClient } from '../support/harness.js';
 
 describe.skipIf(!hasTestDatabase)('busca de mensagens', () => {
   let server: TestServer;
@@ -141,7 +141,8 @@ describe.skipIf(!hasTestDatabase)('busca de mensagens', () => {
 describe.skipIf(!hasTestDatabase)('histórico em volta de uma mensagem', () => {
   let server: TestServer;
   beforeAll(async () => {
-    server = await TestServer.start();
+    // O teste manda 80 mensagens seguidas só para ter um histórico para percorrer.
+    server = await TestServer.start({ limits: limitsAllowingManyPosts() });
   });
   afterEach(() => server.disconnectAll());
   afterAll(() => server?.stop());

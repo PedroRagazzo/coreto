@@ -31,6 +31,7 @@ import type {
   SearchResult,
   SelectableStatus,
   UpdateChannelRequest,
+  VoiceJoinResult,
 } from '@shared/protocol';
 import type { UploadHandle } from '../../lib/uploads';
 import type { ScreenShareOptions, StreamStats } from '../../lib/voice';
@@ -213,4 +214,11 @@ export interface RealtimeActions {
   toggleDeafen(): void;
   dismissVoiceError(): void;
   setPresence(status: SelectableStatus): void;
+  /**
+   * Diagnóstico: faz alguns pedidos seguidos ao servidor e mede a ida e volta de cada (ms). `lost` são os que não voltaram
+   * a tempo; `transport` é como o socket fala com o servidor (`websocket` ou `polling`).
+   */
+  probeServer(): Promise<{ pingsMs: number[]; lost: number; connected: boolean; transport: string | null }>;
+  /** Diagnóstico: os servidores de rede das chamadas (STUN/TURN), sem entrar numa sala de voz. */
+  probeIceServers(): Promise<Ack<Pick<VoiceJoinResult, 'iceServers' | 'iceTransportPolicy'>>>;
 }

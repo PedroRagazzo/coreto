@@ -22,6 +22,24 @@ export interface ChangelogEntry {
 /** Da mais nova para a mais antiga. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-14-5',
+    title: 'Diagnóstico, transmissão nítida e mais proteção',
+    items: [
+      {
+        title: 'Teste de conexão com um botão',
+        text: 'Em Configurações, Diagnóstico, o Coreto testa a sua internet, o servidor, o microfone e as chamadas e diz o que está errado. Dá para copiar o resultado e mandar para quem cuida do Coreto.',
+      },
+      {
+        title: 'Transmissão nítida desde o começo',
+        text: 'A tela de quem transmite chegava borrada e levava uns 18 segundos para ficar nítida. Agora ela já começa no tamanho cheio quando a conexão aguenta.',
+      },
+      {
+        title: 'Proteção contra excesso de pedidos',
+        text: 'Se alguém (ou um programa) mandar mensagens ou ações rápido demais, o Coreto pede para esperar um instante, e o resto do grupo não sente lentidão. No uso normal, você não nota nada.',
+      },
+    ],
+  },
+  {
     id: '2026-11-14-4',
     title: 'Conexão mais firme',
     items: [

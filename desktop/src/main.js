@@ -16,12 +16,13 @@
 // (uma chamada continua); o ícone traz de volta e o menu tem "Sair do Coreto".
 // Aberto junto com o Windows (--hidden), começa direto na bandeja.
 
-import { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, Menu, nativeImage, session, shell, Tray } from 'electron';
+import { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, Menu, nativeImage, screen, session, shell, Tray } from 'electron';
 import updater from 'electron-updater';
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { fitWindowState } from './window-bounds.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -186,9 +187,19 @@ function pushWatchedBinds() {
   for (const action of SHORTCUT_ACTIONS) stdin.write(`set ${action} ${watchedBinds[action] ?? ''}\n`);
 }
 
+/**
+ * Escrever na entrada de um helper que acabou de morrer dá EPIPE; sem ouvinte, o Node trata isso como erro não
+ * capturado e o Electron abre uma janela de erro. O helper cair já é tratado pelo `exit`; aqui só se ignora o erro.
+ * @param {import('node:child_process').ChildProcess} child
+ */
+const ignoreStdinErrors = (child) => {
+  child.stdin?.on('error', () => {});
+};
+
 function startKeyWatcher() {
   if (keyWatcher || !keyWatcherAvailable()) return;
   const child = spawn(KEYS_HELPER, [], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+  ignoreStdinErrors(child);
   keyWatcher = child;
   let pending = '';
   child.stdout?.on('data', (/** @type {Buffer} */ chunk) => {
@@ -372,6 +383,7 @@ function startAppAudio(sourceId) {
 
   const id = ++appAudioCounter;
   const child = spawn(AUDIO_HELPER, args, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+  ignoreStdinErrors(child);
   appAudio = { id, child };
   const target = mainWindow.webContents;
   /** @type {Buffer} */
@@ -396,13 +408,18 @@ function startAppAudio(sourceId) {
 
 const statePath = () => join(app.getPath('userData'), 'window.json');
 
-/** @returns {{ width: number; height: number; x?: number; y?: number; maximized?: boolean }} */
+/** O que foi guardado, ajustado às telas de agora: sem o segundo monitor, a janela não abre fora de qualquer tela. */
 function loadWindowState() {
+  /** @type {unknown} */
+  let saved = null;
   try {
-    return JSON.parse(readFileSync(statePath(), 'utf8'));
+    saved = JSON.parse(readFileSync(statePath(), 'utf8'));
   } catch {
-    return { width: 1280, height: 800 };
+    // primeira vez, ou arquivo estragado: tamanho padrão
   }
+  const primary = screen.getPrimaryDisplay();
+  const others = screen.getAllDisplays().filter((display) => display.id !== primary.id);
+  return fitWindowState(saved, [primary, ...others].map((display) => display.workArea));
 }
 
 /** @param {BrowserWindow} win */
@@ -421,7 +438,29 @@ function saveWindowState(win) {
  * @param {BrowserWindow} parent
  * @returns {Promise<string | null>} id da fonte escolhida, ou `null` se cancelou
  */
-async function pickSource(parent) {
+function pickSource(parent) {
+  // Dois pedidos ao mesmo tempo (um clique duplo, uma segunda aba): o segundo recebe a escolha do primeiro, em vez de
+  // abrir outro seletor (que tentaria registrar os mesmos canais do Electron e falharia).
+  if (!picking) {
+    picking = openPicker(parent).finally(() => {
+      picking = null;
+    });
+  } else if (pickerWindow && !pickerWindow.isDestroyed()) {
+    pickerWindow.focus();
+  }
+  return picking;
+}
+
+/** O seletor aberto agora, se houver. @type {Promise<string | null> | null} */
+let picking = null;
+/** @type {BrowserWindow | null} */
+let pickerWindow = null;
+
+/**
+ * @param {BrowserWindow} parent
+ * @returns {Promise<string | null>}
+ */
+async function openPicker(parent) {
   const sources = await desktopCapturer.getSources({
     types: ['screen', 'window'],
     thumbnailSize: { width: 320, height: 180 },
@@ -441,6 +480,7 @@ async function pickSource(parent) {
     show: false,
     webPreferences: { preload: join(here, 'picker-preload.cjs'), contextIsolation: true, sandbox: true },
   });
+  pickerWindow = picker;
   const list = sources.map((s) => ({
     id: s.id,
     name: s.name,
@@ -464,7 +504,10 @@ async function pickSource(parent) {
       if (event.sender !== picker.webContents) return;
       finish(typeof id === 'string' && list.some((s) => s.id === id) ? id : null);
     });
-    picker.on('closed', () => finish(null));
+    picker.on('closed', () => {
+      if (pickerWindow === picker) pickerWindow = null;
+      finish(null);
+    });
     picker.once('ready-to-show', () => picker.show());
     void picker.loadFile(join(here, 'picker.html'));
   });
@@ -474,7 +517,7 @@ async function pickSource(parent) {
 
 /** @type {Tray | null} */
 let tray = null;
-/** O app está saindo de verdade (menu "Sair", atualização, desligamento): a janela pode fechar. */
+/** O app está saindo de verdade (menu "Sair", atualização, desligamento do Windows): a janela pode fechar. */
 let quitting = false;
 
 function showWindow() {
@@ -569,17 +612,28 @@ function createWindow(visible = true) {
   win.on('closed', () => {
     if (mainWindow === win) mainWindow = null;
   });
+  // Desligar, reiniciar ou sair do usuário no Windows: o `before-quit` NÃO dispara nesses casos. Sem isto, o `close`
+  // acima só esconde a janela e o Windows fica esperando o Coreto (ou o mata no meio, sem parar os helpers).
+  win.on('session-end', () => {
+    quitting = true;
+    app.quit();
+  });
 
   // Links de fora (e anexos abertos em "nova aba") vão para o navegador padrão.
   win.webContents.setWindowOpenHandler(({ url }) => {
     openOutside(url);
     return { action: 'deny' };
   });
-  win.webContents.on('will-navigate', (event, url) => {
+  // `will-navigate` não dispara para redirecionamento do servidor: sem `will-redirect`, um redirecionamento do próprio
+  // site para outro endereço carregaria esse endereço dentro do app, com a ponte do desktop.
+  /** @param {{ preventDefault(): void }} event @param {string} url */
+  const keepInside = (event, url) => {
     if (isOurs(url)) return;
     event.preventDefault();
     openOutside(url);
-  });
+  };
+  win.webContents.on('will-navigate', (event, url) => keepInside(event, url));
+  win.webContents.on('will-redirect', (event, url) => keepInside(event, url));
 
   // Sem servidor: uma página local explica e tenta de novo.
   win.webContents.on('did-fail-load', (_event, code, description, url, isMainFrame) => {
@@ -652,7 +706,7 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   // Abrir de novo (atalho, menu Iniciar) traz a janela de volta, mesmo escondida na bandeja.
   app.on('second-instance', showWindow);
-  // Sair pelo menu, pela atualização ou pelo desligamento do Windows: a janela pode fechar.
+  // Sair pelo menu ou pela atualização: a janela pode fechar. (O desligamento do Windows não passa por aqui: ver `session-end`.)
   app.on('before-quit', () => {
     quitting = true;
   });

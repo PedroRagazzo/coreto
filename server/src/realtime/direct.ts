@@ -4,6 +4,7 @@
 
 import type { DirectConversation, Id } from '../../../shared/src/models.js';
 import type { DirectConversationPayload } from '../../../shared/src/protocol.js';
+import { TOO_FAST, type RateLimits } from '../rate-limit.js';
 import type { Store } from '../store.js';
 import { isFunction, storageError } from './guards.js';
 import { rooms, type AppSocket } from './types.js';
@@ -22,11 +23,12 @@ export function otherParticipant(conversation: DirectConversation, userId: Id): 
 
 export const participantRooms = (conversation: DirectConversation) => conversation.participantIds.map(rooms.user);
 
-export function registerDirect(socket: AppSocket, store: Store): void {
+export function registerDirect(socket: AppSocket, store: Store, limits: RateLimits): void {
   const { userId } = socket.data;
 
   socket.on('dm:open', async (req, ack) => {
     if (!isFunction(ack)) return;
+    if (!limits.openDirect.take(userId)) return ack(TOO_FAST);
     const target = typeof req?.userId === 'string' ? store.users.get(req.userId) : undefined;
     if (!target || target.id === userId) return ack({ ok: false, error: 'Usuário inválido.' });
     if (target.isBot) return ack({ ok: false, error: 'Robôs não recebem mensagens diretas.' });

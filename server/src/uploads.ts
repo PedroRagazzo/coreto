@@ -71,6 +71,8 @@ interface ChunkedUpload {
 }
 /** Quantos envios em pedaços podem estar abertos ao mesmo tempo no servidor todo. */
 const MAX_CHUNKED_UPLOADS = 200;
+/** Os quatro anexos de uma mensagem mais algumas folgas (abas, tentativas que ainda não expiraram). */
+const MAX_CHUNKED_UPLOADS_PER_USER = 12;
 
 export class UploadDir {
   /** Os envios em pedaços abertos, por id (o que quem envia escolheu). Os parados são esquecidos na limpeza. */
@@ -264,6 +266,10 @@ async function handleChunk(
     if (upload?.busy) return send(409, { ok: false, error: 'Esse envio já está recebendo um pedaço.', received: upload.size });
     if (!upload && dir.chunked.size >= MAX_CHUNKED_UPLOADS) {
       return send(503, { ok: false, error: 'O servidor está recebendo arquivos demais agora. Tente de novo em instantes.' });
+    }
+    // Uma pessoa sozinha não ocupa todas as vagas de envio em andamento.
+    if (!upload && [...dir.chunked.values()].filter((open) => open.userId === user.id).length >= MAX_CHUNKED_UPLOADS_PER_USER) {
+      return send(429, { ok: false, error: 'Você já tem envios demais em andamento. Espere um terminar.' });
     }
     if ((await store.attachmentBytes()) + total > dir.quotaBytes) {
       await dir.dropChunked(id);

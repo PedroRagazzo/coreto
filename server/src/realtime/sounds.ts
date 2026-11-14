@@ -1,4 +1,5 @@
 import { Permission, hasPermission } from '../../../shared/src/permissions.js';
+import { TOO_FAST, type RateLimits } from '../rate-limit.js';
 import type { Store } from '../store.js';
 import type { UploadDir } from '../uploads.js';
 import { isFunction, storageError } from './guards.js';
@@ -10,11 +11,12 @@ export async function announceSounds(io: IO, store: Store, spaceId: string): Pro
 }
 
 /** Lista e remoção dos sons de um espaço. O envio é pelo HTTP (POST /sounds, ver sounds.ts). */
-export function registerSounds(io: IO, socket: AppSocket, store: Store, uploads: UploadDir): void {
+export function registerSounds(io: IO, socket: AppSocket, store: Store, uploads: UploadDir, limits: RateLimits): void {
   const { userId } = socket.data;
 
   socket.on('sounds:list', async (req, ack) => {
     if (!isFunction(ack)) return;
+    if (!limits.read.take(userId)) return ack(TOO_FAST);
     if (typeof req?.spaceId !== 'string' || !store.member(req.spaceId, userId)) {
       return ack({ ok: false, error: 'Você não participa deste espaço.' });
     }
@@ -28,6 +30,7 @@ export function registerSounds(io: IO, socket: AppSocket, store: Store, uploads:
   // Quem enviou o som, ou quem gerencia os canais do espaço, remove.
   socket.on('sound:remove', async (req, ack) => {
     if (!isFunction(ack)) return;
+    if (!limits.manage.take(userId)) return ack(TOO_FAST);
     try {
       const clip = typeof req?.id === 'string' ? await store.findSound(req.id) : null;
       if (!clip || !store.member(clip.spaceId, userId)) return ack({ ok: false, error: 'Som não encontrado.' });

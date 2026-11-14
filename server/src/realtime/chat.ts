@@ -11,6 +11,7 @@ import {
   MAX_MESSAGE_LENGTH,
   MAX_PINS_PER_CHANNEL,
 } from '../../../shared/src/protocol.js';
+import { TOO_FAST, type RateLimits } from '../rate-limit.js';
 import { AttachmentUnavailableError, type Store } from '../store.js';
 import type { UploadDir } from '../uploads.js';
 import { directPayload, otherParticipant, participantRooms } from './direct.js';
@@ -19,22 +20,6 @@ import { isFunction, messageTarget, storageError, type MessageTarget } from './g
 import { rooms, type AppSocket, type IO } from './types.js';
 
 const MAX_HISTORY_PAGE = 100;
-/** No máximo isto de reações por socket nesta janela: um clique nervoso passa, uma enxurrada não. */
-const REACTION_BURST = 20;
-const REACTION_WINDOW_MS = 5000;
-/** Votos, encerramentos e giros: o mesmo tipo de limite, para um clique nervoso passar e uma enxurrada não. */
-const POLL_BURST = 30;
-
-/** Devolve uma função que diz se mais um evento cabe agora: no máximo `max` por janela de `windowMs`. */
-function burstLimiter(max: number, windowMs: number): () => boolean {
-  const recent: number[] = [];
-  return () => {
-    const now = Date.now();
-    while (recent.length > 0 && now - recent[0] > windowMs) recent.shift();
-    recent.push(now);
-    return recent.length <= max;
-  };
-}
 
 /** Conteúdo pronto para gravar, ou o motivo da recusa. Vazio só vale para mensagem com anexos. */
 function validateContent(raw: unknown, allowEmpty = false): { ok: true; content: string } | { ok: false; error: string } {
@@ -88,6 +73,7 @@ export function registerChat(
   socket: AppSocket,
   store: Store,
   uploads: UploadDir,
+  limits: RateLimits,
   /** Chamado para cada mensagem nova de canal (o bot de música lê os comandos aqui). */
   onChannelMessage: (message: Message, channel: Channel) => void = () => {},
 ): void {
@@ -112,6 +98,7 @@ export function registerChat(
 
   socket.on('channel:history', async (req, ack) => {
     if (!isFunction(ack)) return;
+    if (!limits.read.take(userId)) return ack(TOO_FAST);
     const target = messageTarget(store, userId, req?.channelId, 'read');
     if (!target) return ack({ ok: false, error: 'Canal indisponível.' });
     const limit = Math.min(Math.max(Number(req.limit) || HISTORY_PAGE_SIZE, 1), MAX_HISTORY_PAGE);
@@ -126,6 +113,7 @@ export function registerChat(
 
   socket.on('message:send', async (req, ack) => {
     if (!isFunction(ack)) return;
+    if (!limits.post.take(userId)) return ack(TOO_FAST);
     const target = messageTarget(store, userId, req?.channelId, 'write');
     if (!target) return ack({ ok: false, error: 'Você não tem permissão para escrever aqui.' });
     const attachmentIds = readAttachmentIds(req.attachmentIds);
@@ -172,10 +160,9 @@ export function registerChat(
   };
 
   // Reagir vale onde a pessoa pode ler (como no Discord, dá para reagir em canais só de leitura).
-  const reactionAllowed = burstLimiter(REACTION_BURST, REACTION_WINDOW_MS);
   socket.on('reaction:toggle', async (req, ack) => {
     if (!isFunction(ack)) return;
-    if (!reactionAllowed()) return ack({ ok: false, error: 'Devagar: muitas reações seguidas.' });
+    if (!limits.reaction.take(userId)) return ack({ ok: false, error: 'Devagar: muitas reações seguidas.' });
     if (!isReactionEmoji(req?.emoji)) return ack({ ok: false, error: 'Esse emoji não vale como reação.' });
     try {
       const found = await locate(req?.messageId);
@@ -217,6 +204,7 @@ export function registerChat(
 
   socket.on('poll:create', async (req, ack) => {
     if (!isFunction(ack)) return;
+    if (!limits.post.take(userId)) return ack(TOO_FAST);
     const target = messageTarget(store, userId, req?.channelId, 'write');
     if (!target) return ack({ ok: false, error: 'Você não tem permissão para escrever aqui.' });
     const checked = checkPoll(req ?? {});
@@ -226,6 +214,7 @@ export function registerChat(
 
   socket.on('roulette:create', async (req, ack) => {
     if (!isFunction(ack)) return;
+    if (!limits.post.take(userId)) return ack(TOO_FAST);
     const target = messageTarget(store, userId, req?.channelId, 'write');
     if (!target) return ack({ ok: false, error: 'Você não tem permissão para escrever aqui.' });
     const checked = checkRoulette(req ?? {});
@@ -234,7 +223,7 @@ export function registerChat(
   });
 
   // Votar e girar valem onde a pessoa pode ler, como reagir (num canal só de leitura dá para votar).
-  const pollActionAllowed = burstLimiter(POLL_BURST, REACTION_WINDOW_MS);
+  const pollActionAllowed = () => limits.pollAction.take(userId);
 
   // Fixar vale para quem pode escrever no lugar (num grupo de amigos ninguém tem cargo de moderação): o limite é o de
   // MAX_PINS_PER_CHANNEL fixadas por vez.
@@ -264,6 +253,7 @@ export function registerChat(
 
   socket.on('pins:list', async (req, ack) => {
     if (!isFunction(ack)) return;
+    if (!limits.read.take(userId)) return ack(TOO_FAST);
     const target = messageTarget(store, userId, req?.channelId, 'read');
     if (!target) return ack({ ok: false, error: 'Canal indisponível.' });
     try {
@@ -333,6 +323,7 @@ export function registerChat(
 
   socket.on('message:edit', async (req, ack) => {
     if (!isFunction(ack)) return;
+    if (!limits.edit.take(userId)) return ack(TOO_FAST);
     try {
       const found = await locate(req?.messageId);
       if (!found || found.message.authorId !== userId) {
@@ -368,6 +359,7 @@ export function registerChat(
 
   socket.on('message:delete', async (req, ack) => {
     if (!isFunction(ack)) return;
+    if (!limits.edit.take(userId)) return ack(TOO_FAST);
     try {
       const found = await locate(req?.messageId);
       if (!found) return ack({ ok: false, error: 'Mensagem não encontrada.' });
@@ -393,6 +385,7 @@ export function registerChat(
   });
 
   socket.on('typing:start', (req) => {
+    if (!limits.typing.take(userId)) return;
     const target = messageTarget(store, userId, req?.channelId, 'write');
     if (!target) return;
     const room =
@@ -404,6 +397,7 @@ export function registerChat(
 
   socket.on('message:context', async (req, ack) => {
     if (!isFunction(ack)) return;
+    if (!limits.read.take(userId)) return ack(TOO_FAST);
     try {
       const found = await locate(req?.messageId);
       if (!found) return ack({ ok: false, error: 'Mensagem não encontrada.' });
@@ -416,6 +410,7 @@ export function registerChat(
 
   socket.on('message:search', async (req, ack) => {
     if (!isFunction(ack)) return;
+    if (!limits.search.take(userId)) return ack(TOO_FAST);
     const words = typeof req?.text === 'string' ? searchWords(req.text) : [];
     const authorId = typeof req?.authorId === 'string' ? req.authorId : undefined;
     const channelId = typeof req?.channelId === 'string' ? req.channelId : undefined;
@@ -453,6 +448,7 @@ export function registerChat(
   });
 
   socket.on('mentions:ack', async (req) => {
+    if (!limits.readMark.take(userId)) return;
     const channel = typeof req?.channelId === 'string' ? store.channels.get(req.channelId) : undefined;
     if (!channel) return;
     try {

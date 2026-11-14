@@ -80,7 +80,8 @@ export interface LoginRequest {
   pin: string;
 }
 
-export type LoginErrorCode = 'invalid_input' | 'wrong_pin' | 'reserved_name' | 'locked';
+/** `locked`: PIN errado demais neste nome. `rate_limited`: pedidos demais deste endereço (ou contas novas demais). */
+export type LoginErrorCode = 'invalid_input' | 'wrong_pin' | 'reserved_name' | 'locked' | 'rate_limited';
 
 export type LoginResponse =
   | { ok: true; token: string; user: User; created: boolean }
@@ -303,6 +304,10 @@ export interface ClientToServerEvents {
   'stream:stop': () => void;
   /** Token para entrar na sala do servidor de mídia da chamada; quem tem STREAM pode enviar vídeo, os outros só recebem. */
   'sfu:token': (ack: (res: Ack<SfuAccess>) => void) => void;
+  /** Diagnóstico: o servidor só responde, e o site mede a ida e volta. */
+  'net:ping': (ack: (res: Ack<null>) => void) => void;
+  /** Diagnóstico: os servidores de rede das chamadas (STUN/TURN), sem precisar entrar numa sala de voz. */
+  'net:ice': (ack: (res: Ack<Pick<VoiceJoinResult, 'iceServers' | 'iceTransportPolicy'>>) => void) => void;
   /** Quem transmite manda, de tempos em tempos, uma miniatura da tela (JPEG em data URL) para a prévia da lista. */
   'stream:preview': (req: { image: string }) => void;
   /** A miniatura mais recente da transmissão de alguém da sala; `null` se ainda não chegou nenhuma. */

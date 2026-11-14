@@ -10,11 +10,14 @@ import type { MusicBot, MusicFactory } from './music/index.js';
 import { registerMusic } from './music/socket.js';
 import { createEmbeds, type EmbedService } from './embeds/service.js';
 import { registerChat } from './realtime/chat.js';
+import { registerDiagnostics } from './realtime/diagnostics.js';
 import { registerDirect } from './realtime/direct.js';
 import { registerManagement } from './realtime/manage.js';
 import { joinPublicSpaces } from './realtime/membership.js';
 import { registerEmbeds } from './realtime/embeds.js';
 import { registerPresence } from './realtime/presence.js';
+import type { Id } from '../../shared/src/models.js';
+import { clientAddress, createRateLimits, isLoopbackAddress, MAX_SOCKETS_PER_USER, type RateLimits } from './rate-limit.js';
 import type { IO } from './realtime/types.js';
 import { registerVoice } from './realtime/voice.js';
 import { sfuConfigFromEnv, type SfuConfig } from './sfu.js';
@@ -45,6 +48,8 @@ export interface ServerOptions {
   clientDist?: string | null;
   /** Cria o bot de música (ver music/index.ts); sem ele, os comandos de música não existem. */
   music?: MusicFactory;
+  /** Limites de ritmo (ver rate-limit.ts); sem eles, os padrões. */
+  limits?: RateLimits;
 }
 
 export interface RunningServer {
@@ -57,9 +62,22 @@ export interface RunningServer {
 /** Sobe o HTTP (saúde, login e anexos) + socket.io sobre um Store já carregado. */
 export async function startServer(
   store: Store,
-  { port, clientOrigins, uploadDir, uploadQuotaBytes = uploadQuotaFromEnv(process.env), ice = iceConfigFromEnv(), sfu = sfuConfigFromEnv(), clientDist = null, music: createMusic, embeds = createEmbeds() }: ServerOptions,
+  {
+    port,
+    clientOrigins,
+    uploadDir,
+    uploadQuotaBytes = uploadQuotaFromEnv(process.env),
+    ice = iceConfigFromEnv(),
+    sfu = sfuConfigFromEnv(),
+    clientDist = null,
+    music: createMusic,
+    embeds = createEmbeds(),
+    limits = createRateLimits(),
+  }: ServerOptions,
 ): Promise<RunningServer> {
   const throttle = new LoginThrottle();
+  /** Conexões abertas por conta (abas e janelas), para uma conta não abrir milhares. */
+  const openSockets = new Map<Id, number>();
   const uploads = new UploadDir(uploadDir, uploadQuotaBytes);
   await uploads.ensure();
   const installer = new LatestInstaller();
@@ -74,7 +92,7 @@ export async function startServer(
     }
     if (path === '/login') {
       if (preflight(req, res, clientOrigins, 'POST', 'content-type')) return;
-      return void handleLogin(req, res, store, throttle);
+      return void handleLogin(req, res, store, throttle, limits);
     }
     if (path === '/uploads') {
       if (preflight(req, res, clientOrigins, 'POST', 'authorization, content-type, x-file-name, x-upload-id, x-upload-offset, x-upload-total')) return;
@@ -143,6 +161,9 @@ export async function startServer(
       .userForSession(token)
       .then(async (user) => {
         if (!user) return invalid();
+        if ((openSockets.get(user.id) ?? 0) >= MAX_SOCKETS_PER_USER) {
+          return next(new Error('Esta conta já está aberta em janelas demais. Feche algumas e tente de novo.'));
+        }
         socket.data.userId = user.id;
         await joinPublicSpaces(io, store, user.id);
         next();
@@ -155,14 +176,22 @@ export async function startServer(
 
   let music: MusicBot | null = null;
   io.on('connection', (socket) => {
-    registerPresence(io, socket, store);
-    registerChat(io, socket, store, uploads, (message, channel) => music?.onMessage(message, channel));
-    registerEmbeds(socket, store, embeds);
-    registerDirect(socket, store);
-    registerManagement(io, socket, store);
-    registerVoice(io, socket, store, ice, sfu);
-    registerMusic(socket, () => music);
-    registerSounds(io, socket, store, uploads);
+    const { userId } = socket.data;
+    openSockets.set(userId, (openSockets.get(userId) ?? 0) + 1);
+    socket.on('disconnect', () => {
+      const left = (openSockets.get(userId) ?? 1) - 1;
+      if (left > 0) openSockets.set(userId, left);
+      else openSockets.delete(userId);
+    });
+    registerPresence(io, socket, store, limits);
+    registerChat(io, socket, store, uploads, limits, (message, channel) => music?.onMessage(message, channel));
+    registerEmbeds(socket, store, embeds, limits);
+    registerDirect(socket, store, limits);
+    registerManagement(io, socket, store, limits);
+    registerVoice(io, socket, store, ice, sfu, limits);
+    registerDiagnostics(socket, ice, limits);
+    registerMusic(socket, () => music, limits);
+    registerSounds(io, socket, store, uploads, limits);
   });
 
   music = (await createMusic?.({ io, store, ice })) ?? null;
@@ -198,8 +227,22 @@ function preflight(req: IncomingMessage, res: ServerResponse, clientOrigins: str
   return true;
 }
 
-async function handleLogin(req: IncomingMessage, res: ServerResponse, store: Store, throttle: LoginThrottle): Promise<void> {
+async function handleLogin(
+  req: IncomingMessage,
+  res: ServerResponse,
+  store: Store,
+  throttle: LoginThrottle,
+  limits: RateLimits,
+): Promise<void> {
   if (req.method !== 'POST') return sendJson(res, 405, { ok: false, code: 'invalid_input', error: 'Use POST.' });
+
+  // Conferir um PIN gasta processador (scrypt): antes de ler o pedido, vê se este endereço não está exagerando.
+  // Quem chega da própria máquina (desenvolvimento e testes) não conta.
+  const address = clientAddress(req);
+  const counted = !isLoopbackAddress(address);
+  if (counted && !limits.login.take(address)) {
+    return sendLogin(res, 429, { ok: false, code: 'rate_limited', error: 'Muitas tentativas de entrar deste endereço. Espere um minuto.' });
+  }
 
   let body: Partial<LoginRequest>;
   try {
@@ -213,6 +256,15 @@ async function handleLogin(req: IncomingMessage, res: ServerResponse, store: Sto
   if (!name) return sendLogin(res, 400, { ok: false, code: 'invalid_input', error: 'Digite um nome.' });
   if (!isValidPin(pin)) {
     return sendLogin(res, 400, { ok: false, code: 'invalid_input', error: 'O PIN tem exatamente 4 números.' });
+  }
+
+  // Nome livre = conta nova: o limite de contas novas protege o banco de um programa criando milhares delas.
+  if (counted && !store.accountExists(name) && !(limits.newAccountByAddress.take(address) && limits.newAccountAnywhere.take('todos'))) {
+    return sendLogin(res, 429, {
+      ok: false,
+      code: 'rate_limited',
+      error: 'Muitas contas novas criadas agora. Tente de novo mais tarde, ou peça a quem cuida do servidor.',
+    });
   }
 
   const key = loginKey(name);

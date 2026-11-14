@@ -1,12 +1,13 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { MAX_PINS_PER_CHANNEL } from '../../../shared/src/protocol.js';
 import { hasTestDatabase } from '../support/database.js';
-import { channelNamed, expectNoEvent, joinDemoSpace, nextEvent, ok, TestServer } from '../support/harness.js';
+import { channelNamed, expectNoEvent, joinDemoSpace, limitsAllowingManyPosts, nextEvent, ok, TestServer } from '../support/harness.js';
 
 describe.skipIf(!hasTestDatabase)('mensagens fixadas', () => {
   let server: TestServer;
   beforeAll(async () => {
-    server = await TestServer.start();
+    // Um teste manda dezenas de mensagens seguidas só para encher o canal de fixadas.
+    server = await TestServer.start({ limits: limitsAllowingManyPosts() });
   });
   afterEach(() => server.disconnectAll());
   afterAll(() => server?.stop());

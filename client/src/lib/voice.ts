@@ -12,6 +12,7 @@
 import { assess, type ConnectionQuality, ownLevel, type QualitySample } from '@shared/connection-quality';
 import type { Id } from '@shared/models';
 import { withStereoOpus, withVoiceOpus } from '@shared/opus-sdp';
+import { startBitrateKbps, withVideoStartBitrate } from '@shared/video-sdp';
 import { initialLeveler, levelerStep, LIMIT_HEADROOM, rmsDb, softLimitCurve, type LevelerState } from '@shared/voice-level';
 import type { IceServer, SignalPayload, VoiceJoinResult } from '@shared/protocol';
 import type { ScreenPublishOptions, SfuSession } from './sfu';
@@ -1541,7 +1542,20 @@ export class VoiceManager {
   private async describeLocally(peerId: Id, pc: RTCPeerConnection): Promise<void> {
     const description = pc.signalingState === 'have-remote-offer' ? await pc.createAnswer() : await pc.createOffer();
     const sdp = description.sdp ?? '';
-    await pc.setLocalDescription({ type: description.type, sdp: this.events.isBot?.(peerId) ? withStereoOpus(sdp) : withVoiceOpus(sdp) });
+    const tuned = this.events.isBot?.(peerId) ? withStereoOpus(sdp) : withVoiceOpus(sdp);
+    await pc.setLocalDescription({ type: description.type, sdp: this.withVideoStart(tuned) });
+  }
+
+  /**
+   * Enquanto você transmite a tela pela malha P2P, o vídeo começa a estimar a banda mais alto (`x-google-start-bitrate`).
+   * Sem isso o WebRTC parte de ~300 kbps e a imagem leva uns 18 s para chegar no tamanho cheio, borrada até lá. Se a rede
+   * não aguenta, a estimativa cai sozinha. Fora dessa situação o SDP segue como está.
+   */
+  private withVideoStart(sdp: string): string {
+    const screen = this.screen;
+    if (!screen || screen.transport !== 'p2p') return sdp;
+    const viewers = Math.max(1, [...this.peers.keys()].filter((id) => this.screenViewers.has(id)).length);
+    return withVideoStartBitrate(sdp, startBitrateKbps(viewerBitrate(screen.options, viewers, 'p2p')));
   }
 
   private addLocalAudio(peer: Peer): void {
@@ -1563,7 +1577,8 @@ export class VoiceManager {
         const collision = description.type === 'offer' && (peer.makingOffer || pc.signalingState !== 'stable');
         peer.ignoreOffer = !peer.polite && collision;
         if (peer.ignoreOffer) return;
-        await pc.setRemoteDescription(description); // em colisão, desfaz a oferta local sozinho
+        // Quem transmite lê a banda inicial do vídeo da descrição que RECEBE (a de quem assiste), então ela também leva o valor.
+        await pc.setRemoteDescription({ type: description.type, sdp: this.withVideoStart(description.sdp ?? '') }); // em colisão, desfaz a oferta local sozinho
         if (description.type === 'offer') {
           // Quem recebe a primeira oferta só adiciona o microfone agora, reaproveitando o
           // transceptor que a oferta criou (antes disso, criaria outro e renegociaria à toa).

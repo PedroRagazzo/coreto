@@ -1,4 +1,5 @@
 import type { Id, MentionCount, PresenceStatus, UnreadCount } from '../../../shared/src/models.js';
+import type { RateLimits } from '../rate-limit.js';
 import type { Store } from '../store.js';
 import { otherParticipant } from './direct.js';
 import { messageTarget } from './guards.js';
@@ -7,7 +8,7 @@ import { rooms, type AppSocket, type IO } from './types.js';
 /** Conexões abertas por usuário: várias abas contam como uma presença só. */
 const connectionCount = new Map<Id, number>();
 
-export function registerPresence(io: IO, socket: AppSocket, store: Store): void {
+export function registerPresence(io: IO, socket: AppSocket, store: Store, limits: RateLimits): void {
   const { userId } = socket.data;
   const user = store.users.get(userId);
   if (!user) return;
@@ -33,11 +34,13 @@ export function registerPresence(io: IO, socket: AppSocket, store: Store): void 
 
   // A pessoa leu o canal ou a conversa até agora (só vale onde ela pode ler).
   socket.on('read:mark', (req) => {
+    if (!limits.readMark.take(userId)) return;
     const target = messageTarget(store, userId, req?.channelId, 'read');
     if (target) store.markRead(userId, target.id).catch((err: unknown) => console.error('[read:mark]', err));
   });
 
   socket.on('presence:set', (status) => {
+    if (!limits.presence.take(userId)) return;
     if (status === 'online' || status === 'idle' || status === 'dnd') setStatus(io, store, userId, status);
   });
 

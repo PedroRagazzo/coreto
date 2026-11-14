@@ -110,6 +110,37 @@ jobs:
             e2e/test-results
           retention-days: 7
 
+  # O app de desktop tem as próprias dependências (fora dos workspaces). Só o instalador (workflow Release) o checava,
+  # no momento da tag; aqui os erros de tipo e os testes aparecem no push.
+  desktop:
+    name: App de desktop (tipos e testes)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: desktop
+    env:
+      # Os tipos vêm do pacote; o binário do Electron (~100 MB) não é preciso aqui.
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Checar tipos
+        run: npm run typecheck
+
+      - name: Testes
+        run: npm test
+
   docker:
     name: Imagem Docker
     runs-on: ubuntu-latest

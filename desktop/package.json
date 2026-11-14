@@ -13,6 +13,7 @@
     "icon": "node scripts/make-icon.js",
     "native-helpers": "node scripts/build-native-helpers.js",
     "typecheck": "tsc --noEmit -p jsconfig.json",
+    "test": "node --test",
     "dist": "npm run icon && npm run native-helpers && electron-builder --win --publish never"
   },
   "devDependencies": {

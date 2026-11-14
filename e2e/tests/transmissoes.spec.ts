@@ -32,6 +32,21 @@ test.describe('transmissões de tela', () => {
     await Promise.all([ana, bruno].map((p) => p.context.close()));
   });
 
+  test('a imagem já chega no tamanho cheio nos primeiros segundos, sem a subida lenta da banda', async ({ browser }) => {
+    test.setTimeout(60_000);
+    const ana = await openPerson(browser, 'Ana', { screen: { color: '#7a2d9e', width: 1280, height: 720 } });
+    const bruno = await openPerson(browser, 'Bruno', { screen: { color: '#1f7a4d', width: 1280, height: 720 } });
+    await joinCall(ana.page);
+    await joinCall(bruno.page);
+    await startScreen(bruno.page);
+    await ana.page.getByRole('button', { name: `Assistir à tela de ${bruno.name}` }).click();
+    const video = ana.page.getByRole('region', { name: `Tela de ${bruno.name}` }).locator('video');
+    // Sem a banda inicial no SDP (`x-google-start-bitrate`), o WebRTC parte de ~300 kbps e a imagem sobe em degraus
+    // (320 → 480 → 640 → 960 → 1280) durante uns 18 s; o prazo abaixo é bem menor que isso.
+    await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.videoWidth), { timeout: 12_000 }).toBe(1280);
+    await Promise.all([ana, bruno].map((p) => p.context.close()));
+  });
+
   test('parar de transmitir avisa quem assistia', async ({ browser }) => {
     const ana = await openPerson(browser, 'Ana');
     const bruno = await openPerson(browser, 'Bruno', { screen: {} });
