@@ -25,7 +25,7 @@ test.describe('configurações de voz', () => {
     await ana.page.evaluate(() => {
       const key = 'coreto.settings';
       const saved = JSON.parse(localStorage.getItem(key) ?? '{}');
-      localStorage.setItem(key, JSON.stringify({ ...saved, voice: { ...(saved.voice ?? {}), outputVolume: 2 } }));
+      localStorage.setItem(key, JSON.stringify({ ...saved, voice: { ...(saved.voice ?? {}), outputVolume: 2, levelVoices: false } }));
     });
     // Registra os nós de ganho que a página cria, para ler o ganho que a voz de verdade recebeu.
     await ana.page.addInitScript(() => {
@@ -51,6 +51,46 @@ test.describe('configurações de voz', () => {
     await ana.page.getByRole('button', { name: 'Configurações' }).first().click();
     await ana.page.getByRole('slider', { name: /Volume das chamadas/ }).fill('0.5');
     await expect.poll(gainValues, { timeout: 10_000 }).not.toContain(2);
+    await Promise.all([ana, bruno].map((p) => p.context.close()));
+  });
+
+  test('igualar o volume sobe a voz de quem fala baixo, e desligar volta ao normal na hora', async ({ browser }) => {
+    test.setTimeout(90_000);
+    const ana = await openPerson(browser, 'Ana');
+    const bruno = await openPerson(browser, 'Bruno');
+    // A Ana registra os nós de ganho que a página cria; o microfone do Bruno é bem mais baixo que o da Ana.
+    await ana.page.addInitScript(() => {
+      const gains: GainNode[] = [];
+      (window as unknown as { __gains: GainNode[] }).__gains = gains;
+      const create = AudioContext.prototype.createGain;
+      AudioContext.prototype.createGain = function (this: AudioContext) {
+        const node = create.call(this);
+        gains.push(node);
+        return node;
+      };
+    });
+    await bruno.page.evaluate(() => {
+      const saved = JSON.parse(localStorage.getItem('coreto.settings') ?? '{}');
+      localStorage.setItem('coreto.settings', JSON.stringify({ ...saved, voice: { ...(saved.voice ?? {}), inputVolume: 0.3 } }));
+    });
+    await Promise.all([ana.page.reload(), bruno.page.reload()]);
+    await joinCall(ana.page);
+    await joinCall(bruno.page);
+
+    // Os ganhos que passam de 1 mas não são os fixos do limitador (4) nem o volume geral (1): o do nivelador.
+    const boosts = () =>
+      ana.page.evaluate(() =>
+        (window as unknown as { __gains: GainNode[] }).__gains.map((g) => g.gain.value).filter((v) => v > 1.15 && v < 3.9).length,
+      );
+    // O nivelador é lento de propósito (sobe 2,5 dB por segundo de fala), então basta ele começar a subir.
+    await expect.poll(boosts, { timeout: 40_000, intervals: [500] }).toBeGreaterThan(0);
+
+    await ana.page.getByRole('button', { name: 'Configurações' }).first().click();
+    const toggle = ana.page.getByRole('switch', { name: 'Igualar o volume das vozes' });
+    await expect(toggle).toHaveAttribute('aria-checked', 'true');
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-checked', 'false');
+    await expect.poll(boosts, { timeout: 10_000 }).toBe(0);
     await Promise.all([ana, bruno].map((p) => p.context.close()));
   });
 });

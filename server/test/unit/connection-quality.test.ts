@@ -142,3 +142,68 @@ describe('describeQuality', () => {
     expect(describeQuality({ level: 'fair', rttMs: null, lossPercent: null, jitterMs: null })).toBe('Conexão oscilando');
   });
 });
+
+describe('áudio remendado (o "pipoca") e retransmissão', () => {
+  /** Leituras a cada 2 s com 96 000 amostras de áudio por leitura (48 kHz), `concealedPerRead` delas remendadas. */
+  const audioReads = (count: number, concealedPerRead: number, relayed = false): QualitySample[] =>
+    Array.from({ length: count }, (_, i) => ({
+      received: i * 100,
+      lost: 0,
+      rttMs: 40,
+      jitterMs: 5,
+      concealed: i * concealedPerRead,
+      samples: i * 96_000,
+      ...(relayed && { relayed }),
+    }));
+
+  it('mede a parte do áudio remendada na janela recente', () => {
+    expect(assess(audioReads(4, 0))?.concealedPercent).toBe(0);
+    expect(assess(audioReads(4, 4_800))?.concealedPercent).toBe(5);
+    expect(assess(audioReads(4, 1_200))?.concealedPercent).toBe(1.3);
+  });
+
+  it.each([
+    [2_000, 'good'], // ~2%
+    [4_800, 'fair'], // 5%
+    [9_000, 'fair'], // ~9%
+    [14_400, 'poor'], // 15%
+    [40_000, 'poor'],
+  ] as const)('%s amostras remendadas por leitura é %s', (concealed, level) => {
+    expect(assess(audioReads(4, concealed))?.level).toBe(level);
+  });
+
+  it('com pouco áudio na janela não diz nada (e a conexão segue boa)', () => {
+    const q = assess([
+      { received: 0, lost: 0, rttMs: 40, jitterMs: 5, concealed: 0, samples: 0 },
+      { received: 100, lost: 0, rttMs: 40, jitterMs: 5, concealed: 9_000, samples: 96_000 },
+    ]);
+    expect(q?.concealedPercent).toBeUndefined();
+    expect(q?.level).toBe('good');
+  });
+
+  it('sem os campos novos (leituras antigas), tudo segue como antes', () => {
+    expect(assess(reads(5))).toEqual({ level: 'good', rttMs: 40, lossPercent: 0, jitterMs: 5 });
+  });
+
+  it('contador de áudio que volta a zero (conexão renegociada) descarta o que veio antes', () => {
+    const before = audioReads(3, 40_000);
+    const after = audioReads(3, 0).map((s) => ({ ...s, received: s.received + 1_000 }));
+    expect(assess([...before, ...after])?.concealedPercent).toBe(0);
+  });
+
+  it('avisa quando a conexão passa pelo servidor de retransmissão, sem mudar o nível por isso', () => {
+    const q = assess(audioReads(4, 0, true));
+    expect(q?.relayed).toBe(true);
+    expect(q?.level).toBe('good');
+    expect(assess(audioReads(4, 0))?.relayed).toBeUndefined();
+  });
+
+  it('a descrição mostra o remendo (a partir de 1%) e a retransmissão', () => {
+    expect(describeQuality({ level: 'fair', rttMs: 40, lossPercent: 0, jitterMs: 5, concealedPercent: 12.5, relayed: true })).toBe(
+      'Conexão oscilando (ping 40 ms, perda 0%, oscilação 5 ms, áudio remendado 12,5%, passando pelo servidor de retransmissão)',
+    );
+    expect(describeQuality({ level: 'good', rttMs: 40, lossPercent: 0, jitterMs: 5, concealedPercent: 0.4 })).toBe(
+      'Conexão boa (ping 40 ms, perda 0%, oscilação 5 ms)',
+    );
+  });
+});

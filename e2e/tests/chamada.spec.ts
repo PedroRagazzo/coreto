@@ -21,6 +21,35 @@ test.describe('chamada de voz', () => {
     await Promise.all([ana, bruno].map((p) => p.context.close()));
   });
 
+  test('a voz é codificada a 64 kbps, e não nos 32 kbps do padrão do navegador', async ({ browser }) => {
+    const ana = await openPerson(browser, 'Ana');
+    const bruno = await openPerson(browser, 'Bruno');
+    await joinCall(ana.page);
+    await joinCall(bruno.page);
+    await expect.poll(() => audioBytesReceived(ana.page), { timeout: 20_000 }).toBeGreaterThan(2_000);
+
+    for (const { page } of [ana, bruno]) {
+      const sent = await page.evaluate(async () => {
+        const peers = (window as unknown as { __peers?: RTCPeerConnection[] }).__peers ?? [];
+        for (const pc of peers) {
+          const report = await pc.getStats();
+          const codecs = new Map<string, { sdpFmtpLine?: string }>();
+          report.forEach((r) => r.type === 'codec' && codecs.set(r.id, r));
+          const found: { target: number; fmtp: string }[] = [];
+          report.forEach((r) => {
+            if (r.type === 'outbound-rtp' && r.kind === 'audio') found.push({ target: r.targetBitrate, fmtp: codecs.get(r.codecId)?.sdpFmtpLine ?? '' });
+          });
+          if (found[0]) return found[0];
+        }
+        return null;
+      });
+      expect(sent?.fmtp).toContain('maxaveragebitrate=64000');
+      expect(sent?.fmtp).toContain('useinbandfec=1');
+      expect(sent?.target).toBe(64_000);
+    }
+    await Promise.all([ana, bruno].map((p) => p.context.close()));
+  });
+
   test('mutar mostra o ícone para os outros, e sair da chamada tira a pessoa da sala', async ({ browser }) => {
     const ana = await openPerson(browser, 'Ana');
     const bruno = await openPerson(browser, 'Bruno');

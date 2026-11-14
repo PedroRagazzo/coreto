@@ -17,6 +17,13 @@ export interface ConnectionQuality {
   lossPercent: number | null;
   /** Oscilação (ms) do áudio que chega; `null` se não medida. */
   jitterMs: number | null;
+  /**
+   * Quanto do áudio (%) o navegador teve de "remendar" na janela recente: quando pacotes faltam ou chegam atrasados, ele
+   * inventa o trecho que faltou, e isso é o "pipoca" que se ouve. Ausente se chegou pouco áudio para dizer.
+   */
+  concealedPercent?: number;
+  /** A conexão passa por um servidor de retransmissão (TURN) em vez de ir direto: mais longe, mais atraso. */
+  relayed?: boolean;
 }
 
 /** Uma leitura das estatísticas de uma conexão. `received` e `lost` são totais acumulados desde o começo dela. */
@@ -25,6 +32,10 @@ export interface QualitySample {
   lost: number;
   rttMs: number | null;
   jitterMs: number | null;
+  /** Amostras de áudio remendadas e recebidas, totais acumulados (como `received` e `lost`). */
+  concealed?: number;
+  samples?: number;
+  relayed?: boolean;
 }
 
 /** Valores a partir dos quais a conexão passa a "oscilando" e a "ruim". */
@@ -32,12 +43,15 @@ const LIMITS = {
   rttMs: { fair: 200, poor: 400 },
   lossPercent: { fair: 2, poor: 5 },
   jitterMs: { fair: 30, poor: 60 },
+  concealedPercent: { fair: 5, poor: 15 },
 } as const;
 
 /** Quantas leituras entram na janela (a 2 s cada, uns 8 s). */
 export const QUALITY_WINDOW = 5;
 /** Menos pacotes que isso na janela não dizem nada sobre perda (o áudio chega a uns 50 por segundo). */
 const MIN_PACKETS = 100;
+/** Menos áudio que isso na janela (3 s a 48 kHz) não diz nada sobre o quanto foi remendado. */
+const MIN_AUDIO_SAMPLES = 48_000 * 3;
 
 const ORDER: QualityLevel[] = ['good', 'fair', 'poor'];
 
@@ -58,7 +72,9 @@ export function worst(levels: QualityLevel[]): QualityLevel {
 export function assess(samples: QualitySample[]): ConnectionQuality | null {
   let from = 0;
   for (let i = 1; i < samples.length; i++) {
-    if (samples[i]!.received < samples[i - 1]!.received || samples[i]!.lost < samples[i - 1]!.lost) from = i;
+    const a = samples[i - 1]!;
+    const b = samples[i]!;
+    if (b.received < a.received || b.lost < a.lost || (b.samples ?? 0) < (a.samples ?? 0)) from = i;
   }
   const recent = samples.slice(Math.max(from, samples.length - QUALITY_WINDOW));
   const last = recent.at(-1);
@@ -69,16 +85,29 @@ export function assess(samples: QualitySample[]): ConnectionQuality | null {
   const lost = last.lost - first.lost;
   const lossPercent = received + lost >= MIN_PACKETS ? (lost / (received + lost)) * 100 : null;
 
+  const audio = (last.samples ?? 0) - (first.samples ?? 0);
+  const concealedPercent =
+    last.samples !== undefined && first.samples !== undefined && audio >= MIN_AUDIO_SAMPLES
+      ? Math.round((((last.concealed ?? 0) - (first.concealed ?? 0)) / audio) * 1000) / 10
+      : null;
+
   const jitters = recent.map((s) => s.jitterMs).filter((j): j is number => j !== null);
   const jitterMs = jitters.length ? Math.max(...jitters) : null;
   const rtts = recent.map((s) => s.rttMs).filter((r): r is number => r !== null);
   const rttMs = rtts.length ? rtts.reduce((a, b) => a + b, 0) / rtts.length : null;
 
   return {
-    level: worst([rate(rttMs, LIMITS.rttMs), rate(lossPercent, LIMITS.lossPercent), rate(jitterMs, LIMITS.jitterMs)]),
+    level: worst([
+      rate(rttMs, LIMITS.rttMs),
+      rate(lossPercent, LIMITS.lossPercent),
+      rate(jitterMs, LIMITS.jitterMs),
+      rate(concealedPercent, LIMITS.concealedPercent),
+    ]),
     rttMs: rttMs === null ? null : Math.round(rttMs),
     lossPercent: lossPercent === null ? null : Math.round(lossPercent * 10) / 10,
     jitterMs: jitterMs === null ? null : Math.round(jitterMs),
+    ...(concealedPercent !== null && { concealedPercent }),
+    ...(last.relayed && { relayed: true }),
   };
 }
 
@@ -100,5 +129,8 @@ export function describeQuality(q: ConnectionQuality): string {
   if (q.rttMs !== null) parts.push(`ping ${q.rttMs} ms`);
   if (q.lossPercent !== null) parts.push(`perda ${String(q.lossPercent).replace('.', ',')}%`);
   if (q.jitterMs !== null) parts.push(`oscilação ${q.jitterMs} ms`);
+  // Só vale mostrar quando já se ouve: abaixo de 1% ninguém percebe.
+  if (q.concealedPercent !== undefined && q.concealedPercent >= 1) parts.push(`áudio remendado ${String(q.concealedPercent).replace('.', ',')}%`);
+  if (q.relayed) parts.push('passando pelo servidor de retransmissão');
   return parts.length ? `${level} (${parts.join(', ')})` : level;
 }

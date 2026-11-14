@@ -561,6 +561,16 @@ guardado no aparelho (`localStorage`), porque o microfone do notebook não é o 
 - **Volume por pessoa:** botão direito em alguém da sua chamada (na barra lateral ou no mosaico) abre o volume só seu,
   de 0 a 200%, e "Silenciar para mim". Fica guardado por pessoa neste aparelho. A voz recebida passa por um ganho próprio
   antes de tocar, o que permite passar de 100%.
+- **Qualidade da voz:** a voz entre pessoas vai em Opus mono a **64 kbps** com correção de perda (FEC) e sem DTX
+  (`withVoiceOpus`, em `shared/src/opus-sdp.ts`, aplicado ao SDP de toda oferta e resposta; o padrão do navegador é 32 kbps, que
+  deixa a voz com cara de "lata"). O bot de música segue em estéreo a 128 kbps. Mais que 64 kbps quase não melhora a fala, e na
+  malha P2P cada pessoa envia uma cópia para cada outra.
+- **Igualar o volume das vozes** (Configurações, Voz e vídeo; ligado por padrão): cada voz recebida passa por um nivelador
+  (`shared/src/voice-level.ts`, com testes) que mede o nível da fala (só acima de -45 dB, então silêncio e ruído de fundo não
+  contam) e leva a voz, devagar, para perto de -24 dB: sobe até 12 dB quem fala baixo (2,5 dB por segundo de fala) e desce até
+  9 dB quem fala alto (10 dB/s). É só no seu lado e não vale para o bot de música. No fim da cadeia há um limitador suave
+  (curva `softLimit`, sem sobreamostragem: abaixo de 70% do máximo o som passa idêntico) que impede o ganho extra (nivelador,
+  volume por pessoa e volume geral até 200%) de estourar.
 - **Sons:** avisos sintetizados na hora (sem arquivos) quando você entra ou sai da chamada, alguém entra ou sai, alguém
   começa ou para de assistir à transmissão que você faz ou assiste, e quando você muta ou ensurdece. Dá para desligar,
   ajustar o volume e ouvir cada um. Ensurdecido, você não ouve ninguém entrar ou sair. A regra de qual som tocar fica em
@@ -648,7 +658,9 @@ nada pelo servidor.
 **Qualidade da conexão:** ao lado de cada pessoa da sua chamada aparecem três barrinhas (verde, amarela ou vermelha); passar o
 mouse mostra o ping, a perda de pacotes e a oscilação. Também é medido no seu navegador, a cada 2 s, pelas estatísticas do
 WebRTC (`shared/src/connection-quality.ts`): a perda e a oscilação vêm do áudio que chega daquela pessoa, nos últimos ~8 s, e o
-ping do caminho entre vocês dois. Passa a "oscilando" com ping de 200 ms, perda de 2% ou oscilação de 30 ms, e a "ruim" com 400
+ping do caminho entre vocês dois. Também mede quanto do áudio o navegador teve de "remendar" (`concealedSamples`: pacotes que faltaram
+ou chegaram atrasados, o que se ouve como "pipoca"; fica "oscilando" a partir de 5% e "ruim" a partir de 15%) e mostra, na dica, quando a
+conexão passa pelo servidor de retransmissão (TURN, mais longe e com mais atraso) em vez de ir direto. Passa a "oscilando" com ping de 200 ms, perda de 2% ou oscilação de 30 ms, e a "ruim" com 400
 ms, 5% ou 60 ms. Na lista lateral só aparece quando não está boa. Para saber de quem é o problema: se só uma pessoa está
 ruim, é dela (ou do caminho até ela); no seu próprio nome a barrinha só aparece com duas ou mais pessoas na chamada, e só fica
 ruim quando metade ou mais delas está ruim para você, aí o problema provavelmente é a sua conexão. O bot de música não entra.

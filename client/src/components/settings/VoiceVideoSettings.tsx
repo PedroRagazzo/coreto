@@ -125,6 +125,12 @@ export function VoiceVideoSettings() {
           checked={prefs.autoGainControl}
           onChange={(v) => setVoice({ autoGainControl: v })}
         />
+        <Toggle
+          label="Igualar o volume das vozes"
+          description="Aproxima o volume de quem fala baixo e de quem fala alto, só no seu lado, e evita que o som estoure. Desligue se preferir ajustar cada pessoa na mão."
+          checked={prefs.levelVoices}
+          onChange={(v) => setVoice({ levelVoices: v })}
+        />
       </SettingsGroup>
 
       <SettingsGroup title="Vídeo">

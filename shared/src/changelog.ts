@@ -22,6 +22,24 @@ export interface ChangelogEntry {
 /** Da mais nova para a mais antiga. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-14-3',
+    title: 'Voz melhor',
+    items: [
+      {
+        title: 'Voz com mais qualidade',
+        text: 'A voz agora é enviada com o dobro da taxa de antes (64 kbps), o que tira o som abafado, de lata, da conversa. Vale na hora, para todo mundo.',
+      },
+      {
+        title: 'Igualar o volume das vozes',
+        text: 'Quem fala baixo sobe e quem fala alto desce, só no seu lado, e o som não estoura mesmo com o volume em 200%. Fica em Configurações, Voz e vídeo, e dá para desligar.',
+      },
+      {
+        title: 'Dica da conexão mostra o "pipoca"',
+        text: 'Ao passar o mouse nas barrinhas da conexão, agora aparece quanto do áudio precisou ser remendado (o pipoca) e se a conexão passa pelo servidor em vez de ir direto.',
+      },
+    ],
+  },
+  {
     id: '2026-11-14-2',
     title: 'Volume das chamadas até 200%',
     items: [

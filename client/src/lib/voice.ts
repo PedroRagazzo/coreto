@@ -11,7 +11,8 @@
 
 import { assess, type ConnectionQuality, ownLevel, type QualitySample } from '@shared/connection-quality';
 import type { Id } from '@shared/models';
-import { withStereoOpus } from '@shared/opus-sdp';
+import { withStereoOpus, withVoiceOpus } from '@shared/opus-sdp';
+import { initialLeveler, levelerStep, LIMIT_HEADROOM, rmsDb, softLimitCurve, type LevelerState } from '@shared/voice-level';
 import type { IceServer, SignalPayload, VoiceJoinResult } from '@shared/protocol';
 import type { ScreenPublishOptions, SfuSession } from './sfu';
 import { resolutionScale, viewerBitrate } from '@shared/stream-quality';
@@ -33,6 +34,8 @@ const SPEAKING_THRESHOLD = 0.02;
 /** Depois do último som alto, continua "falando" por este tempo, para o anel não piscar entre palavras. */
 const SPEAKING_HOLD_MS = 300;
 const SPEAKING_POLL_MS = 100;
+/** De quanto em quanto tempo o nivelador mede o nível da fala de cada pessoa (ms). */
+const LEVELER_POLL_MS = 100;
 /** De quanto em quanto tempo se mede a qualidade da conexão com cada pessoa. */
 const QUALITY_POLL_MS = 2000;
 
@@ -264,31 +267,58 @@ class RemoteVoice {
   /** O Chrome só entrega o áudio remoto ao Web Audio se o fluxo também estiver ligado a um elemento. */
   private readonly keepAlive = new Audio();
   private readonly source: MediaStreamAudioSourceNode;
+  /** O nivelador: o ganho que iguala esta voz às outras (0 dB quando desligado). */
+  private readonly leveler: GainNode;
   private readonly gain: GainNode;
   private readonly destination: MediaStreamAudioDestinationNode;
+  private readonly nodes: AudioNode[];
+  private readonly meter: AnalyserNode;
+  private readonly samples: Float32Array<ArrayBuffer>;
+  private levelState: LevelerState = initialLeveler();
+  private levelTimer: ReturnType<typeof setInterval> | null = null;
+  private lastLevelAt = 0;
   private user: UserVolume;
   /** A parte do volume geral acima de 100%: o elemento de áudio só vai até 1, o resto é ganho aqui. */
   private boost: number;
 
+  /** `canLevel` é falso para o bot de música: a música tem a dinâmica dela, e o nivelador a estragaria. */
   constructor(
     private readonly context: AudioContext,
     remote: MediaStream,
     userVolume: UserVolume,
-    outputVolume = 1,
+    prefs: Pick<VoicePrefs, 'outputVolume' | 'levelVoices'>,
+    private readonly canLevel = true,
   ) {
     this.user = userVolume;
-    this.boost = Math.max(1, outputVolume);
+    this.boost = Math.max(1, prefs.outputVolume);
     this.keepAlive.muted = true;
     this.keepAlive.autoplay = true;
     this.keepAlive.srcObject = remote;
     void this.keepAlive.play().catch(() => {});
     this.source = context.createMediaStreamSource(remote);
+    this.leveler = context.createGain();
     this.gain = context.createGain();
     this.gain.gain.value = this.level();
+    // Limitador suave no fim: o ganho extra (nivelador, volume por pessoa, volume geral até 200%) não estoura o som.
+    // Sem sobreamostragem de propósito: abaixo de 0,7 o sinal passa exatamente igual.
+    const before = context.createGain();
+    before.gain.value = 1 / LIMIT_HEADROOM;
+    const shaper = context.createWaveShaper();
+    shaper.curve = softLimitCurve();
+    shaper.oversample = 'none';
+    const after = context.createGain();
+    after.gain.value = LIMIT_HEADROOM;
     this.destination = context.createMediaStreamDestination();
-    this.source.connect(this.gain).connect(this.destination);
+    this.source.connect(this.leveler).connect(this.gain).connect(before).connect(shaper).connect(after).connect(this.destination);
+    this.nodes = [this.leveler, this.gain, before, shaper, after];
+    // A medida do nível sai da fonte, antes do ganho, para o ganho não realimentar a medida.
+    this.meter = context.createAnalyser();
+    this.meter.fftSize = 2048;
+    this.samples = new Float32Array(this.meter.fftSize);
+    this.source.connect(this.meter);
     this.output.autoplay = true;
     this.output.srcObject = this.destination.stream;
+    this.setLeveling(canLevel && prefs.levelVoices);
   }
 
   private level(): number {
@@ -300,16 +330,42 @@ class RemoteVoice {
     this.gain.gain.setTargetAtTime(this.level(), this.context.currentTime, 0.03);
   }
 
-  /** Saída de áudio e volume geral: até 100% no elemento, o que passa disso (até 200%) vira ganho. */
-  setOutput(prefs: VoicePrefs): void {
-    applyOutput(this.output, prefs);
+  /** Saída de áudio, volume geral (até 100% no elemento; o que passa disso, até 200%, vira ganho) e nivelamento. */
+  setOutput(prefs: Pick<VoicePrefs, 'outputDeviceId' | 'outputVolume' | 'levelVoices'>): void {
+    applyOutput(this.output, prefs as VoicePrefs);
     this.boost = Math.max(1, prefs.outputVolume);
     this.gain.gain.setTargetAtTime(this.level(), this.context.currentTime, 0.03);
+    this.setLeveling(this.canLevel && prefs.levelVoices);
+  }
+
+  private setLeveling(on: boolean): void {
+    if (on && !this.levelTimer) {
+      this.lastLevelAt = performance.now();
+      this.levelTimer = setInterval(() => this.tickLeveler(), LEVELER_POLL_MS);
+    } else if (!on && this.levelTimer) {
+      clearInterval(this.levelTimer);
+      this.levelTimer = null;
+      this.levelState = initialLeveler();
+      this.leveler.gain.setTargetAtTime(1, this.context.currentTime, 0.1);
+    }
+  }
+
+  private tickLeveler(): void {
+    const now = performance.now();
+    // Com a aba em segundo plano o relógio atrasa; limitar o passo evita um salto de ganho quando ele volta.
+    const dt = Math.min((now - this.lastLevelAt) / 1000, 0.25);
+    this.lastLevelAt = now;
+    this.meter.getFloatTimeDomainData(this.samples);
+    this.levelState = levelerStep(this.levelState, rmsDb(this.samples), dt);
+    this.leveler.gain.setTargetAtTime(dbToLinear(this.levelState.gainDb), this.context.currentTime, 0.08);
   }
 
   close(): void {
+    if (this.levelTimer) clearInterval(this.levelTimer);
+    this.levelTimer = null;
     this.source.disconnect();
-    this.gain.disconnect();
+    this.meter.disconnect();
+    for (const node of this.nodes) node.disconnect();
     this.output.srcObject = null;
     this.keepAlive.srcObject = null;
   }
@@ -459,22 +515,39 @@ function currentRoundTrip(report: RTCStatsReport): number | null {
   return rtt;
 }
 
+/** A conexão em uso passa por um servidor de retransmissão (TURN)? `null` se o navegador não diz. */
+function usesRelay(report: RTCStatsReport): boolean | null {
+  let relayed: boolean | null = null;
+  report.forEach((stat) => {
+    if (stat.type !== 'candidate-pair' || !stat.nominated || stat.state !== 'succeeded') return;
+    const local = report.get(stat.localCandidateId) as { candidateType?: string } | undefined;
+    const remote = report.get(stat.remoteCandidateId) as { candidateType?: string } | undefined;
+    if (local?.candidateType || remote?.candidateType) relayed = local?.candidateType === 'relay' || remote?.candidateType === 'relay';
+  });
+  return relayed;
+}
+
 /** O áudio que chega de uma conexão, somado (microfone e som da tela), e a ida e volta da rede; `null` se ainda não há. */
 function audioSample(report: RTCStatsReport): QualitySample | null {
   let received = 0;
   let lost = 0;
   let jitter: number | null = null;
   let seen = false;
+  let concealed = 0;
+  let samples = 0;
   report.forEach((stat) => {
     if (stat.type !== 'inbound-rtp' || stat.kind !== 'audio') return;
     seen = true;
+    concealed += Number(stat.concealedSamples ?? 0);
+    samples += Number(stat.totalSamplesReceived ?? 0);
     received += Number(stat.packetsReceived ?? 0);
     // Pode vir negativo (pacotes duplicados): não conta como "ganho".
     lost += Math.max(0, Number(stat.packetsLost ?? 0));
     if (Number.isFinite(stat.jitter)) jitter = Math.max(jitter ?? 0, stat.jitter * 1000);
   });
   const rttMs = currentRoundTrip(report);
-  return seen || rttMs !== null ? { received, lost, rttMs, jitterMs: jitter } : null;
+  const relayed = usesRelay(report);
+  return seen || rttMs !== null ? { received, lost, rttMs, jitterMs: jitter, concealed, samples, ...(relayed && { relayed }) } : null;
 }
 
 export interface VoiceEvents {
@@ -699,7 +772,7 @@ export class VoiceManager {
       }
     }
     if (next.outputDeviceId !== prev.outputDeviceId) this.mic?.setMonitorDevice(next.outputDeviceId);
-    if (next.outputDeviceId !== prev.outputDeviceId || next.outputVolume !== prev.outputVolume) {
+    if (next.outputDeviceId !== prev.outputDeviceId || next.outputVolume !== prev.outputVolume || next.levelVoices !== prev.levelVoices) {
       for (const peer of this.peers.values()) peer.voice?.setOutput(next);
     }
     if (next.userVolumes !== prev.userVolumes) {
@@ -1389,7 +1462,7 @@ export class VoiceManager {
       // Áudio que não é da tela é o microfone (o som da tela toca pelo <video> de quem assiste).
       if (remote.id !== peer.remoteMedia?.screen && this.playback) {
         peer.voice?.close();
-        const voice = new RemoteVoice(this.playback, remote, this.prefs.userVolumes[peerId] ?? DEFAULT_USER_VOLUME, this.prefs.outputVolume);
+        const voice = new RemoteVoice(this.playback, remote, this.prefs.userVolumes[peerId] ?? DEFAULT_USER_VOLUME, this.prefs, !this.events.isBot?.(peerId));
         voice.output.muted = this.deafened;
         voice.setOutput(this.prefs);
         peer.voice = voice;
@@ -1463,12 +1536,12 @@ export class VoiceManager {
   /**
    * O mesmo que `pc.setLocalDescription()` (oferta ou resposta, conforme o estado). Com o bot de música, o SDP
    * pede Opus em estéreo e a 128 kbps: sem isso o navegador decodifica a música em mono. Com as pessoas, a voz
-   * continua mono (pedir estéreo dobraria o envio do microfone à toa).
+   * continua mono (pedir estéreo dobraria o envio do microfone à toa), mas a 64 kbps em vez dos 32 kbps do padrão.
    */
   private async describeLocally(peerId: Id, pc: RTCPeerConnection): Promise<void> {
-    if (!this.events.isBot?.(peerId)) return pc.setLocalDescription();
     const description = pc.signalingState === 'have-remote-offer' ? await pc.createAnswer() : await pc.createOffer();
-    await pc.setLocalDescription({ type: description.type, sdp: withStereoOpus(description.sdp ?? '') });
+    const sdp = description.sdp ?? '';
+    await pc.setLocalDescription({ type: description.type, sdp: this.events.isBot?.(peerId) ? withStereoOpus(sdp) : withVoiceOpus(sdp) });
   }
 
   private addLocalAudio(peer: Peer): void {

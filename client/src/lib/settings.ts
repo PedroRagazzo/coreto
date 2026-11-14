@@ -34,6 +34,8 @@ export interface VoicePrefs {
   /** Cancelamento de ruído com IA (RNNoise), mais forte que o do navegador; quando ligado, substitui `noiseSuppression`. */
   aiNoiseSuppression: boolean;
   autoGainControl: boolean;
+  /** Iguala o volume das vozes que você ouve (a de quem fala baixo sobe, a de quem fala alto desce), só no seu lado. */
+  levelVoices: boolean;
   /** Ligado: o microfone fica sempre aberto. Desligado: só passa o que está acima de `inputSensitivity`. */
   autoSensitivity: boolean;
   /** Nível mínimo (dB) para o microfone abrir, como o controle de sensibilidade do Discord. */
@@ -95,6 +97,7 @@ export const DEFAULT_SETTINGS: Settings = {
     noiseSuppression: true,
     aiNoiseSuppression: true,
     autoGainControl: true,
+    levelVoices: true,
     autoSensitivity: true,
     inputSensitivity: -50,
     userVolumes: {},
@@ -165,6 +168,7 @@ export function loadSettings(): Settings {
       noiseSuppression: bool(v.noiseSuppression, d.voice.noiseSuppression),
       aiNoiseSuppression: bool(v.aiNoiseSuppression, d.voice.aiNoiseSuppression),
       autoGainControl: bool(v.autoGainControl, d.voice.autoGainControl),
+      levelVoices: bool(v.levelVoices, d.voice.levelVoices),
       autoSensitivity: bool(v.autoSensitivity, d.voice.autoSensitivity),
       inputSensitivity: Math.round(
         clamp(v.inputSensitivity, SENSITIVITY_RANGE.min, SENSITIVITY_RANGE.max, d.voice.inputSensitivity),

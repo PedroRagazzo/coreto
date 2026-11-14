@@ -7,11 +7,27 @@
 /** Bitrate médio máximo pedido ao bot de música: 128 kbps em estéreo é qualidade de música. */
 const MUSIC_MAX_AVERAGE_BITRATE = 128_000;
 
+/**
+ * Bitrate médio pedido para a voz entre pessoas: 64 kbps. Sem isso o navegador usa 32 kbps, que no Opus deixa a voz
+ * com cara de "lata" (menos agudos e mais artefatos). Mais que 64 kbps quase não melhora a fala, e na malha P2P cada
+ * pessoa envia uma cópia para cada outra.
+ */
+export const VOICE_MAX_AVERAGE_BITRATE = 64_000;
+
 /** Devolve o SDP pedindo estéreo no Opus (e o bitrate máximo); o resto fica como está. */
 export function withStereoOpus(sdp: string, maxAverageBitrate: number = MUSIC_MAX_AVERAGE_BITRATE): string {
+  return withOpusParams(sdp, { stereo: '1', maxaveragebitrate: String(Math.round(maxAverageBitrate)) });
+}
+
+/** Devolve o SDP pedindo o Opus da voz em mono, com mais bitrate, correção de perda (FEC) e sem pausa de silêncio (DTX). */
+export function withVoiceOpus(sdp: string, maxAverageBitrate: number = VOICE_MAX_AVERAGE_BITRATE): string {
+  return withOpusParams(sdp, { maxaveragebitrate: String(Math.round(maxAverageBitrate)), useinbandfec: '1', usedtx: '0' });
+}
+
+/** Põe (ou troca) esses parâmetros no fmtp de cada Opus do SDP; o resto fica como está. */
+export function withOpusParams(sdp: string, wanted: Record<string, string>): string {
   const eol = sdp.includes('\r\n') ? '\r\n' : '\n';
   const lines = sdp.split(eol);
-  const wanted = { stereo: '1', maxaveragebitrate: String(Math.round(maxAverageBitrate)) };
 
   const payloads = lines.flatMap((line) => {
     const match = /^a=rtpmap:(\d+) opus\/48000\/2\s*$/i.exec(line);
