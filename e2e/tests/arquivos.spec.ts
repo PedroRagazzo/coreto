@@ -25,6 +25,43 @@ test.describe('anexos', () => {
     await Promise.all([ana, bruno].map((p) => p.context.close()));
   });
 
+  test('um arquivo grande vai em pedaços e sobrevive a uma conexão que cai no meio', async ({ browser }) => {
+    const ana = await openPerson(browser, 'Ana');
+    const bruno = await openPerson(browser, 'Bruno');
+    const text = uniqueName('segue o jogo salvo');
+    // 5 MB: 3 pedaços de até 2 MB. Cada byte depende da posição, para notar um pedaço gravado no lugar errado.
+    const content = Buffer.alloc(5 * 1024 * 1024);
+    for (let i = 0; i < content.length; i++) content[i] = (i * 31 + (i >> 8)) % 251;
+
+    // O proxy do servidor cortava pedidos longos: aqui o segundo pedaço é derrubado uma vez, e o site tem de repeti-lo.
+    const offsets: string[] = [];
+    let dropped = false;
+    await ana.page.route('**/uploads', async (route) => {
+      const offset = route.request().headers()['x-upload-offset'];
+      if (offset === undefined) return route.continue();
+      offsets.push(offset);
+      if (offset !== '0' && !dropped) {
+        dropped = true;
+        return route.abort('connectionreset');
+      }
+      return route.continue();
+    });
+
+    await ana.page.locator('input[type=file]').setInputFiles({ name: 'jogo-salvo.zip', mimeType: 'application/zip', buffer: content });
+    // Só dá para enviar a mensagem depois que o último pedaço chegou (o segundo é repetido depois de 1 s).
+    await expect(ana.page.getByTitle(/jogo-salvo.zip — Pronto para enviar/)).toBeVisible({ timeout: 30_000 });
+    await ana.page.getByRole('textbox', { name: /^Mensagem para / }).fill(text);
+    await ana.page.getByRole('textbox', { name: /^Mensagem para / }).press('Enter');
+
+    const card = messageRow(bruno.page, text).getByRole('link', { name: /jogo-salvo\.zip/ });
+    await expect(card).toBeVisible({ timeout: 30_000 });
+    const [download] = await Promise.all([bruno.page.waitForEvent('download'), card.click()]);
+    expect((await readFile(await download.path())).equals(content)).toBe(true);
+    // Três pedaços, e o segundo foi pedido duas vezes (a primeira caiu).
+    expect(offsets).toEqual(['0', String(2 * 1024 * 1024), String(2 * 1024 * 1024), String(4 * 1024 * 1024)]);
+    await Promise.all([ana, bruno].map((p) => p.context.close()));
+  });
+
   test('uma imagem aparece na própria conversa, e clicar a abre em tela cheia', async ({ browser }) => {
     const ana = await openPerson(browser, 'Ana');
     const bruno = await openPerson(browser, 'Bruno');

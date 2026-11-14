@@ -12,7 +12,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { mkdir, open, readdir, rename, rm, stat } from 'node:fs/promises';
+import { mkdir, open, readdir, readFile, rename, rm, stat } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { join } from 'node:path';
 import { isImageAttachment } from '../../shared/src/models.js';
@@ -21,11 +21,14 @@ import {
   FILE_CONTENT_TYPE,
   MAX_ATTACHMENT_BYTES,
   MAX_IMAGE_BYTES,
-  type UploadResponse,
+  MAX_UPLOAD_CHUNK_BYTES,
+  type UploadChunkResponse,
 } from '../../shared/src/protocol.js';
 import type { Db } from './db/client.js';
 import { imageInfo } from './images.js';
 import type { Store } from './store.js';
+
+type User = NonNullable<Awaited<ReturnType<Store['userForSession']>>>;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const MAX_FILE_NAME = 100;
@@ -56,7 +59,23 @@ export interface ReceivedUpload {
   whole: Buffer | null;
 }
 
+/** Um envio em pedaços em andamento: o arquivo provisório já tem `size` bytes dos `total`. */
+interface ChunkedUpload {
+  userId: string;
+  part: string;
+  total: number;
+  size: number;
+  /** Um pedaço está sendo gravado agora (dois ao mesmo tempo embaralhariam o arquivo). */
+  busy: boolean;
+  updatedAt: number;
+}
+/** Quantos envios em pedaços podem estar abertos ao mesmo tempo no servidor todo. */
+const MAX_CHUNKED_UPLOADS = 200;
+
 export class UploadDir {
+  /** Os envios em pedaços abertos, por id (o que quem envia escolheu). Os parados são esquecidos na limpeza. */
+  readonly chunked = new Map<string, ChunkedUpload>();
+
   constructor(
     readonly path: string,
     /** Espaço máximo de todos os anexos, em bytes. */
@@ -114,6 +133,39 @@ export class UploadDir {
     return { part, size, whole: kept ? Buffer.concat(kept) : null };
   }
 
+  /**
+   * Grava o corpo do pedido no fim do arquivo provisório de um envio em pedaços, na posição `upload.size` (o que veio
+   * de uma tentativa que falhou no meio é descartado, então repetir um pedaço é seguro). Devolve quantos bytes
+   * chegaram, ou `null` se passar de `limit` (o resto é lido e descartado para dar tempo de responder).
+   */
+  async appendChunk(upload: ChunkedUpload, req: IncomingMessage, limit: number): Promise<number | null> {
+    const file = await open(upload.part, upload.size === 0 ? 'w' : 'r+');
+    let written = 0;
+    let over = false;
+    try {
+      if (upload.size > 0) await file.truncate(upload.size);
+      for await (const chunk of req as AsyncIterable<Buffer>) {
+        if (over) continue;
+        if (written + chunk.length > limit) {
+          over = true;
+          continue;
+        }
+        await file.write(chunk, 0, chunk.length, upload.size + written);
+        written += chunk.length;
+      }
+    } finally {
+      await file.close();
+    }
+    return over ? null : written;
+  }
+
+  /** Esquece um envio em pedaços e apaga o que ele tinha no disco. */
+  async dropChunked(id: string): Promise<void> {
+    const upload = this.chunked.get(id);
+    this.chunked.delete(id);
+    if (upload) await rm(upload.part, { force: true });
+  }
+
   /** Dá ao arquivo provisório o nome definitivo (o id do anexo). */
   async adopt(part: string, id: string): Promise<void> {
     await rename(part, this.file(id));
@@ -145,6 +197,8 @@ export async function sweepUploads(db: Db, dir: UploadDir, now = Date.now(), ret
     if (now - mtimeMs > PENDING_UPLOAD_TTL_MS) await rm(join(dir.path, name), { force: true });
   }
 
+  for (const [id, upload] of dir.chunked) if (now - upload.updatedAt > PENDING_UPLOAD_TTL_MS) await dir.dropChunked(id);
+
   const files = names.filter((name) => UUID.test(name));
   // Os arquivos da pasta são anexos ou sons do quadro de som.
   const known = new Set([
@@ -156,17 +210,21 @@ export async function sweepUploads(db: Db, dir: UploadDir, now = Date.now(), ret
   return orphans.length;
 }
 
-/** POST /uploads — corpo = arquivo cru, `Authorization: Bearer <token>`, `X-File-Name` opcional. */
+/**
+ * POST /uploads — corpo = arquivo cru, `Authorization: Bearer <token>`, `X-File-Name` opcional. Com `X-Upload-Id`, o corpo
+ * é um pedaço do arquivo (ver `UPLOAD_CHUNK_BYTES` em protocol.ts).
+ */
 export async function handleUpload(req: IncomingMessage, res: ServerResponse, store: Store, dir: UploadDir): Promise<void> {
-  const send = (status: number, body: UploadResponse) =>
+  const send = (status: number, body: UploadChunkResponse) =>
     void res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(body));
   const tooBig = () => send(413, { ok: false, error: `O arquivo passa de ${MAX_ATTACHMENT_BYTES / 1024 / 1024} MB.` });
-  const noRoom = () => send(507, { ok: false, error: 'O servidor está sem espaço para novos anexos. Avise quem cuida dele.' });
+  const noRoom = () => send(507, { ok: false, error: NO_ROOM });
 
   if (req.method !== 'POST') return send(405, { ok: false, error: 'Use POST.' });
   const token = /^Bearer (\S+)$/.exec(req.headers.authorization ?? '')?.[1];
   const user = token ? await store.userForSession(token) : null;
   if (!user) return send(401, { ok: false, error: 'Sessão inválida. Entre de novo.' });
+  if (req.headers['x-upload-id'] !== undefined) return handleChunk(req, send, user, store, dir);
   const declared = Number(req.headers['content-length']);
   if (declared > MAX_ATTACHMENT_BYTES) return tooBig();
   const used = await store.attachmentBytes();
@@ -174,7 +232,93 @@ export async function handleUpload(req: IncomingMessage, res: ServerResponse, st
 
   const received = await dir.receive(req, MAX_ATTACHMENT_BYTES);
   if (!received) return tooBig();
-  const { part, size, whole } = received;
+  return finishUpload(send, user, store, dir, received, used, req.headers['x-file-name']);
+}
+
+const NO_ROOM = 'O servidor está sem espaço para novos anexos. Avise quem cuida dele.';
+
+/** Um pedaço de um envio em pedaços: guarda no arquivo provisório e, no último, publica o anexo como num envio único. */
+async function handleChunk(
+  req: IncomingMessage,
+  send: (status: number, body: UploadChunkResponse) => void,
+  user: User,
+  store: Store,
+  dir: UploadDir,
+): Promise<void> {
+  const header = (name: string) => (typeof req.headers[name] === 'string' ? (req.headers[name] as string) : '');
+  const number = (name: string) => (/^\d{1,12}$/.test(header(name)) ? Number(header(name)) : NaN);
+  const id = header('x-upload-id');
+  const offset = number('x-upload-offset');
+  const total = number('x-upload-total');
+  const declared = Number(req.headers['content-length']);
+  if (!UUID.test(id) || !Number.isInteger(offset) || !Number.isInteger(total) || total < 1) {
+    return send(400, { ok: false, error: 'Pedaço de envio inválido.' });
+  }
+  if (total > MAX_ATTACHMENT_BYTES || declared > MAX_UPLOAD_CHUNK_BYTES) {
+    return send(413, { ok: false, error: `O arquivo passa de ${MAX_ATTACHMENT_BYTES / 1024 / 1024} MB.` });
+  }
+
+  let upload = dir.chunked.get(id);
+  if (offset === 0) {
+    if (upload && upload.userId !== user.id) return send(409, { ok: false, error: 'Esse envio é de outra pessoa.' });
+    if (upload?.busy) return send(409, { ok: false, error: 'Esse envio já está recebendo um pedaço.', received: upload.size });
+    if (!upload && dir.chunked.size >= MAX_CHUNKED_UPLOADS) {
+      return send(503, { ok: false, error: 'O servidor está recebendo arquivos demais agora. Tente de novo em instantes.' });
+    }
+    if ((await store.attachmentBytes()) + total > dir.quotaBytes) {
+      await dir.dropChunked(id);
+      return send(507, { ok: false, error: NO_ROOM });
+    }
+    upload = { userId: user.id, part: join(dir.path, `${id}.part`), total, size: 0, busy: false, updatedAt: Date.now() };
+    dir.chunked.set(id, upload);
+  } else {
+    if (!upload || upload.userId !== user.id) {
+      return send(409, { ok: false, error: 'Esse envio não existe mais. Envie o arquivo de novo.', received: 0 });
+    }
+    if (upload.busy || offset !== upload.size || total !== upload.total) {
+      return send(409, { ok: false, error: 'Pedaço fora de ordem.', received: upload.size });
+    }
+  }
+
+  upload.busy = true;
+  try {
+    // Nunca passa do que falta para fechar o arquivo (nem do tamanho máximo de um pedaço).
+    const written = await dir.appendChunk(upload, req, Math.min(MAX_UPLOAD_CHUNK_BYTES, upload.total - upload.size));
+    if (written === null) {
+      await dir.dropChunked(id);
+      return send(413, { ok: false, error: 'O pedaço é maior do que o combinado.' });
+    }
+    if (written === 0) {
+      await dir.dropChunked(id);
+      return send(400, { ok: false, error: 'O pedaço está vazio.' });
+    }
+    upload.size += written;
+    upload.updatedAt = Date.now();
+  } catch (err) {
+    await dir.dropChunked(id);
+    throw err;
+  } finally {
+    upload.busy = false;
+  }
+  if (upload.size < upload.total) return send(200, { ok: true, received: upload.size });
+
+  // O arquivo está completo: segue como se tivesse chegado de uma vez.
+  dir.chunked.delete(id);
+  const whole = upload.total <= MAX_IMAGE_BYTES ? await readFile(upload.part) : null;
+  const used = await store.attachmentBytes();
+  return finishUpload(send, user, store, dir, { part: upload.part, size: upload.size, whole }, used, req.headers['x-file-name']);
+}
+
+/** Com o arquivo provisório completo: confere o espaço, reconhece imagem, registra o anexo e dá ao arquivo o nome definitivo. */
+async function finishUpload(
+  send: (status: number, body: UploadChunkResponse) => void,
+  user: User,
+  store: Store,
+  dir: UploadDir,
+  { part, size, whole }: ReceivedUpload,
+  used: number,
+  fileNameHeader: string | string[] | undefined,
+): Promise<void> {
   try {
     if (size === 0) {
       await rm(part, { force: true });
@@ -182,7 +326,7 @@ export async function handleUpload(req: IncomingMessage, res: ServerResponse, st
     }
     if (used + size > dir.quotaBytes) {
       await rm(part, { force: true });
-      return noRoom();
+      return send(507, { ok: false, error: NO_ROOM });
     }
     // Imagem pelo conteúdo (não pela extensão nem pelo tipo declarado); o resto é só um arquivo.
     const image = whole ? imageInfo(whole) : null;
@@ -190,7 +334,7 @@ export async function handleUpload(req: IncomingMessage, res: ServerResponse, st
       image
         ? {
             uploaderId: user.id,
-            fileName: cleanFileName(req.headers['x-file-name'], EXTENSIONS[image.contentType]),
+            fileName: cleanFileName(fileNameHeader, EXTENSIONS[image.contentType]),
             contentType: image.contentType,
             size,
             width: image.width,
@@ -198,7 +342,7 @@ export async function handleUpload(req: IncomingMessage, res: ServerResponse, st
           }
         : {
             uploaderId: user.id,
-            fileName: cleanFileName(req.headers['x-file-name']),
+            fileName: cleanFileName(fileNameHeader),
             contentType: FILE_CONTENT_TYPE,
             size,
             width: null,

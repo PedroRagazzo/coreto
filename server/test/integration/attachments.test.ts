@@ -1,9 +1,10 @@
+import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { readdir, utimes, writeFile } from 'node:fs/promises';
+import { readdir, readFile, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { Attachment } from '../../../shared/src/models.js';
-import { MAX_ATTACHMENT_BYTES } from '../../../shared/src/protocol.js';
+import { MAX_ATTACHMENT_BYTES, type UploadChunkResponse } from '../../../shared/src/protocol.js';
 import { ATTACHMENT_RETENTION_MS, cleanFileName, PENDING_UPLOAD_TTL_MS, sweepUploads, UploadDir } from '../../src/uploads.js';
 import { hasTestDatabase } from '../support/database.js';
 import { channelNamed, fakePng, joinDemoSpace, nextEvent, ok, TestServer, type TestClient } from '../support/harness.js';
@@ -396,6 +397,133 @@ describe.skipIf(!hasTestDatabase)('anexos', () => {
     it('um cabeçalho malformado vira o nome padrão', () => {
       expect(cleanFileName('%E0%A4%A', undefined)).toBe('arquivo');
     });
+  });
+});
+
+describe.skipIf(!hasTestDatabase)('envio em pedaços', () => {
+  let server: TestServer;
+  beforeAll(async () => {
+    server = await TestServer.start({ uploadQuotaBytes: 20_000_000 });
+  });
+  afterEach(() => server.disconnectAll());
+  afterAll(() => server?.stop());
+
+  const id = () => randomUUID();
+  const parts = async () => (await readdir(server.uploadDir)).filter((n) => n.endsWith('.part'));
+  /** Um arquivo de `size` bytes que não se repete, para notar se algum pedaço foi gravado fora do lugar. */
+  const content = (size: number) => {
+    const data = Buffer.alloc(size);
+    for (let i = 0; i < size; i++) data[i] = (i * 31 + (i >> 8)) % 251;
+    return data;
+  };
+  const attachmentOf = (body: UploadChunkResponse): Attachment => {
+    if (!body.ok || !('attachment' in body)) throw new Error('faltou o anexo');
+    return body.attachment;
+  };
+
+  it('junta os pedaços em ordem e entrega o arquivo igualzinho', async () => {
+    const ana = await server.connect('Ana');
+    const geral = channelNamed(await joinDemoSpace(ana), 'geral');
+    const data = content(2_500_000);
+    const upload = id();
+    const send = (offset: number, end: number) =>
+      server.uploadChunk(ana.token, { id: upload, offset, total: data.length, data: data.subarray(offset, end), fileName: 'jogo.zip' });
+
+    expect(await send(0, 1_000_000)).toEqual({ status: 200, body: { ok: true, received: 1_000_000 } });
+    expect(await send(1_000_000, 2_000_000)).toEqual({ status: 200, body: { ok: true, received: 2_000_000 } });
+    expect(await parts()).toEqual([`${upload}.part`]);
+    const last = await send(2_000_000, data.length);
+    expect(last.status).toBe(201);
+    const attachment = attachmentOf(last.body);
+    expect(attachment).toMatchObject({ fileName: 'jogo.zip', size: data.length, contentType: 'application/octet-stream' });
+    expect(await parts()).toEqual([]);
+
+    ok(await ana.socket.emitWithAck('message:send', { channelId: geral.id, content: '', attachmentIds: [attachment.id] }));
+    const res = await fetch(`${server.url}/uploads/${attachment.id}`);
+    expect(Buffer.from(await res.arrayBuffer()).equals(data)).toBe(true);
+  });
+
+  it('um pedaço repetido ou fora de ordem recebe 409 com o ponto de onde continuar, sem estragar o arquivo', async () => {
+    const ana = await server.connect('Ana');
+    const data = content(1_500_000);
+    const upload = id();
+    const send = (offset: number, end: number) =>
+      server.uploadChunk(ana.token, { id: upload, offset, total: data.length, data: data.subarray(offset, end) });
+
+    await send(0, 600_000);
+    expect(await send(900_000, data.length)).toEqual({
+      status: 409,
+      body: { ok: false, error: 'Pedaço fora de ordem.', received: 600_000 },
+    });
+    expect(await send(600_000, 1_000_000)).toMatchObject({ status: 200, body: { received: 1_000_000 } });
+    // A resposta se perdeu e o site manda o mesmo pedaço de novo: o servidor já passou dele e diz onde está.
+    expect(await send(600_000, 1_000_000)).toMatchObject({ status: 409, body: { received: 1_000_000 } });
+    // Recomeçar do zero é permitido (o que havia é descartado).
+    expect(await send(0, 600_000)).toMatchObject({ status: 200, body: { received: 600_000 } });
+    expect(await send(600_000, 1_000_000)).toMatchObject({ status: 200 });
+    const attachment = attachmentOf((await send(1_000_000, data.length)).body);
+    expect((await readFile(join(server.uploadDir, attachment.id))).equals(data)).toBe(true);
+  });
+
+  it('só quem começou o envio continua, e um envio desconhecido manda recomeçar', async () => {
+    const ana = await server.connect('Ana');
+    const bruno = await server.connect('Bruno');
+    const data = content(1_000_000);
+    const upload = id();
+    await server.uploadChunk(ana.token, { id: upload, offset: 0, total: data.length, data: data.subarray(0, 400_000) });
+
+    const intruder = await server.uploadChunk(bruno.token, { id: upload, offset: 400_000, total: data.length, data: data.subarray(400_000) });
+    expect(intruder).toMatchObject({ status: 409, body: { received: 0 } });
+    const hijack = await server.uploadChunk(bruno.token, { id: upload, offset: 0, total: data.length, data: data.subarray(0, 400_000) });
+    expect(hijack.status).toBe(409);
+    const unknown = await server.uploadChunk(ana.token, { id: id(), offset: 400_000, total: data.length, data: data.subarray(400_000) });
+    expect(unknown).toMatchObject({ status: 409, body: { received: 0 } });
+    const noSession = await server.uploadChunk('token-que-nao-existe-1234', { id: upload, offset: 400_000, total: data.length, data: data.subarray(400_000) });
+    expect(noSession.status).toBe(401);
+    // O envio da Ana segue de onde parou, intacto.
+    const done = await server.uploadChunk(ana.token, { id: upload, offset: 400_000, total: data.length, data: data.subarray(400_000) });
+    expect(done.status).toBe(201);
+  });
+
+  it('recusa pedido malformado, arquivo grande demais e pedaço maior que o combinado, sem deixar provisório', async () => {
+    const ana = await server.connect('Ana');
+    const bad = await server.uploadChunk(ana.token, { id: 'nao-e-uuid', offset: 0, total: 10, data: Buffer.alloc(5) });
+    expect(bad.status).toBe(400);
+    const tooBig = await server.uploadChunk(ana.token, { id: id(), offset: 0, total: MAX_ATTACHMENT_BYTES + 1, data: Buffer.alloc(5) });
+    expect(tooBig.status).toBe(413);
+    const empty = await server.uploadChunk(ana.token, { id: id(), offset: 0, total: 10, data: Buffer.alloc(0) });
+    expect(empty.status).toBe(400);
+    // O pedaço traz mais bytes do que faltam para fechar o arquivo.
+    const over = await server.uploadChunk(ana.token, { id: id(), offset: 0, total: 10, data: Buffer.alloc(20, 1) });
+    expect(over.status).toBe(413);
+    expect(await parts()).toEqual([]);
+  });
+
+  it('confere o espaço logo no primeiro pedaço, contando o arquivo todo', async () => {
+    const ana = await server.connect('Ana');
+    const res = await server.uploadChunk(ana.token, { id: id(), offset: 0, total: 25_000_000, data: Buffer.alloc(1000, 1) });
+    expect(res.status).toBe(507);
+    expect(await parts()).toEqual([]);
+  });
+
+  it('reconhece imagem pelo conteúdo mesmo chegando em pedaços', async () => {
+    const ana = await server.connect('Ana');
+    const png = fakePng(640, 480);
+    const upload = id();
+    const half = Math.floor(png.length / 2);
+    await server.uploadChunk(ana.token, { id: upload, offset: 0, total: png.length, data: png.subarray(0, half), fileName: 'foto.bin' });
+    const last = await server.uploadChunk(ana.token, { id: upload, offset: half, total: png.length, data: png.subarray(half), fileName: 'foto.bin' });
+    expect(last.status).toBe(201);
+    expect(attachmentOf(last.body)).toMatchObject({ contentType: 'image/png', width: 640, height: 480, fileName: 'foto.png' });
+  });
+
+  it('a limpeza apaga o provisório de um envio parado', async () => {
+    const ana = await server.connect('Ana');
+    const upload = id();
+    await server.uploadChunk(ana.token, { id: upload, offset: 0, total: 1_000_000, data: content(300_000) });
+    expect(await parts()).toEqual([`${upload}.part`]);
+    await sweepUploads(server.db, new UploadDir(server.uploadDir), Date.now() + PENDING_UPLOAD_TTL_MS + 60_000);
+    expect(await parts()).toEqual([]);
   });
 });
 

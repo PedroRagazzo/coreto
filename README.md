@@ -347,7 +347,11 @@ coreto/
 
 ## Tempo real
 
-Cada aba mantém uma conexão socket.io. Os eventos vão para salas do socket.io:
+Cada aba mantém uma conexão socket.io. O cliente tenta o WebSocket primeiro e cai para o polling HTTP se ele for bloqueado
+(`client/src/lib/socket.ts`: `transports: ['websocket', 'polling']` com `tryAllTransports`); atrás de VPN, antivírus ou
+proxy o polling inicial era o que falhava com "xhr poll error". Quando a conexão falha, o aviso do topo troca as mensagens
+técnicas do socket.io por uma frase em português (`shared/src/connection-error.ts`); a mensagem original fica na dica
+(`title`) do aviso. Os eventos vão para salas do socket.io:
 
 | Sala | Recebe |
 |---|---|
@@ -529,9 +533,16 @@ Como o servidor visita endereços que estranhos escrevem, as defesas ficam em `s
   contar na cota. O espelho do backup guarda as imagens até 8 MB por até 30 dias de idade, então elas saem dele um pouco
   depois. Para mudar o prazo, troque a constante e faça o deploy. O link de um anexo é aleatório e não
   exige login, como num CDN: quem tem o link baixa o arquivo. A busca tem os filtros "Com imagem" e "Com arquivo".
-- **Limite de tempo do envio:** o envio de um arquivo grande atravessa o proxy (Traefik, no Dokploy); se ele tiver um limite de
-  tempo para ler o pedido, uma internet lenta pode não conseguir enviar 50 MB a tempo. Se isso acontecer, aumente o
-  `readTimeout` do ponto de entrada no Traefik.
+- **Envio em pedaços (limite de tempo do proxy):** o Traefik do Dokploy corta qualquer pedido que leve mais de 60 s para
+  chegar (`readTimeout` padrão de 60 s, que vale para o corpo inteiro: conferido em 2026-11-14, o `traefik.yml` do
+  servidor não o altera). Um arquivo de 40 MB passa disso para quem tem upload abaixo de ~5 Mb/s. Por isso o site envia
+  qualquer arquivo acima de 2 MB (`UPLOAD_CHUNK_BYTES`) em vários `POST /uploads` de 2 MB, cada um levando poucos
+  segundos. Cada pedaço traz `X-Upload-Id` (UUID escolhido pelo site), `X-Upload-Offset` e `X-Upload-Total`; o servidor
+  (`handleChunk` em `server/src/uploads.ts`) grava no `<id>.part` na posição certa, só aceita o pedaço que começa onde o
+  arquivo termina (senão responde 409 com `received`, de onde continuar), só deixa continuar quem começou o envio, e no
+  último pedaço faz o mesmo que um envio único (cota, reconhece imagem, registra o anexo). O site repete um pedaço até 4
+  vezes se a conexão cair. Sem `X-Upload-Id` o `POST /uploads` continua sendo um envio único (clientes antigos). Envios
+  parados há mais de 1 hora são apagados pela limpeza. Não é preciso mexer no Traefik.
 
 ## Configurações
 

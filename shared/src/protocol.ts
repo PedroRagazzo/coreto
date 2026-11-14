@@ -48,6 +48,26 @@ export const FILE_CONTENT_TYPE = 'application/octet-stream';
 
 export type UploadResponse = { ok: true; attachment: Attachment } | { ok: false; error: string };
 
+// Envio em pedaços: arquivos maiores que UPLOAD_CHUNK_BYTES vão em vários POST /uploads. O proxy na frente do servidor
+// (Traefik) corta qualquer pedido que leve mais de 60 s para chegar, e um arquivo de 40 MB passa disso para quem tem
+// upload abaixo de ~5 Mb/s; em pedaços pequenos cada pedido leva poucos segundos. Cada pedaço traz, além dos cabeçalhos
+// acima, `X-Upload-Id` (um UUID escolhido por quem envia), `X-Upload-Offset` (onde o pedaço começa) e `X-Upload-Total`
+// (o tamanho do arquivo). Sem `X-Upload-Id` o POST é um envio único, como sempre foi.
+
+/** O tamanho dos pedaços que o site envia: 2 MB levam ~30 s mesmo com 0,5 Mb/s de upload. */
+export const UPLOAD_CHUNK_BYTES = 2 * 1024 * 1024;
+/** O maior pedaço que o servidor aceita (o site manda `UPLOAD_CHUNK_BYTES`). */
+export const MAX_UPLOAD_CHUNK_BYTES = 8 * 1024 * 1024;
+
+/**
+ * Resposta a um pedaço: `received` = quantos bytes do arquivo o servidor já tem (200, falta mais); com `attachment`, o
+ * último pedaço chegou e o anexo existe (201). Um pedaço fora de ordem (409) traz em `received` de onde continuar.
+ */
+export type UploadChunkResponse =
+  | { ok: true; received: number }
+  | { ok: true; attachment: Attachment }
+  | { ok: false; error: string; received?: number };
+
 /** Resposta de POST /sounds (o envio de um som para o quadro de som). */
 export type SoundUploadResponse = { ok: true; clip: SoundClip } | { ok: false; error: string };
 

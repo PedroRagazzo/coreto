@@ -1,6 +1,9 @@
 import { expect, test, type Page } from '@playwright/test';
 import { joinCall, openPerson, startScreen } from '../support/app';
 
+/** Quanto esperar a imagem chegar no tamanho cheio: pela malha P2P a banda estimada sobe aos poucos, e isso leva ~20 s numa máquina lenta. */
+const RAMP_UP_MS = 45_000;
+
 /** O arranjo que o palco escolheu agora: quantas colunas a grade tem e se está empilhado (janela em pé). */
 const stageLayout = (page: Page) =>
   page.locator('[data-layout]').evaluate((el) => ({
@@ -10,6 +13,7 @@ const stageLayout = (page: Page) =>
 
 test.describe('transmissões de tela', () => {
   test('quem assiste recebe a imagem da tela de quem transmite', async ({ browser }) => {
+    test.setTimeout(RAMP_UP_MS + 45_000);
     const ana = await openPerson(browser, 'Ana', { screen: { color: '#7a2d9e', width: 1280, height: 720 } });
     const bruno = await openPerson(browser, 'Bruno', { screen: { color: '#1f7a4d', width: 1280, height: 720 } });
     await joinCall(ana.page);
@@ -20,7 +24,8 @@ test.describe('transmissões de tela', () => {
     await ana.page.getByRole('button', { name: `Assistir à tela de ${bruno.name}` }).click();
     const video = ana.page.getByRole('region', { name: `Tela de ${bruno.name}` }).locator('video');
     await expect(video).toBeVisible();
-    await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.videoWidth), { timeout: 20_000 }).toBe(1280);
+    // O WebRTC começa estimando pouca banda e sobe aos poucos (320 → 640 → 960 → 1280 de largura): em máquina lenta isso passa de 20 s.
+    await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.videoWidth), { timeout: RAMP_UP_MS }).toBe(1280);
 
     // O Bruno vê quantas pessoas assistem.
     await expect(bruno.page.getByRole('region', { name: 'Sua tela' })).toContainText('1');
@@ -113,6 +118,7 @@ test.describe('qualidade para jogos', () => {
 
 test.describe('trocar a janela com a transmissão no ar', () => {
   test('quem assiste continua na mesma transmissão, só a imagem muda', async ({ browser }) => {
+    test.setTimeout(RAMP_UP_MS + 45_000);
     const ana = await openPerson(browser, 'Ana');
     // A primeira "janela" é 1280×720; a segunda, 960×540.
     const bruno = await openPerson(browser, 'Bruno', { screen: { width: 1280, height: 720, after: { width: 960, height: 540 } } });
@@ -122,12 +128,12 @@ test.describe('trocar a janela com a transmissão no ar', () => {
 
     await ana.page.getByRole('button', { name: `Assistir à tela de ${bruno.name}` }).click();
     const video = ana.page.getByRole('region', { name: `Tela de ${bruno.name}` }).locator('video');
-    await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.videoWidth), { timeout: 20_000 }).toBe(1280);
+    await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.videoWidth), { timeout: RAMP_UP_MS }).toBe(1280);
 
     await bruno.page.getByRole('button', { name: 'Trocar a janela ou tela transmitida' }).first().click();
 
     // A mesma transmissão passa a mostrar a janela nova, sem aviso de que acabou.
-    await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.videoWidth), { timeout: 20_000 }).toBe(960);
+    await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.videoWidth), { timeout: RAMP_UP_MS }).toBe(960);
     await expect(ana.page.getByText('A transmissão terminou.')).toHaveCount(0);
     await expect(bruno.page.getByRole('region', { name: 'Sua tela' })).toBeVisible();
     await expect(bruno.page.getByRole('button', { name: 'Parar de transmitir' }).first()).toBeVisible();

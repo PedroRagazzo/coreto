@@ -12,5 +12,7 @@ export const SERVER_URL: string =
 
 /** Cria o socket desconectado: registre os ouvintes antes de chamar connect(). */
 export function createSocket(token: string): AppSocket {
-  return io(SERVER_URL, { autoConnect: false, auth: { token } });
+  // WebSocket primeiro: conecta em uma ida só e não depende de várias requisições HTTP seguidas (as que falhavam com
+  // "xhr poll error" em redes com proxy, VPN ou antivírus no meio). Se o WebSocket for bloqueado, cai para o polling.
+  return io(SERVER_URL, { autoConnect: false, auth: { token }, transports: ['websocket', 'polling'], tryAllTransports: true });
 }

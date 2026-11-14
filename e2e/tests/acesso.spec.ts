@@ -20,6 +20,42 @@ test.describe('acesso', () => {
     await ana.context.close();
   });
 
+  test('o site conecta por WebSocket e, com o servidor inalcançável, avisa em palavras e volta sozinho', async ({ browser }) => {
+    // O socket.io espera até 20 s antes de desistir de uma tentativa de conexão; o aviso só aparece depois disso.
+    test.setTimeout(120_000);
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    let pollingBlocked = true;
+    const sockets: string[] = [];
+    page.on('websocket', (ws) => sockets.push(ws.url()));
+    await signIn(page, uniqueName('Ana'));
+    // WebSocket primeiro: não depende de várias requisições HTTP seguidas, que falhavam com "xhr poll error" atrás de proxy/VPN.
+    expect(sockets.some((url) => url.includes('/socket.io/'))).toBe(true);
+
+    // Um proxy que derruba tanto o WebSocket quanto o polling: o site não alcança o servidor em tempo real.
+    await page.addInitScript(() => {
+      const Original = window.WebSocket;
+      window.WebSocket = new Proxy(Original, {
+        construct(target, args: ConstructorParameters<typeof WebSocket>) {
+          if (localStorage.getItem('bloquear-websocket')) throw new DOMException('bloqueado pelo teste', 'SecurityError');
+          return new target(...args);
+        },
+      });
+    });
+    await page.evaluate(() => localStorage.setItem('bloquear-websocket', '1'));
+    await page.route('**/socket.io/**', (route) => (pollingBlocked ? route.abort() : route.continue()));
+    await page.reload();
+    const banner = page.getByRole('status').filter({ hasText: 'Sem conexão' });
+    await expect(banner).toContainText('Não deu para alcançar o servidor', { timeout: 45_000 });
+    await expect(banner).not.toContainText('xhr poll error');
+
+    pollingBlocked = false;
+    await page.evaluate(() => localStorage.removeItem('bloquear-websocket'));
+    await expect(banner).toHaveCount(0, { timeout: 45_000 });
+    await expect(page.getByRole('textbox', { name: 'Mensagem para #geral' })).toBeVisible();
+    await context.close();
+  });
+
   test('PIN errado numa conta que já existe é recusado, e o certo entra', async ({ browser }) => {
     const ana = await openPerson(browser, 'Ana');
     const other = await browser.newContext();

@@ -11,6 +11,7 @@ import type {
   ClientToServerEvents,
   LoginResponse,
   ServerToClientEvents,
+  UploadChunkResponse,
   UploadResponse,
 } from '../../../shared/src/protocol.js';
 import { startServer, type RunningServer } from '../../src/app.js';
@@ -119,6 +120,25 @@ export class TestServer {
       body: data,
     });
     return { status: res.status, body: (await res.json()) as UploadResponse };
+  }
+
+  /** Um pedaço de um envio em pedaços (POST /uploads com `X-Upload-*`). */
+  async uploadChunk(
+    token: string,
+    chunk: { id: string; offset: number; total: number; data: Buffer; fileName?: string },
+  ): Promise<{ status: number; body: UploadChunkResponse }> {
+    const res = await fetch(`${this.url}/uploads`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${token}`,
+        'x-file-name': encodeURIComponent(chunk.fileName ?? 'grande.bin'),
+        'x-upload-id': chunk.id,
+        'x-upload-offset': String(chunk.offset),
+        'x-upload-total': String(chunk.total),
+      },
+      body: chunk.data,
+    });
+    return { status: res.status, body: (await res.json()) as UploadChunkResponse };
   }
 
   /**

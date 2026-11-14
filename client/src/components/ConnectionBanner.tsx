@@ -1,8 +1,10 @@
+import { describeConnectionError } from '@shared/connection-error';
 import { useRealtime } from '../state/realtime';
 
 export function ConnectionBanner() {
   const { state } = useRealtime();
   if (state.connection === 'ready' && !state.connectionError) return null;
+  const detail = describeConnectionError(state.connectionError, navigator.onLine);
 
   const message =
     state.connection === 'connecting'
@@ -19,8 +21,10 @@ export function ConnectionBanner() {
       }`}
     >
       {message}
-      {state.connection === 'disconnected' && state.connectionError && (
-        <span className="ml-2 text-xs opacity-80">({state.connectionError})</span>
+      {state.connection === 'disconnected' && detail && (
+        <span className="ml-2 text-xs opacity-80" title={state.connectionError ?? undefined}>
+          {detail}
+        </span>
       )}
     </div>
   );

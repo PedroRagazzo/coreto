@@ -77,7 +77,7 @@ export async function startServer(
       return void handleLogin(req, res, store, throttle);
     }
     if (path === '/uploads') {
-      if (preflight(req, res, clientOrigins, 'POST', 'authorization, content-type, x-file-name')) return;
+      if (preflight(req, res, clientOrigins, 'POST', 'authorization, content-type, x-file-name, x-upload-id, x-upload-offset, x-upload-total')) return;
       return void handleUpload(req, res, store, uploads).catch((err: unknown) => {
         console.error('[upload]', err);
         if (!res.headersSent) sendJson(res, 500, { ok: false, error: 'Não foi possível guardar o arquivo.' });

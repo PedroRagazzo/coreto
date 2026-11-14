@@ -22,6 +22,20 @@ export interface ChangelogEntry {
 /** Da mais nova para a mais antiga. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-14-4',
+    title: 'Conexão mais firme',
+    items: [
+      {
+        title: 'Conecta mais rápido e avisa melhor',
+        text: 'O site agora tenta o WebSocket primeiro, o que evita o erro "xhr poll error" em redes com VPN, antivírus ou proxy. Se mesmo assim a conexão falhar, o aviso diz o que houve e o que conferir.',
+      },
+      {
+        title: 'Arquivos grandes enviam sem falhar',
+        text: 'Arquivos grandes agora sobem em pedaços e repetem sozinhos o que cair no caminho. Antes, com internet lenta, um arquivo de 40 MB podia ser cortado no meio.',
+      },
+    ],
+  },
+  {
     id: '2026-11-14-3',
     title: 'Voz melhor',
     items: [
