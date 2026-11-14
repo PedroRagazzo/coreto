@@ -750,6 +750,9 @@ transmite codifica uma vez por espectador. Para a imagem não ficar borrada quan
   mostra o teto pedido, quanto a rede estima que comporta (`availableOutgoingBitrate`) e, para quem assiste, quantas
   vezes a imagem travou nos últimos 30 s (`freezeCount`), e explica a causa provável: computador, internet de envio,
   caminho até o servidor, perda de pacotes com ida e volta longa (cada retransmissão demora) ou poucos quadros na origem.
+  Quem transmite também vê "captura N fps (pedido: 60)", lido do `media-source` do emissor (`framesPerSecond`, antes do
+  codificador): captura baixa = limite do jogo ou da placa; captura alta e quadros enviados baixos = limite do envio.
+  Captura 0 (tela sem movimento) não dispara aviso; captura baixa dispara um aviso que já admite "tela quase parada".
 
 Para transmitir bem para muita gente de uma vez, o caminho é um servidor de mídia (SFU): quem transmite envia uma cópia só.
 

@@ -397,6 +397,10 @@ export interface StreamStats {
   capKbps: number | null;
   /** Só ao transmitir: quanto a rede estima que comporta até o servidor (ou até o espectador), em kbps; `null` se o navegador não diz. */
   availableKbps: number | null;
+  /** Só ao transmitir: quadros por segundo que a captura da tela entrega, antes do codificador (`null` se o navegador não diz). */
+  captureFps: number | null;
+  /** Só ao transmitir: os quadros por segundo pedidos nas configurações. */
+  targetFps: number | null;
   /** Só ao assistir: quantas vezes a imagem congelou nos últimos 30 segundos. */
   freezes: number;
 }
@@ -1202,6 +1206,8 @@ export class VoiceManager {
       encoder: null,
       capKbps: null,
       availableKbps: null,
+      captureFps: null,
+      targetFps: null,
       freezes: this.recentIncrease(`freeze:${userId}`, Number(inbound['freezeCount'] ?? 0)),
     };
   }
@@ -1219,6 +1225,7 @@ export class VoiceManager {
     let worst = 0; // índice em `limits`: o pior limite entre os espectadores
     let viewers = 0;
     let available: number | null = null; // a menor estimativa da rede entre os caminhos
+    let captureFps: number | null = null; // da captura da tela (a mesma para todos os caminhos)
     const limits = ['none', 'other', 'bandwidth', 'cpu'] as const;
 
     // Pelo servidor de mídia há um emissor só; pela malha, um por espectador.
@@ -1241,6 +1248,10 @@ export class VoiceManager {
       report.forEach((stat) => {
         if (stat.type === 'outbound-rtp' && stat.kind === 'video') outbound = stat;
         if (stat.type === 'remote-inbound-rtp' && stat.kind === 'video') remote = stat;
+        // A fonte de mídia é a própria faixa da captura: o que ela entrega, antes de o codificador receber.
+        if (stat.type === 'media-source' && stat.kind === 'video' && Number.isFinite(stat.framesPerSecond)) {
+          captureFps = Math.max(captureFps ?? 0, Number(stat.framesPerSecond));
+        }
       });
       if (!outbound) continue;
       viewers++;
@@ -1281,6 +1292,8 @@ export class VoiceManager {
       encoder,
       capKbps,
       availableKbps: available,
+      captureFps,
+      targetFps: this.screen.options.frameRate,
       freezes: 0,
     };
   }

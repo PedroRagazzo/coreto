@@ -143,6 +143,28 @@ describe('diagnoseStream', () => {
     expect(diagnoseStream(sending({ availableKbps: null }))).toBeNull();
   });
 
+  it('a captura entregando bem menos quadros que o pedido aponta a origem (jogo, placa), não o codificador nem a rede', () => {
+    expect(diagnoseStream(sending({ captureFps: 32, targetFps: 60 }))).toBe('capture-limited');
+    expect(diagnoseStream(sending({ captureFps: 58, targetFps: 60 }))).toBeNull();
+    expect(diagnoseStream(sending({ captureFps: 42, targetFps: 60 }))).toBeNull(); // 70% do pedido ainda é aceitável
+    expect(diagnoseStream(sending({ captureFps: 41, targetFps: 60 }))).toBe('capture-limited');
+  });
+
+  it('captura parada (tela sem movimento), ou sem dados, não gera aviso', () => {
+    expect(diagnoseStream(sending({ captureFps: 0, targetFps: 60 }))).toBeNull();
+    expect(diagnoseStream(sending({ captureFps: null, targetFps: 60 }))).toBeNull();
+    expect(diagnoseStream(sending({ captureFps: 20, targetFps: null }))).toBeNull();
+  });
+
+  it('o computador ou a internet no limite continuam sendo o aviso, mesmo com a captura baixa', () => {
+    expect(diagnoseStream(sending({ limit: 'cpu', captureFps: 20, targetFps: 60 }))).toBe('cpu');
+    expect(diagnoseStream(sending({ limit: 'bandwidth', captureFps: 20, targetFps: 60 }))).toBe('bandwidth-sfu');
+  });
+
+  it('quem assiste nunca recebe o aviso da captura', () => {
+    expect(diagnoseStream(receiving({ captureFps: 10, targetFps: 60 }))).toBeNull();
+  });
+
   it('perda com ida e volta longa explica a travada: retransmitir demora', () => {
     expect(diagnoseStream(sending({ lossPercent: 5, rttMs: 250 }))).toBe('loss-far');
     expect(diagnoseStream(sending({ lossPercent: 5, rttMs: 30 }))).toBe('loss');

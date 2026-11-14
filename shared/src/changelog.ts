@@ -22,6 +22,16 @@ export interface ChangelogEntry {
 /** Da mais nova para a mais antiga. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-14',
+    title: 'Estatísticas mostram a captura',
+    items: [
+      {
+        title: 'Quantos quadros a captura entrega',
+        text: 'Nas estatísticas de quem transmite aparece "captura N fps (pedido: 60)". Se saem poucos quadros, dá para ver se o limite é o jogo ou a placa de vídeo (captura baixa) ou o envio (captura alta e quadros enviados baixos). Com a captura bem abaixo do pedido, o painel explica o que olhar.',
+      },
+    ],
+  },
+  {
     id: '2026-11-12-2',
     title: 'Compartilhar tela mais simples',
     items: [

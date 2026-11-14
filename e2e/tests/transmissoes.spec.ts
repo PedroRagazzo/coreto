@@ -95,7 +95,10 @@ test.describe('qualidade para jogos', () => {
 
     // Quem transmite vê o teto pedido ao codificador (1080p a 60 fps, dividido pelo upload de 20 Mbps).
     await bruno.page.getByRole('region', { name: 'Sua tela' }).getByRole('button', { name: 'Estatísticas da transmissão' }).click();
-    await expect(bruno.page.getByRole('status', { name: 'Estatísticas da transmissão' })).toContainText(/teto \d/, { timeout: 15_000 });
+    const stats = bruno.page.getByRole('status', { name: 'Estatísticas da transmissão' });
+    await expect(stats).toContainText(/teto \d/, { timeout: 15_000 });
+    // E quantos quadros a captura entrega, ao lado do pedido: separa o limite do jogo do limite do codificador.
+    await expect(stats).toContainText(/captura \d+ fps \(pedido: 60\)/, { timeout: 15_000 });
 
     // Com a transmissão no ar, as configurações mostram a melhor qualidade e deixam ajustar.
     await bruno.page.getByRole('button', { name: 'Configurações da transmissão' }).first().click();

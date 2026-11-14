@@ -477,6 +477,8 @@ const mbps = (kbps: number) => `${(kbps / 1000).toLocaleString('pt-BR', { maximu
 
 /** O que fazer, em palavras, para cada causa que o diagnóstico (shared/stream-quality.ts) aponta. */
 const ADVICE: Record<StreamAdvice, string> = {
+  'capture-limited':
+    'A captura da tela entrega menos quadros do que o pedido, e isso vem antes do codificador e da rede: se a tela está parada ou quase, é normal; se é um jogo, ele (ou a placa de vídeo ocupada) está limitando. Veja o limite de quadros do jogo e se o monitor está em taxa alta.',
   'cpu-software':
     'O processador está codificando o vídeo e no limite: em Configurações da transmissão, escolha H.264 (placa de vídeo), ou uma resolução menor ou menos quadros por segundo.',
   'cpu-software-h264':
@@ -525,6 +527,11 @@ function StatsPanel({ stats }: { stats: StreamStats | null }) {
             {stats.encoder ? `${stats.encoder === 'hardware' ? 'placa de vídeo' : 'processador'} · ` : ''}perda {stats.lossPercent.toFixed(1)}%
             {stats.rttMs !== null ? ` · ${Math.round(stats.rttMs)} ms` : ''}
           </p>
+          {stats.role === 'sending' && stats.captureFps !== null && (
+            <p>
+              captura {Math.round(stats.captureFps)} fps{stats.targetFps !== null ? ` (pedido: ${stats.targetFps})` : ''}
+            </p>
+          )}
           {stats.role === 'sending' && stats.capKbps !== null && (
             <p>
               teto {mbps(stats.capKbps)}

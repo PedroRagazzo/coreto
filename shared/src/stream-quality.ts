@@ -85,11 +85,16 @@ export interface StreamDiagnosisInput {
   capKbps: number | null;
   /** Só ao transmitir: quanto a rede estima que comporta até o servidor (ou até o espectador), em kbps. */
   availableKbps: number | null;
+  /** Só ao transmitir: quantos quadros por segundo a captura da tela entrega, antes do codificador (`null` se o navegador não diz). */
+  captureFps?: number | null;
+  /** Só ao transmitir: os quadros por segundo pedidos nas configurações. */
+  targetFps?: number | null;
   /** Só ao assistir: quantas vezes a imagem congelou nos últimos 30 segundos. */
   freezes: number;
 }
 
 export type StreamAdvice =
+  | 'capture-limited'
   | 'cpu-software'
   | 'cpu-software-h264'
   | 'cpu'
@@ -109,6 +114,8 @@ const FAR_RTT_MS = 150;
 const PATH_LIMIT_RATIO = 0.75;
 /** Travadas em 30 s a partir das quais vale avisar (uma só passa despercebida). */
 const FREEZE_ALERT = 2;
+/** A captura entrega menos que esta fração dos quadros pedidos: o limite vem da origem (jogo, placa), não do codificador nem da rede. */
+const CAPTURE_SHORT_RATIO = 0.7;
 
 /** A principal causa de uma imagem ruim, a partir dos números; `null` se está tudo bem. */
 export function diagnoseStream(input: StreamDiagnosisInput): StreamAdvice | null {
@@ -119,6 +126,9 @@ export function diagnoseStream(input: StreamDiagnosisInput): StreamAdvice | null
       return input.codec?.toLowerCase() === 'h264' ? 'cpu-software-h264' : 'cpu-software';
     }
     if (input.limit === 'bandwidth') return input.via === 'sfu' ? 'bandwidth-sfu' : 'bandwidth-p2p';
+    // Captura parada (0) é tela sem movimento, não defeito: só avisa quando ela entrega quadros, mas bem menos que o pedido.
+    const { captureFps, targetFps } = input;
+    if (captureFps != null && targetFps != null && captureFps > 0 && captureFps < targetFps * CAPTURE_SHORT_RATIO) return 'capture-limited';
     if (input.availableKbps !== null && input.capKbps !== null && input.availableKbps < input.capKbps * PATH_LIMIT_RATIO) return 'path-limit';
     if (input.lossPercent > LOSS_ALERT_PERCENT) return input.rttMs !== null && input.rttMs > FAR_RTT_MS ? 'loss-far' : 'loss';
     return null;
