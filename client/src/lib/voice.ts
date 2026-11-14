@@ -266,27 +266,45 @@ class RemoteVoice {
   private readonly source: MediaStreamAudioSourceNode;
   private readonly gain: GainNode;
   private readonly destination: MediaStreamAudioDestinationNode;
+  private user: UserVolume;
+  /** A parte do volume geral acima de 100%: o elemento de áudio só vai até 1, o resto é ganho aqui. */
+  private boost: number;
 
   constructor(
     private readonly context: AudioContext,
     remote: MediaStream,
     userVolume: UserVolume,
+    outputVolume = 1,
   ) {
+    this.user = userVolume;
+    this.boost = Math.max(1, outputVolume);
     this.keepAlive.muted = true;
     this.keepAlive.autoplay = true;
     this.keepAlive.srcObject = remote;
     void this.keepAlive.play().catch(() => {});
     this.source = context.createMediaStreamSource(remote);
     this.gain = context.createGain();
-    this.gain.gain.value = userVolume.muted ? 0 : userVolume.volume;
+    this.gain.gain.value = this.level();
     this.destination = context.createMediaStreamDestination();
     this.source.connect(this.gain).connect(this.destination);
     this.output.autoplay = true;
     this.output.srcObject = this.destination.stream;
   }
 
-  setUserVolume({ volume, muted }: UserVolume): void {
-    this.gain.gain.setTargetAtTime(muted ? 0 : volume, this.context.currentTime, 0.03);
+  private level(): number {
+    return (this.user.muted ? 0 : this.user.volume) * this.boost;
+  }
+
+  setUserVolume(user: UserVolume): void {
+    this.user = user;
+    this.gain.gain.setTargetAtTime(this.level(), this.context.currentTime, 0.03);
+  }
+
+  /** Saída de áudio e volume geral: até 100% no elemento, o que passa disso (até 200%) vira ganho. */
+  setOutput(prefs: VoicePrefs): void {
+    applyOutput(this.output, prefs);
+    this.boost = Math.max(1, prefs.outputVolume);
+    this.gain.gain.setTargetAtTime(this.level(), this.context.currentTime, 0.03);
   }
 
   close(): void {
@@ -321,7 +339,8 @@ async function openCamera(deviceId: string | null): Promise<MediaStream> {
 
 /** Saída de áudio escolhida (onde o navegador permite) e volume. */
 export function applyOutput(element: HTMLMediaElement, prefs: VoicePrefs, volume = prefs.outputVolume): void {
-  element.volume = volume;
+  // O elemento só aceita 0 a 1; o que passa de 100% do volume geral é ganho do `RemoteVoice`.
+  element.volume = Math.min(1, Math.max(0, volume));
   if ('setSinkId' in element) {
     void element.setSinkId(prefs.outputDeviceId ?? '').catch((err: unknown) => console.warn('[voz] setSinkId', err));
   }
@@ -681,7 +700,7 @@ export class VoiceManager {
     }
     if (next.outputDeviceId !== prev.outputDeviceId) this.mic?.setMonitorDevice(next.outputDeviceId);
     if (next.outputDeviceId !== prev.outputDeviceId || next.outputVolume !== prev.outputVolume) {
-      for (const peer of this.peers.values()) if (peer.voice) applyOutput(peer.voice.output, next);
+      for (const peer of this.peers.values()) peer.voice?.setOutput(next);
     }
     if (next.userVolumes !== prev.userVolumes) {
       for (const [peerId, peer] of this.peers) peer.voice?.setUserVolume(next.userVolumes[peerId] ?? DEFAULT_USER_VOLUME);
@@ -1370,9 +1389,9 @@ export class VoiceManager {
       // Áudio que não é da tela é o microfone (o som da tela toca pelo <video> de quem assiste).
       if (remote.id !== peer.remoteMedia?.screen && this.playback) {
         peer.voice?.close();
-        const voice = new RemoteVoice(this.playback, remote, this.prefs.userVolumes[peerId] ?? DEFAULT_USER_VOLUME);
+        const voice = new RemoteVoice(this.playback, remote, this.prefs.userVolumes[peerId] ?? DEFAULT_USER_VOLUME, this.prefs.outputVolume);
         voice.output.muted = this.deafened;
-        applyOutput(voice.output, this.prefs);
+        voice.setOutput(this.prefs);
         peer.voice = voice;
         this.detector.watch(peerId, remote);
         voice.output.play().catch(() => {

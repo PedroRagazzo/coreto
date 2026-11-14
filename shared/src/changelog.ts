@@ -22,6 +22,16 @@ export interface ChangelogEntry {
 /** Da mais nova para a mais antiga. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-14-2',
+    title: 'Volume das chamadas até 200%',
+    items: [
+      {
+        title: 'Mais volume para ouvir a chamada',
+        text: 'Em Configurações, Voz e vídeo, o volume das chamadas agora vai até 200%, como no Discord. Serve para quem ouve baixo no fone ou nas caixas. Acima de 100% pode distorcer se a pessoa já fala alto.',
+      },
+    ],
+  },
+  {
     id: '2026-11-14',
     title: 'Estatísticas mostram a captura',
     items: [

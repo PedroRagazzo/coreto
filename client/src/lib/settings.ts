@@ -13,6 +13,8 @@ export interface UserVolume {
 }
 
 export const USER_VOLUME_MAX = 2;
+/** O volume geral das chamadas vai até 200%, como o do Discord (acima de 100% é ganho no Web Audio). */
+export const OUTPUT_VOLUME_MAX = 2;
 export const DEFAULT_USER_VOLUME: UserVolume = { volume: 1, muted: false };
 
 /** Faixa do medidor e do controle de sensibilidade do microfone, em dB (0 = o mais alto possível). */
@@ -158,7 +160,7 @@ export function loadSettings(): Settings {
       outputDeviceId: deviceId(v.outputDeviceId),
       cameraDeviceId: deviceId(v.cameraDeviceId),
       inputVolume: clamp(v.inputVolume, 0, 2, d.voice.inputVolume),
-      outputVolume: clamp(v.outputVolume, 0, 1, d.voice.outputVolume),
+      outputVolume: clamp(v.outputVolume, 0, OUTPUT_VOLUME_MAX, d.voice.outputVolume),
       echoCancellation: bool(v.echoCancellation, d.voice.echoCancellation),
       noiseSuppression: bool(v.noiseSuppression, d.voice.noiseSuppression),
       aiNoiseSuppression: bool(v.aiNoiseSuppression, d.voice.aiNoiseSuppression),

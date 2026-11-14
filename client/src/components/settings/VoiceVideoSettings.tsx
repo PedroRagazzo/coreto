@@ -1,6 +1,6 @@
 import { Mic, Video } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { SENSITIVITY_RANGE, type VoicePrefs } from '../../lib/settings';
+import { OUTPUT_VOLUME_MAX, SENSITIVITY_RANGE, type VoicePrefs } from '../../lib/settings';
 import { applyOutput, MicPipeline, openMicrophone, type MicLevel } from '../../lib/voice';
 import { useSettings } from '../../state/settings';
 import { SettingsGroup, Toggle } from './SettingsModal';
@@ -84,7 +84,7 @@ export function VoiceVideoSettings() {
             max={2}
             onChange={(v) => setVoice({ inputVolume: v })}
           />
-          <Slider label="Volume das chamadas" value={prefs.outputVolume} max={1} onChange={(v) => setVoice({ outputVolume: v })} />
+          <Slider label="Volume das chamadas" value={prefs.outputVolume} max={OUTPUT_VOLUME_MAX} onChange={(v) => setVoice({ outputVolume: v })} />
         </div>
       </SettingsGroup>
 

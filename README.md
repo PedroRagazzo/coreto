@@ -540,7 +540,8 @@ guardado no aparelho (`localStorage`), porque o microfone do notebook não é o 
 
 - **Voz e vídeo:**
   - microfone, saída de áudio (onde o navegador permite escolher) e câmera;
-  - volume do microfone (até 200%) e das chamadas;
+  - volume do microfone e das chamadas, os dois até 200% (no das chamadas, o elemento de áudio vai até 100% e o que passa
+    disso é ganho do Web Audio em `RemoteVoice`, somado ao volume de cada pessoa; muito alto pode distorcer);
   - cancelamento de eco, controle automático de ganho e **cancelamento de ruído com IA** (ligado por padrão): o
     [RNNoise](https://github.com/xiph/rnnoise), pelo pacote `@jitsi/rnnoise-wasm`, roda num AudioWorklet
     (`client/src/lib/noise-suppressor.worklet.js`) e tira teclado, ventilador e barulho de fundo, deixando a voz
