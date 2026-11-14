@@ -58,7 +58,10 @@ test.describe('configurações de voz', () => {
     test.setTimeout(90_000);
     const ana = await openPerson(browser, 'Ana');
     const bruno = await openPerson(browser, 'Bruno');
-    // A Ana registra os nós de ganho que a página cria; o microfone do Bruno é bem mais baixo que o da Ana.
+    // A Ana registra os nós de ganho que a página cria. E a voz do Bruno que ela mede é sintética: baixa (cerca de -37 dB)
+    // e constante. O microfone falso do navegador só faz bipes curtos, cujo nível varia de máquina para máquina (no CI o
+    // teste ficava 40 s sem ver o ganho subir). Só o medidor do nivelador (fftSize 2048) é trocado; o de "quem está falando"
+    // (512) segue real.
     await ana.page.addInitScript(() => {
       const gains: GainNode[] = [];
       (window as unknown as { __gains: GainNode[] }).__gains = gains;
@@ -68,10 +71,11 @@ test.describe('configurações de voz', () => {
         gains.push(node);
         return node;
       };
-    });
-    await bruno.page.evaluate(() => {
-      const saved = JSON.parse(localStorage.getItem('coreto.settings') ?? '{}');
-      localStorage.setItem('coreto.settings', JSON.stringify({ ...saved, voice: { ...(saved.voice ?? {}), inputVolume: 0.3 } }));
+      const read = AnalyserNode.prototype.getFloatTimeDomainData;
+      AnalyserNode.prototype.getFloatTimeDomainData = function (this: AnalyserNode, array: Float32Array<ArrayBuffer>) {
+        if (this.fftSize !== 2048) return read.call(this, array);
+        for (let i = 0; i < array.length; i++) array[i] = 0.02 * Math.sin(i / 3);
+      };
     });
     await Promise.all([ana.page.reload(), bruno.page.reload()]);
     await joinCall(ana.page);
