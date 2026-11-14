@@ -22,6 +22,16 @@ export interface ChangelogEntry {
 /** Da mais nova para a mais antiga. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-14-6',
+    title: 'App de desktop 0.7.2',
+    items: [
+      {
+        title: 'App mais firme',
+        text: 'A janela não abre mais fora da tela quando você desconecta o segundo monitor, o Windows consegue desligar com o Coreto aberto e o seletor de tela não abre em dobro. O app se atualiza sozinho.',
+      },
+    ],
+  },
+  {
     id: '2026-11-14-5',
     title: 'Diagnóstico, transmissão nítida e mais proteção',
     items: [
