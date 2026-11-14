@@ -118,7 +118,8 @@ test.describe('qualidade para jogos', () => {
     const stats = bruno.page.getByRole('status', { name: 'Estatísticas da transmissão' });
     await expect(stats).toContainText(/teto \d/, { timeout: 15_000 });
     // E quantos quadros a captura entrega, ao lado do pedido: separa o limite do jogo do limite do codificador.
-    await expect(stats).toContainText(/captura \d+ fps \(pedido: 60\)/, { timeout: 15_000 });
+    // Com o tamanho da captura na frente: é ele que mostra se a imagem foi reduzida depois de capturada.
+    await expect(stats).toContainText(/captura \d+×\d+ · \d+ fps \(pedido: 60\)/, { timeout: 15_000 });
 
     // Com a transmissão no ar, as configurações mostram a melhor qualidade e deixam ajustar.
     await bruno.page.getByRole('button', { name: 'Configurações da transmissão' }).first().click();

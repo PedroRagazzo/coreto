@@ -477,6 +477,10 @@ export interface StreamStats {
   captureFps: number | null;
   /** Só ao transmitir: os quadros por segundo pedidos nas configurações. */
   targetFps: number | null;
+  /** Só ao transmitir: o tamanho que a captura da tela entrega, antes do codificador (`null` se o navegador não diz). */
+  captureSize: { width: number; height: number } | null;
+  /** Só ao transmitir: quanto o envio reduz a imagem da captura (1 = sem redução), como está nos parâmetros do emissor. */
+  scaleDown: number | null;
   /** Só ao assistir: quantas vezes a imagem congelou nos últimos 30 segundos. */
   freezes: number;
 }
@@ -1301,6 +1305,8 @@ export class VoiceManager {
       availableKbps: null,
       captureFps: null,
       targetFps: null,
+      captureSize: null,
+      scaleDown: null,
       freezes: this.recentIncrease(`freeze:${userId}`, Number(inbound['freezeCount'] ?? 0)),
     };
   }
@@ -1319,6 +1325,8 @@ export class VoiceManager {
     let viewers = 0;
     let available: number | null = null; // a menor estimativa da rede entre os caminhos
     let captureFps: number | null = null; // da captura da tela (a mesma para todos os caminhos)
+    let captureSize: StreamStats['captureSize'] = null;
+    let scaleDown: number | null = null;
     const limits = ['none', 'other', 'bandwidth', 'cpu'] as const;
 
     // Pelo servidor de mídia há um emissor só; pela malha, um por espectador.
@@ -1345,7 +1353,13 @@ export class VoiceManager {
         if (stat.type === 'media-source' && stat.kind === 'video' && Number.isFinite(stat.framesPerSecond)) {
           captureFps = Math.max(captureFps ?? 0, Number(stat.framesPerSecond));
         }
+        if (stat.type === 'media-source' && stat.kind === 'video' && Number(stat['width']) > 0 && Number(stat['height']) > 0) {
+          captureSize = { width: Number(stat['width']), height: Number(stat['height']) };
+        }
       });
+      // A escala que está valendo no emissor (a pedida por nós, a do LiveKit ou a que o navegador pôs sozinho).
+      const applied = Number(sender.getParameters().encodings?.[0]?.scaleResolutionDownBy ?? 1);
+      if (Number.isFinite(applied)) scaleDown = Math.max(scaleDown ?? 1, applied);
       if (!outbound) continue;
       viewers++;
       const rate = this.rate(key, Number(outbound['bytesSent'] ?? 0), Number(outbound['framesEncoded'] ?? 0));
@@ -1387,6 +1401,8 @@ export class VoiceManager {
       availableKbps: available,
       captureFps,
       targetFps: this.screen.options.frameRate,
+      captureSize,
+      scaleDown,
       freezes: 0,
     };
   }

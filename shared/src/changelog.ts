@@ -22,6 +22,16 @@ export interface ChangelogEntry {
 /** Da mais nova para a mais antiga. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-14-7',
+    title: 'Estatísticas da transmissão mais claras',
+    items: [
+      {
+        title: 'Tamanho da captura no painel',
+        text: 'No painel de quem transmite, a linha "captura" agora mostra também o tamanho da tela capturada. Se a imagem for reduzida antes de enviar, aparece quanto. Assim dá para saber de onde vem uma imagem menor que a esperada.',
+      },
+    ],
+  },
+  {
     id: '2026-11-14-6',
     title: 'App de desktop 0.7.2',
     items: [

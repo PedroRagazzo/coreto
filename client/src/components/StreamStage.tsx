@@ -529,8 +529,12 @@ function StatsPanel({ stats }: { stats: StreamStats | null }) {
           </p>
           {stats.role === 'sending' && stats.captureFps !== null && (
             <p>
-              captura {Math.round(stats.captureFps)} fps{stats.targetFps !== null ? ` (pedido: ${stats.targetFps})` : ''}
+              captura {stats.captureSize ? `${stats.captureSize.width}×${stats.captureSize.height} · ` : ''}
+              {Math.round(stats.captureFps)} fps{stats.targetFps !== null ? ` (pedido: ${stats.targetFps})` : ''}
             </p>
+          )}
+          {stats.role === 'sending' && stats.scaleDown !== null && stats.scaleDown > 1.01 && (
+            <p>imagem reduzida {stats.scaleDown.toFixed(2).replace('.', ',')}× antes de enviar</p>
           )}
           {stats.role === 'sending' && stats.capKbps !== null && (
             <p>
