@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { preferHardwareH264 } from '../../../shared/src/h264.js';
+import { codecOrderFor, preferHardwareH264 } from '../../../shared/src/h264.js';
 
 const h264 = (profile: string, mode = 1) => ({
   mimeType: 'video/H264',
@@ -59,6 +59,44 @@ describe('preferHardwareH264', () => {
   it('não altera a lista que recebeu', () => {
     const copy = [...chrome];
     preferHardwareH264(chrome);
+    expect(chrome).toEqual(copy);
+  });
+});
+
+describe('codecOrderFor', () => {
+  const names = (list: { mimeType: string }[] | null) => (list ?? []).map((c) => c.mimeType.replace('video/', ''));
+
+  it('placa de vídeo: H.264 na frente (os perfis da placa primeiro) e o resto depois', () => {
+    const ordered = codecOrderFor(chrome, 'h264')!;
+    expect(names(ordered).slice(0, 7).every((n) => n === 'H264')).toBe(true);
+    expect(profiles(ordered)[0]).toBe('640032/1');
+    expect(names(ordered).slice(7)).toEqual(['VP8', 'rtx']);
+  });
+
+  it('placa de vídeo: com só o Constrained Baseline, ainda põe o H.264 antes do VP8', () => {
+    const ordered = codecOrderFor([vp8, rtx, h264('42e01f')], 'h264')!;
+    expect(names(ordered)).toEqual(['H264', 'VP8', 'rtx']);
+  });
+
+  it('placa de vídeo: sem H.264 no navegador, ou com a ordem já certa, não muda nada', () => {
+    expect(codecOrderFor([vp8, rtx], 'h264')).toBeNull();
+    expect(codecOrderFor([h264('640032'), h264('42e01f'), vp8], 'h264')).toBeNull();
+  });
+
+  it('processador: VP8 na frente, o resto na ordem', () => {
+    const ordered = codecOrderFor([h264('640032'), vp8, rtx], 'vp8')!;
+    expect(names(ordered)).toEqual(['VP8', 'H264', 'rtx']);
+  });
+
+  it('processador: sem VP8, ou com ele já na frente, não muda nada', () => {
+    expect(codecOrderFor([h264('640032'), rtx], 'vp8')).toBeNull();
+    expect(codecOrderFor([vp8, h264('640032')], 'vp8')).toBeNull();
+  });
+
+  it('não altera a lista que recebeu', () => {
+    const copy = [...chrome];
+    codecOrderFor(chrome, 'h264');
+    codecOrderFor(chrome, 'vp8');
     expect(chrome).toEqual(copy);
   });
 });

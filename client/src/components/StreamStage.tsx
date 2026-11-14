@@ -477,6 +477,8 @@ const mbps = (kbps: number) => `${(kbps / 1000).toLocaleString('pt-BR', { maximu
 
 /** O que fazer, em palavras, para cada causa que o diagnóstico (shared/stream-quality.ts) aponta. */
 const ADVICE: Record<StreamAdvice, string> = {
+  'gpu-not-used':
+    'Você escolheu a placa de vídeo, mas o navegador está codificando no processador. Atualize o driver da placa de vídeo, feche programas que também gravam ou transmitem (gravadores, outros apps de chamada) e, se continuar, tente uma resolução menor: algumas placas só codificam até certo tamanho.',
   'capture-limited':
     'A captura da tela entrega menos quadros do que o pedido, e isso vem antes do codificador e da rede: se a tela está parada ou quase, é normal; se é um jogo, ele (ou a placa de vídeo ocupada) está limitando. Veja o limite de quadros do jogo e se o monitor está em taxa alta.',
   'cpu-software':

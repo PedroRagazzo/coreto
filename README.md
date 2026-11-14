@@ -766,8 +766,8 @@ permissão `STREAM` da tela, como a permissão "Vídeo" do Discord.
 
 ### Compartilhamento de tela
 
-Funciona como o "Go Live" do Discord. Dentro de uma sala de voz, **Compartilhar tela** abre a escolha de qualidade
-(720p, 1080p ou original; 15, 30 ou 60 fps; com ou sem som). Depois disso, o próprio navegador pergunta qual tela,
+Funciona como o "Go Live" do Discord. Dentro de uma sala de voz, **Compartilhar tela** abre uma escolha só de
+qualidade (720p, 1080p ou 2K) e a opção de incluir o som. Depois disso, o próprio navegador pergunta qual tela,
 janela ou aba compartilhar. Quem transmite ganha o selo **AO VIVO** na lista da sala, com o nome do que está sendo compartilhado ("Tela 1", o
 título da janela; no app de desktop a partir da 0.5.1) embaixo do nome. Passar o mouse (ou focar) sobre a pessoa abre
 uma **prévia**: uma miniatura da tela, o que é, e quantos assistem, sem precisar assistir. A miniatura (JPEG de até
@@ -813,9 +813,19 @@ transmite codifica uma vez por espectador. Para a imagem não ficar borrada quan
 - **Estatísticas** (botão com o ícone de atividade no cabeçalho da transmissão): resolução, quadros por segundo, bitrate,
   codec, perda de pacotes e latência, lidos de `getStats()`. Para quem transmite mostra também o que está limitando a
   qualidade (seu computador ou sua internet).
-- **Qualidade ao começar**: o diálogo de compartilhar só pergunta pelo som. Toda transmissão começa na melhor qualidade
-  (`bestScreenQuality`: 1080p, 60 fps, Fluidez, H.264 onde há suporte e 20 Mbps de upload). Quem precisa de menos ajusta
-  nas configurações da transmissão, com ela no ar, onde a receita "Jogo ou vídeo" escolhe isso de uma vez e "Tela e texto"
+- **Qualidade ao começar**: o diálogo de compartilhar tem duas escolhas, a resolução (**720p, 1080p (padrão) ou 2K**,
+  1440p; `LAUNCH_RESOLUTIONS`) e **quem codifica** (**Placa de vídeo** = H.264, padrão onde o navegador suporta, ou
+  **Processador** = VP8; `ENCODERS`), mais o som. A última escolha fica lembrada no navegador. O resto sai no melhor
+  (`bestScreenQuality(altura, codificador)`: 60 fps, Fluidez e 20 Mbps de upload).
+  A placa de vídeo é de fato usada assim: (1) antes de começar, `probeHardwareH264` (`client/src/lib/encoder.ts`) pergunta
+  ao navegador (`mediaCapabilities.encodingInfo`, perfis High, Main e Baseline, os únicos que a placa codifica) se ela
+  codifica H.264 naquela resolução e o diálogo diz o resultado; (2) pelo servidor de mídia a publicação pede H.264 e
+  põe os perfis da placa na frente (`preferHardwareH264`); na malha P2P o mesmo vale pela ordem dos codecs do
+  transceiver (`codecOrderFor`); (3) com a transmissão no ar, se o navegador mesmo assim codificar no processador,
+  as estatísticas avisam (`gpu-not-used`). O Chromium nunca amplia a
+  captura: no 2K, uma tela de 1080p sai em 1080p. O teto de bitrate do 2K é o mais alto (9 Mb/s a 30 fps pelo servidor de
+  mídia, 13,5 a 60; 6 e 9 na malha P2P). Fps, prioridade, codificação e upload se ajustam
+  nas configurações da transmissão, com ela no ar (que também tem o 2K e a "Original"), onde a receita "Jogo ou vídeo" escolhe isso de uma vez e "Tela e texto"
   volta para 720p, 30 fps e Nitidez. Jogo rápido troca a imagem inteira a cada quadro, e a
   prioridade Nitidez (que trata a imagem como texto) deixa os quadros caírem: parece travar.
 - **Banda inicial alta na malha P2P** (`shared/src/video-sdp.ts`): o WebRTC começa a estimar a banda em ~300 kbps e a imagem

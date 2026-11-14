@@ -4,22 +4,49 @@ import { labelClass } from './Modal';
 /** A parte da qualidade que dá para mudar com a transmissão no ar (o som só se escolhe ao começar). */
 export type ScreenQuality = Pick<ScreenShareOptions, 'height' | 'frameRate' | 'priority' | 'uploadMbps' | 'codec'>;
 
+/** A única escolha antes de transmitir: a resolução. */
+export const LAUNCH_RESOLUTIONS = [
+  { value: 720, label: '720p', hint: 'Mais leve: bom para internet fraca ou computador simples.' },
+  { value: 1080, label: '1080p', hint: 'Recomendado: nítido e leve para a maioria dos jogos e telas.' },
+  { value: 1440, label: '2K', hint: 'O mais nítido (1440p): pede boa internet e uma placa de vídeo forte. Se a sua tela for menor, sai no tamanho dela.' },
+] as const satisfies readonly { value: 720 | 1080 | 1440; label: string; hint: string }[];
+
+export type LaunchResolution = (typeof LAUNCH_RESOLUTIONS)[number]['value'];
+
+/** Quem codifica o vídeo: a placa de vídeo (H.264) ou o processador (VP8). */
+export const ENCODERS = [
+  { value: 'h264', label: 'Placa de vídeo' },
+  { value: 'vp8', label: 'Processador' },
+] as const satisfies readonly { value: ScreenShareOptions['codec']; label: string }[];
+
+/** Quem codificou da última vez; na primeira, a placa de vídeo onde o navegador sabe usá-la. */
+export function loadLaunchEncoder(): ScreenShareOptions['codec'] {
+  return supportsH264() ? loadScreenOptions().codec : 'vp8';
+}
+
+/** A resolução que a pessoa escolheu da última vez (1080p na primeira). */
+export function loadLaunchResolution(): LaunchResolution {
+  const saved = loadScreenOptions().height;
+  return LAUNCH_RESOLUTIONS.some((r) => r.value === saved) ? (saved as LaunchResolution) : 1080;
+}
+
 /**
- * Com esta qualidade toda transmissão começa: a melhor (1080p, 60 fps, Fluidez e, onde o navegador sabe, a placa de vídeo
- * codificando). Quem precisa de menos ajusta nas configurações da transmissão, com ela no ar. 20 Mbps de upload: o servidor
- * de mídia usa o teto cheio e, na malha P2P, quem tem pouca internet não é sufocado.
+ * Com esta qualidade toda transmissão começa, na resolução escolhida: 60 fps, Fluidez e, onde o navegador sabe, a placa de
+ * vídeo codificando. Quem precisa de outra coisa ajusta nas configurações da transmissão, com ela no ar. 20 Mbps de upload:
+ * o servidor de mídia usa o teto cheio e, na malha P2P, quem tem pouca internet não é sufocado.
  */
-export const bestScreenQuality = (): ScreenQuality => ({
-  height: 1080,
+export const bestScreenQuality = (height: LaunchResolution = 1080, codec: ScreenShareOptions['codec'] = 'h264'): ScreenQuality => ({
+  height,
   frameRate: 60,
   priority: 'smooth',
   uploadMbps: 20,
-  codec: supportsH264() ? 'h264' : 'vp8',
+  codec: codec === 'h264' && supportsH264() ? 'h264' : 'vp8',
 });
 
 const STORAGE_KEY = 'coreto.screenShare';
 const DEFAULT_SCREEN_OPTIONS: ScreenShareOptions = {
-  height: 720,
+  // 1080p: é o que a escolha antes de transmitir marca na primeira vez.
+  height: 1080,
   frameRate: 30,
   audio: true,
   priority: 'sharp',
@@ -31,6 +58,7 @@ const DEFAULT_SCREEN_OPTIONS: ScreenShareOptions = {
 const RESOLUTIONS: { value: ScreenShareOptions['height']; label: string }[] = [
   { value: 720, label: '720p' },
   { value: 1080, label: '1080p' },
+  { value: 1440, label: '2K' },
   { value: null, label: 'Original' },
 ];
 const FRAME_RATES: ScreenShareOptions['frameRate'][] = [15, 30, 60];
@@ -40,8 +68,8 @@ const PRIORITIES: { value: ScreenShareOptions['priority']; label: string }[] = [
 ];
 const UPLOADS: ScreenShareOptions['uploadMbps'][] = [5, 10, 20, 50];
 const CODECS: { value: ScreenShareOptions['codec']; label: string }[] = [
-  { value: 'h264', label: 'H.264 (placa de vídeo)' },
-  { value: 'vp8', label: 'VP8 (processador)' },
+  { value: 'h264', label: 'Placa de vídeo (H.264)' },
+  { value: 'vp8', label: 'Processador (VP8)' },
 ];
 
 /** A última escolha fica no navegador, como conveniência. */
@@ -173,13 +201,13 @@ export function ScreenQualityFields({ value, onChange }: { value: ScreenQuality;
   );
 }
 
-interface SegmentedProps {
+export interface SegmentedProps {
   name: string;
   options: { key: string; label: string; selected: boolean }[];
   onSelect: (key: string) => void;
 }
 
-function Segmented({ name, options, onSelect }: SegmentedProps) {
+export function Segmented({ name, options, onSelect }: SegmentedProps) {
   return (
     <div className="mt-2 flex rounded-md bg-rail p-1">
       {options.map((option) => (

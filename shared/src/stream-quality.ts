@@ -3,8 +3,8 @@
 // P2P), então o upload se divide entre eles.
 
 export interface QualityOptions {
-  /** Altura máxima em pixels; `null` = resolução original da tela. */
-  height: 720 | 1080 | null;
+  /** Altura máxima em pixels (1440 = "2K"); `null` = resolução original da tela. */
+  height: 720 | 1080 | 1440 | null;
   frameRate: 15 | 30 | 60;
   /** Velocidade de envio (upload) da internet de quem transmite, em Mbps. */
   uploadMbps: number;
@@ -25,6 +25,7 @@ export function maxBitrate({ height, frameRate }: Pick<QualityOptions, 'height' 
     via === 'sfu'
       ? height === 720 ? 3_500_000 : height === 1080 ? 6_500_000 : 9_000_000
       : height === 720 ? 2_500_000 : height === 1080 ? 4_500_000 : 6_000_000;
+  // 1440 ("2K") e a resolução original usam o teto mais alto.
   return fpsFactor(frameRate) * base;
 }
 
@@ -89,11 +90,14 @@ export interface StreamDiagnosisInput {
   captureFps?: number | null;
   /** Só ao transmitir: os quadros por segundo pedidos nas configurações. */
   targetFps?: number | null;
+  /** Só ao transmitir: quem a pessoa escolheu para codificar (placa de vídeo ou processador). */
+  wantedEncoder?: 'hardware' | 'software' | null;
   /** Só ao assistir: quantas vezes a imagem congelou nos últimos 30 segundos. */
   freezes: number;
 }
 
 export type StreamAdvice =
+  | 'gpu-not-used'
   | 'capture-limited'
   | 'cpu-software'
   | 'cpu-software-h264'
@@ -120,6 +124,8 @@ const CAPTURE_SHORT_RATIO = 0.7;
 /** A principal causa de uma imagem ruim, a partir dos números; `null` se está tudo bem. */
 export function diagnoseStream(input: StreamDiagnosisInput): StreamAdvice | null {
   if (input.role === 'sending') {
+    // Escolheu a placa de vídeo e o navegador mesmo assim codifica no processador: vale avisar antes de qualquer outro limite.
+    if (input.wantedEncoder === 'hardware' && input.encoder === 'software') return 'gpu-not-used';
     if (input.limit === 'cpu') {
       if (input.encoder !== 'software' || input.via !== 'sfu') return 'cpu';
       // Já em H.264 e mesmo assim no processador: trocar de codec não adianta, o navegador não está usando a placa.

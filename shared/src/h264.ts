@@ -39,3 +39,24 @@ export function preferHardwareH264<T extends VideoCodecCapability>(codecs: reado
   if (sorted.every((codec, index) => codec === h264[index])) return null;
   return [...sorted, ...codecs.filter((codec) => !isH264(codec))];
 }
+
+/**
+ * Os codecs na ordem de preferência para a escolha da pessoa: `h264` (placa de vídeo) põe os perfis que a placa codifica
+ * na frente, de todos os outros codecs, mesmo que já estivessem na ordem certa entre si; `vp8` (processador) põe o VP8 na
+ * frente. `null` se não há o que mudar (codec ausente ou a lista já está assim). Serve à malha P2P, onde o navegador
+ * escolhe o codec sozinho; no servidor de mídia o codec é pedido na publicação.
+ */
+export function codecOrderFor<T extends VideoCodecCapability>(codecs: readonly T[], choice: 'h264' | 'vp8'): T[] | null {
+  let ordered: T[];
+  if (choice === 'h264') {
+    const h264 = preferHardwareH264(codecs) ?? codecs.filter(isH264);
+    if (h264.length === 0 || !codecs.some(isH264)) return null;
+    // `preferHardwareH264` já devolve a lista inteira reordenada; sem ela, os H.264 vão na frente e o resto segue.
+    ordered = h264.length === codecs.length ? h264 : [...h264, ...codecs.filter((c) => !isH264(c))];
+  } else {
+    const vp8 = codecs.filter((c) => c.mimeType.toLowerCase() === 'video/vp8');
+    if (vp8.length === 0) return null;
+    ordered = [...vp8, ...codecs.filter((c) => !vp8.includes(c))];
+  }
+  return ordered.every((codec, index) => codec === codecs[index]) ? null : ordered;
+}

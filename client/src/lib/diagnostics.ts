@@ -19,6 +19,7 @@ import {
 import type { IceServer } from '@shared/protocol';
 import type { RealtimeActions } from '../state/realtime/types';
 import { desktop } from './desktop';
+import { probeHardwareH264 } from './encoder';
 import type { VoicePrefs } from './settings';
 import { SERVER_URL } from './socket';
 import { describeMediaError, openMicrophone } from './voice';
@@ -222,17 +223,8 @@ export async function probeVideo(): Promise<VideoProbe> {
   } catch {
     // Sem a API: a lista fica vazia e o veredito diz isso.
   }
-  let h264Hardware: boolean | null = null;
-  try {
-    // O que o Coreto pede numa transmissão de jogo: 1080p a 60 quadros. `powerEfficient` é o codificador da placa de vídeo.
-    const info = await navigator.mediaCapabilities.encodingInfo({
-      type: 'webrtc',
-      video: { contentType: 'video/H264;profile-level-id=42e01f', width: 1920, height: 1080, bitrate: 6_000_000, framerate: 60 },
-    });
-    h264Hardware = info.supported ? info.powerEfficient : null;
-  } catch {
-    // O navegador não sabe dizer.
-  }
+  // O que o Coreto pede numa transmissão de jogo: 1080p a 60 quadros, nos perfis que a placa de vídeo codifica.
+  const h264Hardware = await probeHardwareH264(1920, 1080, 60);
   return { codecs, h264Hardware };
 }
 

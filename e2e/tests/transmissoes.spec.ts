@@ -96,7 +96,7 @@ test.describe('transmissões de tela', () => {
 });
 
 test.describe('qualidade para jogos', () => {
-  test('toda transmissão começa na melhor qualidade, sem perguntar, e as configurações com ela no ar mostram o teto', async ({ browser }) => {
+  test('antes de transmitir há uma escolha só (720p, 1080p ou 2K), em 1080p de início, e as configurações com ela no ar mostram o teto', async ({ browser }) => {
     const ana = await openPerson(browser, 'Ana');
     const bruno = await openPerson(browser, 'Bruno', { screen: { color: '#1f7a4d', width: 1920, height: 1080 } });
     await joinCall(ana.page);
@@ -104,8 +104,13 @@ test.describe('qualidade para jogos', () => {
 
     await bruno.page.getByRole('button', { name: 'Tela', exact: true }).click();
     const dialog = bruno.page.getByRole('dialog', { name: 'Compartilhar tela' });
-    // Só o som: a qualidade não é perguntada (sempre a melhor).
-    await expect(dialog.getByRole('radio')).toHaveCount(0);
+    // Uma escolha só de qualidade: a resolução. O resto sai no melhor, e o som é opcional.
+    await expect(dialog.getByRole('radio')).toHaveCount(5);
+    for (const name of ['720p', '1080p', '2K', 'Placa de vídeo', 'Processador']) await expect(dialog.getByRole('radio', { name, exact: true })).toBeVisible();
+    await expect(dialog.getByRole('radio', { name: '1080p' })).toBeChecked();
+    // Quem codifica: a placa de vídeo de início, onde o navegador sabe usá-la.
+    await expect(dialog.getByRole('radio', { name: 'Placa de vídeo' })).toBeChecked();
+    await expect(dialog.getByTestId('encoder-hint')).not.toHaveText('Conferindo a placa de vídeo…', { timeout: 10_000 });
     await expect(dialog.getByRole('checkbox')).toBeChecked();
     await dialog.getByRole('button', { name: 'Escolher tela' }).click();
     await expect(bruno.page.getByRole('region', { name: 'Sua tela' })).toBeVisible();
@@ -128,6 +133,88 @@ test.describe('qualidade para jogos', () => {
     await expect(settings.getByRole('radio', { name: '1080p' })).toBeChecked();
     await expect(settings.getByRole('radio', { name: '60 fps' })).toBeChecked();
     await expect(settings.getByRole('radio', { name: 'Fluidez' })).toBeChecked();
+    await Promise.all([ana, bruno].map((p) => p.context.close()));
+  });
+});
+
+test.describe('escolha da resolução antes de transmitir', () => {
+  test('a resolução escolhida vale para a transmissão e fica lembrada na próxima', async ({ browser }) => {
+    const ana = await openPerson(browser, 'Ana');
+    const bruno = await openPerson(browser, 'Bruno', { screen: { color: '#1f7a4d', width: 1920, height: 1080 } });
+    await joinCall(ana.page);
+    await joinCall(bruno.page);
+
+    await bruno.page.getByRole('button', { name: 'Tela', exact: true }).click();
+    const dialog = bruno.page.getByRole('dialog', { name: 'Compartilhar tela' });
+    await dialog.getByText('2K', { exact: true }).click();
+    await expect(dialog.getByRole('radio', { name: '2K' })).toBeChecked();
+    await expect(dialog).toContainText('1440p');
+    await dialog.getByRole('button', { name: 'Escolher tela' }).click();
+    await expect(bruno.page.getByRole('region', { name: 'Sua tela' })).toBeVisible();
+
+    await ana.page.getByRole('button', { name: `Assistir à tela de ${bruno.name}` }).click();
+    await expect(ana.page.getByRole('region', { name: `Tela de ${bruno.name}` }).locator('video')).toBeVisible();
+
+    // Com a transmissão no ar, as configurações mostram o 2K e o teto de bitrate dele (maior que o do 1080p, de 6,8 Mb/s).
+    await bruno.page.getByRole('region', { name: 'Sua tela' }).getByRole('button', { name: 'Estatísticas da transmissão' }).click();
+    await expect(bruno.page.getByRole('status', { name: 'Estatísticas da transmissão' })).toContainText('teto 9,0 Mb/s', { timeout: 15_000 });
+    await bruno.page.getByRole('button', { name: 'Configurações da transmissão' }).first().click();
+    await expect(bruno.page.getByRole('dialog', { name: 'Configurações da transmissão' }).getByRole('radio', { name: '2K' })).toBeChecked();
+    await bruno.page.keyboard.press('Escape');
+
+    // Parar e começar de novo: a escolha anterior já vem marcada.
+    await bruno.page.getByRole('button', { name: 'Parar de transmitir' }).first().click();
+    await bruno.page.getByRole('button', { name: 'Tela', exact: true }).click();
+    await expect(bruno.page.getByRole('dialog', { name: 'Compartilhar tela' }).getByRole('radio', { name: '2K' })).toBeChecked();
+    await Promise.all([ana, bruno].map((p) => p.context.close()));
+  });
+});
+
+test.describe('quem codifica a transmissão', () => {
+  test('a escolha de quem codifica vale para a transmissão e fica lembrada na próxima', async ({ browser }) => {
+    const ana = await openPerson(browser, 'Ana');
+    const bruno = await openPerson(browser, 'Bruno', { screen: { color: '#1f7a4d', width: 1920, height: 1080 } });
+    await joinCall(ana.page);
+    await joinCall(bruno.page);
+
+    await bruno.page.getByRole('button', { name: 'Tela', exact: true }).click();
+    const dialog = bruno.page.getByRole('dialog', { name: 'Compartilhar tela' });
+    await dialog.getByText('Processador', { exact: true }).click();
+    await expect(dialog.getByRole('radio', { name: 'Processador' })).toBeChecked();
+    await expect(dialog.getByTestId('encoder-hint')).toContainText('O processador codifica');
+    await dialog.getByRole('button', { name: 'Escolher tela' }).click();
+    await expect(bruno.page.getByRole('region', { name: 'Sua tela' })).toBeVisible();
+
+    await ana.page.getByRole('button', { name: `Assistir à tela de ${bruno.name}` }).click();
+    await expect(ana.page.getByRole('region', { name: `Tela de ${bruno.name}` }).locator('video')).toBeVisible();
+
+    // O codec que chega é o escolhido, e não há aviso de placa de vídeo sem uso (o processador era o pedido).
+    await bruno.page.getByRole('region', { name: 'Sua tela' }).getByRole('button', { name: 'Estatísticas da transmissão' }).click();
+    const stats = bruno.page.getByRole('status', { name: 'Estatísticas da transmissão' });
+    await expect(stats).toContainText('VP8', { timeout: 15_000 });
+    await expect(stats).not.toContainText('Você escolheu a placa de vídeo');
+
+    // Parar e começar de novo: o processador já vem marcado.
+    await bruno.page.getByRole('button', { name: 'Parar de transmitir' }).first().click();
+    await bruno.page.getByRole('button', { name: 'Tela', exact: true }).click();
+    await expect(bruno.page.getByRole('dialog', { name: 'Compartilhar tela' }).getByRole('radio', { name: 'Processador' })).toBeChecked();
+    await Promise.all([ana, bruno].map((p) => p.context.close()));
+  });
+
+  test('com a placa de vídeo escolhida, a transmissão sai em H.264', async ({ browser }) => {
+    const ana = await openPerson(browser, 'Ana');
+    const bruno = await openPerson(browser, 'Bruno', { screen: { color: '#1f7a4d', width: 1920, height: 1080 } });
+    await joinCall(ana.page);
+    await joinCall(bruno.page);
+
+    await bruno.page.getByRole('button', { name: 'Tela', exact: true }).click();
+    await bruno.page.getByRole('dialog', { name: 'Compartilhar tela' }).getByRole('button', { name: 'Escolher tela' }).click();
+    await expect(bruno.page.getByRole('region', { name: 'Sua tela' })).toBeVisible();
+    await ana.page.getByRole('button', { name: `Assistir à tela de ${bruno.name}` }).click();
+    await expect(ana.page.getByRole('region', { name: `Tela de ${bruno.name}` }).locator('video')).toBeVisible();
+
+    await ana.page.getByRole('region', { name: `Tela de ${bruno.name}` }).getByRole('button', { name: 'Estatísticas da transmissão' }).click();
+    await expect(ana.page.getByRole('status', { name: 'Estatísticas da transmissão' })).toContainText('H264', { timeout: 15_000 });
     await Promise.all([ana, bruno].map((p) => p.context.close()));
   });
 });

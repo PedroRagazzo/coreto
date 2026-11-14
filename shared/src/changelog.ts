@@ -22,6 +22,26 @@ export interface ChangelogEntry {
 /** Da mais nova para a mais antiga. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-14-9',
+    title: 'Placa de vídeo ou processador',
+    items: [
+      {
+        title: 'Escolha quem codifica a transmissão',
+        text: 'Ao compartilhar a tela, agora dá para escolher entre Placa de vídeo (deixa o processador livre para o jogo) e Processador. O Coreto confere antes se o seu computador usa a placa e avisa na hora se ela não for usada.',
+      },
+    ],
+  },
+  {
+    id: '2026-11-14-8',
+    title: 'Escolha a resolução da transmissão',
+    items: [
+      {
+        title: '720p, 1080p ou 2K',
+        text: 'Ao compartilhar a tela, agora há uma escolha só antes de começar: 720p, 1080p ou 2K. O Coreto lembra a sua última escolha, e o resto da qualidade já sai no melhor. O 2K pede boa internet e uma placa de vídeo forte.',
+      },
+    ],
+  },
+  {
     id: '2026-11-14-7',
     title: 'Estatísticas da transmissão mais claras',
     items: [

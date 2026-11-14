@@ -12,6 +12,7 @@
 import { assess, type ConnectionQuality, ownLevel, type QualitySample } from '@shared/connection-quality';
 import type { Id } from '@shared/models';
 import { withStereoOpus, withVoiceOpus } from '@shared/opus-sdp';
+import { codecOrderFor } from '@shared/h264';
 import { startBitrateKbps, withVideoStartBitrate } from '@shared/video-sdp';
 import { initialLeveler, levelerStep, LIMIT_HEADROOM, rmsDb, softLimitCurve, type LevelerState } from '@shared/voice-level';
 import type { IceServer, SignalPayload, VoiceJoinResult } from '@shared/protocol';
@@ -412,8 +413,8 @@ const micChanged = (a: VoicePrefs, b: VoicePrefs) =>
 
 /** Qualidade da transmissão de tela, como no seletor do Discord. */
 export interface ScreenShareOptions {
-  /** Altura máxima em pixels; `null` = resolução original da tela. */
-  height: 720 | 1080 | null;
+  /** Altura máxima em pixels (1440 = "2K"); `null` = resolução original da tela. */
+  height: 720 | 1080 | 1440 | null;
   frameRate: 15 | 30 | 60;
   /** Pede também o som (o Chrome oferece para abas e para a tela inteira no Windows). */
   audio: boolean;
@@ -477,6 +478,8 @@ export interface StreamStats {
   captureFps: number | null;
   /** Só ao transmitir: os quadros por segundo pedidos nas configurações. */
   targetFps: number | null;
+  /** Só ao transmitir: quem a pessoa escolheu para codificar, a placa de vídeo ou o processador. */
+  wantedEncoder: 'hardware' | 'software' | null;
   /** Só ao transmitir: o tamanho que a captura da tela entrega, antes do codificador (`null` se o navegador não diz). */
   captureSize: { width: number; height: number } | null;
   /** Só ao transmitir: quanto o envio reduz a imagem da captura (1 = sem redução), como está nos parâmetros do emissor. */
@@ -590,6 +593,8 @@ interface Peer {
   screenVideo: RTCRtpTransceiver | null;
   screenAudio: RTCRtpTransceiver | null;
   cameraVideo: RTCRtpTransceiver | null;
+  /** O codec que a vaga da tela foi preparada para preferir (placa de vídeo = h264, processador = vp8). */
+  screenCodec: ScreenShareOptions['codec'] | null;
 }
 
 type Slot = 'screenVideo' | 'screenAudio' | 'cameraVideo';
@@ -1191,6 +1196,7 @@ export class VoiceManager {
     for (const [peerId, peer] of this.peers) {
       const watching = this.screen !== null && p2pViewers.has(peerId);
       this.sendTrack(peer, 'screenVideo', watching ? video : null, this.screenCarrier, encodings);
+      if (watching && options) this.preferScreenCodec(peer, options.codec);
       this.sendTrack(peer, 'screenAudio', watching ? audio : null, this.screenCarrier, []);
     }
     const sender = this.screen?.transport === 'sfu' ? this.sfuSession?.videoSender : null;
@@ -1218,6 +1224,25 @@ export class VoiceManager {
     }
     void transceiver.sender.replaceTrack(track).catch((err: unknown) => console.warn('[voz] replaceTrack', err));
     if (track && encodings.length) void this.updateEncoding(transceiver.sender, encodings[0]);
+  }
+
+  /**
+   * Pela malha P2P o navegador escolhe o codec sozinho; aqui a escolha da pessoa (placa de vídeo = H.264 nos perfis que a
+   * placa codifica, processador = VP8) vai na frente da lista, e a negociação a respeita. Se a vaga já existia com outra
+   * escolha, renegocia para valer.
+   */
+  private preferScreenCodec(peer: Peer, codec: ScreenShareOptions['codec']): void {
+    const transceiver = peer.screenVideo;
+    if (!transceiver || peer.screenCodec === codec) return;
+    const changed = peer.screenCodec !== null;
+    peer.screenCodec = codec;
+    try {
+      const ordered = codecOrderFor(RTCRtpSender.getCapabilities?.('video')?.codecs ?? [], codec);
+      if (ordered) transceiver.setCodecPreferences(ordered);
+      if (changed) void (peer.pc.onnegotiationneeded as ((event: Event) => unknown) | null)?.(new Event('negotiationneeded'));
+    } catch (err) {
+      console.warn('[voz] não deu para preferir o codec escolhido', err);
+    }
   }
 
   private async updateEncoding(
@@ -1305,6 +1330,7 @@ export class VoiceManager {
       availableKbps: null,
       captureFps: null,
       targetFps: null,
+      wantedEncoder: null,
       captureSize: null,
       scaleDown: null,
       freezes: this.recentIncrease(`freeze:${userId}`, Number(inbound['freezeCount'] ?? 0)),
@@ -1401,6 +1427,7 @@ export class VoiceManager {
       availableKbps: available,
       captureFps,
       targetFps: this.screen.options.frameRate,
+      wantedEncoder: this.screen.options.codec === 'h264' && supportsH264() ? 'hardware' : 'software',
       captureSize,
       scaleDown,
       freezes: 0,
@@ -1450,6 +1477,7 @@ export class VoiceManager {
       screenVideo: null,
       screenAudio: null,
       cameraVideo: null,
+      screenCodec: null,
     };
     this.peers.set(peerId, peer);
     // Antes de qualquer oferta: o outro lado precisa saber qual vídeo é qual.

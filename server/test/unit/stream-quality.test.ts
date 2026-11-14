@@ -49,6 +49,14 @@ describe('teto pelo servidor de mídia', () => {
     expect(maxBitrate(options({ height: null }), 'sfu')).toBe(9_000_000);
   });
 
+  it('o 2K (1440p) usa o teto mais alto, e 720p, 1080p e 2K sobem nessa ordem', () => {
+    expect(maxBitrate(options({ height: 1440 }), 'sfu')).toBe(9_000_000);
+    expect(maxBitrate(options({ height: 1440 }))).toBe(6_000_000);
+    const at = (height: 720 | 1080 | 1440) => maxBitrate(options({ height, frameRate: 60 }), 'sfu');
+    expect(at(720)).toBeLessThan(at(1080));
+    expect(at(1080)).toBeLessThan(at(1440));
+  });
+
   it('o upload informado ainda manda: 70% dele', () => {
     // 10 Mbps × 70% = 7 Mbps: 1080p60 pede 9,75 Mbps, então fica em 7.
     expect(viewerBitrate(options({ frameRate: 60 }), 1, 'sfu')).toBe(7_000_000);
@@ -117,6 +125,17 @@ describe('diagnoseStream', () => {
   it('está tudo bem quando nada limita', () => {
     expect(diagnoseStream(sending())).toBeNull();
     expect(diagnoseStream(receiving())).toBeNull();
+  });
+
+  it('escolheu a placa de vídeo e o processador codifica: avisa antes de qualquer outro limite', () => {
+    expect(diagnoseStream(sending({ wantedEncoder: 'hardware', encoder: 'software' }))).toBe('gpu-not-used');
+    expect(diagnoseStream(sending({ wantedEncoder: 'hardware', encoder: 'software', limit: 'cpu', via: 'p2p' }))).toBe('gpu-not-used');
+  });
+
+  it('a placa de vídeo codificando, ou o processador escolhido, não gera o aviso', () => {
+    expect(diagnoseStream(sending({ wantedEncoder: 'hardware', encoder: 'hardware' }))).toBeNull();
+    expect(diagnoseStream(sending({ wantedEncoder: 'hardware', encoder: null }))).toBeNull();
+    expect(diagnoseStream(sending({ wantedEncoder: 'software', encoder: 'software' }))).toBeNull();
   });
 
   it('o computador no limite: sugere H.264 se é o processador que codifica pelo servidor de mídia', () => {
