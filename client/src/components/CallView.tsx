@@ -1,6 +1,6 @@
 import { bestGrid } from '@shared/grid';
 import type { Id, VoiceParticipant } from '@shared/models';
-import { AudioLines, HeadphoneOff, Mic, MicOff, MonitorUp, Music2, PhoneOff, Replace, Settings2, Video, VideoOff, Volume2, X } from 'lucide-react';
+import { AudioLines, HeadphoneOff, Mic, MicOff, MonitorUp, Music2, PhoneOff, Replace, Video, VideoOff, Volume2, X } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useElementSize } from '../lib/useElementSize';
 import { useRealtime } from '../state/realtime';
@@ -10,7 +10,6 @@ import { MusicDialog, useMusic } from './MusicDialog';
 import { SoundboardDialog } from './SoundboardDialog';
 import { ScreenShareDialog } from './ScreenShareDialog';
 import { ConnectionIndicator } from './ConnectionIndicator';
-import { StreamSettingsDialog } from './StreamSettingsDialog';
 import { LiveBadge } from './StreamStage';
 import { useUserVolumeMenu } from './UserVolumeMenu';
 
@@ -26,7 +25,6 @@ const MIN_TILE_WIDTH = 220;
 export function CallView() {
   const { state, actions } = useRealtime();
   const [choosingScreen, setChoosingScreen] = useState(false);
-  const [configuring, setConfiguring] = useState(false);
   const [musicOpen, setMusicOpen] = useState(false);
   const [soundsOpen, setSoundsOpen] = useState(false);
   const music = useMusic();
@@ -102,11 +100,6 @@ export function CallView() {
             <Replace size={20} />
           </CallButton>
         )}
-        {voice.streaming && (
-          <CallButton label="Configurações da transmissão" onClick={() => setConfiguring(true)}>
-            <Settings2 size={20} />
-          </CallButton>
-        )}
         <CallButton label="Música" active={Boolean(music?.state.current)} onClick={() => setMusicOpen(true)}>
           <Music2 size={20} />
         </CallButton>
@@ -126,7 +119,6 @@ export function CallView() {
         </CallButton>
       </footer>
       {choosingScreen && <ScreenShareDialog onClose={() => setChoosingScreen(false)} />}
-      {configuring && voice.streaming && <StreamSettingsDialog onClose={() => setConfiguring(false)} />}
       {musicOpen && <MusicDialog onClose={() => setMusicOpen(false)} />}
       {soundsOpen && <SoundboardDialog onClose={() => setSoundsOpen(false)} />}
     </>

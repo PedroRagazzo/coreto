@@ -12,7 +12,6 @@ import {
   MonitorOff,
   PanelRight,
   Replace,
-  Settings2,
   Volume2,
   VolumeX,
   X,
@@ -22,7 +21,6 @@ import { useElementSize } from '../lib/useElementSize';
 import type { StreamStats } from '../lib/voice';
 import { useRealtime } from '../state/realtime';
 import { displayNameOf } from '../state/selectors';
-import { StreamSettingsDialog } from './StreamSettingsDialog';
 
 /** Selo vermelho "AO VIVO" de quem está transmitindo. */
 export function LiveBadge() {
@@ -196,7 +194,6 @@ function StreamTile({
   const [size, setSize] = useState<{ width: number; height: number } | null>(null);
   const [hasAudio, setHasAudio] = useState(false);
   const [showStats, setShowStats] = useState(false);
-  const [configuring, setConfiguring] = useState(false);
   const stats = useStreamStats(userId, showStats && live, actions.screenStats);
 
   useEffect(() => {
@@ -294,17 +291,6 @@ function StreamTile({
               className="ml-auto rounded p-1.5 text-muted hover:bg-hover hover:text-fg"
             >
               <Replace size={18} />
-            </button>
-          )}
-          {live && isMe && (
-            <button
-              type="button"
-              onClick={() => setConfiguring(true)}
-              title="Configurações da transmissão"
-              aria-label="Configurações da transmissão"
-              className="rounded p-1.5 text-muted hover:bg-hover hover:text-fg"
-            >
-              <Settings2 size={18} />
             </button>
           )}
           {live && (
@@ -449,7 +435,6 @@ function StreamTile({
           )
         )}
       </div>
-      {configuring && live && <StreamSettingsDialog onClose={() => setConfiguring(false)} />}
     </section>
   );
 }
@@ -484,7 +469,7 @@ const ADVICE: Record<StreamAdvice, string> = {
   'capture-limited':
     'A captura da tela entrega menos quadros do que o pedido, e isso vem antes do codificador e da rede: se a tela está parada ou quase, é normal; se é um jogo, ele (ou a placa de vídeo ocupada) está limitando. Veja o limite de quadros do jogo e se o monitor está em taxa alta.',
   'cpu-software':
-    'O processador está codificando o vídeo e no limite: em Configurações da transmissão, escolha H.264 (placa de vídeo), ou uma resolução menor ou menos quadros por segundo.',
+    'O processador está codificando o vídeo e no limite: pare e comece de novo escolhendo Placa de vídeo, ou uma resolução menor ou menos quadros por segundo.',
   'cpu-software-h264':
     'O vídeo está sendo codificado pelo processador, não pela placa de vídeo, mesmo em H.264: atualize o driver da placa, feche programas que também gravam ou transmitem (gravadores, outros apps de chamada) e, se continuar, escolha uma resolução menor ou menos quadros por segundo.',
   cpu: 'Seu computador está no limite: o jogo e a transmissão disputam a máquina. Escolha uma resolução menor ou menos quadros por segundo.',

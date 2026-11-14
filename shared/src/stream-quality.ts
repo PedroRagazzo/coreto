@@ -56,6 +56,30 @@ const HEIGHT_LADDER = [
 /** Imagem em movimento (jogo, vídeo) pede mais bits por pixel que tela parada: a escada acima vale para texto. */
 const MOTION_FACTOR = 1.4;
 
+/** O que pedir à captura de tela (`getDisplayMedia` e `applyConstraints`). */
+export interface ScreenCaptureConstraints {
+  frameRate: { ideal: number; max: number };
+  width?: { ideal: number; max: number };
+  height?: { ideal: number; max: number };
+}
+
+/**
+ * A captura de tela dentro de uma caixa 16:9 de `height` de altura, com a largura pedida junto. Só com a altura, o Chromium
+ * escolhe a largura sozinho, e no app de um amigo isso deu 1080×608 com o 1080p escolhido (a largura saiu igual à altura);
+ * já a opção "Original" (sem limite nenhum) entregou 1920×1080. Com os dois lados pedidos não há o que escolher. Uma tela
+ * 16:9 sai em `height`, uma mais larga (21:9) cabe na caixa e sai um pouco menor, sem distorcer. O Chromium nunca amplia.
+ * `null` (Original): sem limite de tamanho, a captura sai do tamanho da tela.
+ */
+export function screenCaptureConstraints(frameRate: number, height: number | null): ScreenCaptureConstraints {
+  const constraints: ScreenCaptureConstraints = { frameRate: { ideal: frameRate, max: frameRate } };
+  if (height) {
+    const width = Math.round((height * 16) / 9);
+    constraints.width = { ideal: width, max: width };
+    constraints.height = { ideal: height, max: height };
+  }
+  return constraints;
+}
+
 /**
  * Quanto reduzir a imagem para ela caber no bitrate disponível. Com pouco bitrate, uma imagem
  * menor e nítida é melhor que uma grande e cheia de blocos. 1 = sem redução. Na prioridade `smooth`

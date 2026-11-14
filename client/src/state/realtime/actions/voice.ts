@@ -123,14 +123,6 @@ export function createVoiceActions(ctx: ActionContext) {
       return null;
     },
 
-    screenOptions() {
-      return voiceRef.current?.screenOptions() ?? null;
-    },
-
-    updateScreenOptions(patch) {
-      return voiceRef.current?.updateScreen(patch) ?? Promise.resolve(null);
-    },
-
     async musicPlay(input, next = false) {
       const res = await socketRef.current?.emitWithAck('music:play', { input, next });
       if (!res) return { error: 'Sem conexão com o servidor.' };

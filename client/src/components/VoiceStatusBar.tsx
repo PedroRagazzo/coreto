@@ -1,17 +1,15 @@
-import { AudioLines, Eye, Headphones, HeadphoneOff, Mic, MicOff, MonitorUp, MonitorX, Music2, Pause, PhoneOff, Play, Replace, Settings2, SkipForward, Video, VideoOff, X } from 'lucide-react';
+import { AudioLines, Eye, Headphones, HeadphoneOff, Mic, MicOff, MonitorUp, MonitorX, Music2, Pause, PhoneOff, Play, Replace, SkipForward, Video, VideoOff, X } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { useRealtime } from '../state/realtime';
 import { MusicDialog, useMusic } from './MusicDialog';
 import { SoundboardDialog } from './SoundboardDialog';
 import { ScreenShareDialog } from './ScreenShareDialog';
-import { StreamSettingsDialog } from './StreamSettingsDialog';
 import { LiveBadge } from './StreamStage';
 
 /** Faixa acima do painel do usuário enquanto há uma chamada de voz ativa. */
 export function VoiceStatusBar() {
   const { state, actions } = useRealtime();
   const [choosingScreen, setChoosingScreen] = useState(false);
-  const [configuring, setConfiguring] = useState(false);
   const [musicOpen, setMusicOpen] = useState(false);
   const [soundsOpen, setSoundsOpen] = useState(false);
   const music = useMusic();
@@ -91,15 +89,6 @@ export function VoiceStatusBar() {
                 className="rounded-md p-1.5 text-muted hover:bg-hover hover:text-fg"
               >
                 <Replace size={18} />
-              </button>
-              <button
-                type="button"
-                onClick={() => setConfiguring(true)}
-                title="Configurações da transmissão"
-                aria-label="Configurações da transmissão"
-                className="rounded-md p-1.5 text-muted hover:bg-hover hover:text-fg"
-              >
-                <Settings2 size={18} />
               </button>
               <button
                 type="button"
@@ -192,7 +181,6 @@ export function VoiceStatusBar() {
         )}
       </div>
       {choosingScreen && <ScreenShareDialog onClose={() => setChoosingScreen(false)} />}
-      {configuring && voice.streaming && <StreamSettingsDialog onClose={() => setConfiguring(false)} />}
       {musicOpen && voice.channelId && <MusicDialog onClose={() => setMusicOpen(false)} />}
       {soundsOpen && voice.channelId && <SoundboardDialog onClose={() => setSoundsOpen(false)} />}
     </>

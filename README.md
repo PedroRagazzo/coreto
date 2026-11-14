@@ -788,12 +788,9 @@ renegociar) e, pelo servidor de mídia, `SfuSession.replaceScreen` troca a faixa
 não vê a transmissão acabar nem recomeçar. O som e a miniatura da prévia acompanham a janela nova, o nome na lista da sala
 é atualizado (`stream:start` de novo) e, se o seletor for cancelado, nada muda.
 
-**Mudar a qualidade durante a transmissão:** quem transmite abre as **Configurações da transmissão** (engrenagem no
-palco da própria tela, na faixa da chamada ou no rodapé da visão da chamada) e troca resolução, quadros, prioridade e
-upload sem parar nem escolher a tela de novo. A captura passa a entregar a nova altura e os novos quadros
-(`applyConstraints`), a dica de prioridade vai para o codificador e o bitrate de cada espectador é recalculado
-(`setParameters`), sem renegociar: quem assiste só vê a imagem mudar. As mudanças entram numa fila, uma de cada vez. O
-som só se escolhe ao começar.
+**A qualidade se escolhe ao começar:** com a transmissão no ar só se troca a janela ou a tela (botão acima); não há mais
+"Configurações da transmissão". Para mudar resolução, quadros ou quem codifica, pare e comece de novo (a última escolha
+já vem marcada no diálogo).
 
 O vídeo só vai para quem escolheu assistir, o que economiza a banda de quem transmite. O servidor só guarda
 `streaming` e `watching` de cada participante (`stream:start`, `stream:stop`, `stream:watch`, `stream:unwatch`) e quem
@@ -813,25 +810,30 @@ transmite codifica uma vez por espectador. Para a imagem não ficar borrada quan
 - **Estatísticas** (botão com o ícone de atividade no cabeçalho da transmissão): resolução, quadros por segundo, bitrate,
   codec, perda de pacotes e latência, lidos de `getStats()`. Para quem transmite mostra também o que está limitando a
   qualidade (seu computador ou sua internet).
-- **Qualidade ao começar**: o diálogo de compartilhar tem duas escolhas, a resolução (**720p, 1080p (padrão) ou 2K**,
-  1440p; `LAUNCH_RESOLUTIONS`) e **quem codifica** (**Placa de vídeo** = H.264, padrão onde o navegador suporta, ou
-  **Processador** = VP8; `ENCODERS`), mais o som. A última escolha fica lembrada no navegador. O resto sai no melhor
-  (`bestScreenQuality(altura, codificador)`: 60 fps, Fluidez e 20 Mbps de upload).
+- **Qualidade ao começar**: o diálogo de compartilhar tem a **resolução** (**720p, 1080p (padrão), 2K ou Original**,
+  esta marcada como recomendada: a imagem sai do tamanho da tela, sem reduzir; `LAUNCH_RESOLUTIONS`), os **quadros por
+  segundo** (15, 30 ou 60) e **quem codifica** (**Placa de vídeo** = H.264, padrão onde o navegador suporta, ou
+  **Processador** = VP8; `ENCODERS`), mais o som. A última escolha fica lembrada no navegador (os quadros só se lembram
+  quando a pessoa os escolhe; senão o Coreto decide, ver abaixo). O resto sai no melhor
+  (`bestScreenQuality(altura, codificador)`: Fluidez e 20 Mbps de upload). Para a "Original", a sonda da placa de vídeo
+  usa o tamanho real da tela (`nativeScreenSize`).
   A placa de vídeo é de fato usada assim: (1) antes de começar, `probeHardwareH264` (`client/src/lib/encoder.ts`) pergunta
   ao WebCodecs (`VideoEncoder.isConfigSupported` com `hardwareAcceleration: 'prefer-hardware'`) se ela codifica H.264
   naquela resolução, a 60 e a 30 fps, e o diálogo diz o resultado. Não se usa `mediaCapabilities.encodingInfo`
   (`powerEfficient` dá "não" mesmo com a placa codificando) nem `encoderImplementation` (só aparece com uma captura ativa).
   Medido no Electron 44 com uma RTX: a placa vai até 1080p a 60 fps e, em 2K, só a 30; a 60 o Chromium usa o processador.
-  Por isso o 2K com a placa de vídeo escolhida começa a **30 fps** (`launchFrameRate` em `shared/src/h264.ts`) e o
-  diálogo diz isso; (2) pelo servidor de mídia a publicação pede H.264 e
+  Por isso, enquanto a pessoa não escolhe os quadros, o 2K com a placa de vídeo começa a **30 fps**
+  (`launchFrameRate` em `shared/src/h264.ts`) e o diálogo diz isso; se ela escolher 60, o diálogo avisa que a placa não
+  codifica isso; (2) pelo servidor de mídia a publicação pede H.264 e
   põe os perfis da placa na frente (`preferHardwareH264`); na malha P2P o mesmo vale pela ordem dos codecs do
   transceiver (`codecOrderFor`); (3) com a transmissão no ar, se o navegador mesmo assim codificar no processador,
-  as estatísticas avisam (`gpu-not-used`). O Chromium nunca amplia a
+  as estatísticas avisam (`gpu-not-used`). A captura pede largura e altura juntas, numa
+  caixa 16:9 (`screenCaptureConstraints`, em `shared/src/stream-quality.ts`): só com a altura, o Chromium de um amigo
+  escolheu a largura sozinho e o 1080p chegou em 1080×608, enquanto "Original" (sem limite) chegou em 1920×1080. Uma tela
+  mais larga (21:9) cabe na caixa e sai um pouco menor, sem distorcer. O Chromium nunca amplia a
   captura: no 2K, uma tela de 1080p sai em 1080p. O teto de bitrate do 2K é o mais alto (9 Mb/s a 30 fps pelo servidor de
-  mídia, 13,5 a 60; 6 e 9 na malha P2P). Fps, prioridade, codificação e upload se ajustam
-  nas configurações da transmissão, com ela no ar (que também tem o 2K e a "Original"), onde a receita "Jogo ou vídeo" escolhe isso de uma vez e "Tela e texto"
-  volta para 720p, 30 fps e Nitidez. Jogo rápido troca a imagem inteira a cada quadro, e a
-  prioridade Nitidez (que trata a imagem como texto) deixa os quadros caírem: parece travar.
+  mídia, 13,5 a 60; 6 e 9 na malha P2P). Jogo rápido troca a imagem inteira a cada quadro, e a prioridade Nitidez (que
+  trata a imagem como texto) deixa os quadros caírem: parece travar, por isso o padrão é Fluidez.
 - **Banda inicial alta na malha P2P** (`shared/src/video-sdp.ts`): o WebRTC começa a estimar a banda em ~300 kbps e a imagem
   subia em degraus (320 → 480 → 640 → 960 → 1280 de largura) por ~18 s, borrada. Enquanto a tela sai pela malha, o SDP de
   vídeo leva `x-google-start-bitrate` com 60% do bitrate-alvo de cada espectador (piso de 500 e teto de 2500 kbps, então

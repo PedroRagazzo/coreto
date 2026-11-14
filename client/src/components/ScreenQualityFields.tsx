@@ -1,17 +1,25 @@
 import { supportsH264, type ScreenShareOptions } from '../lib/voice';
-import { labelClass } from './Modal';
 
-/** A parte da qualidade que dá para mudar com a transmissão no ar (o som só se escolhe ao começar). */
+/** A parte da qualidade que se escolhe ao começar a transmitir (o som é uma escolha à parte). */
 export type ScreenQuality = Pick<ScreenShareOptions, 'height' | 'frameRate' | 'priority' | 'uploadMbps' | 'codec'>;
 
-/** A única escolha antes de transmitir: a resolução. */
-export const LAUNCH_RESOLUTIONS = [
-  { value: 720, label: '720p', hint: 'Mais leve: bom para internet fraca ou computador simples.' },
-  { value: 1080, label: '1080p', hint: 'Recomendado: nítido e leve para a maioria dos jogos e telas.' },
-  { value: 1440, label: '2K', hint: 'O mais nítido (1440p): pede boa internet e uma placa de vídeo forte. Se a sua tela for menor, sai no tamanho dela.' },
-] as const satisfies readonly { value: 720 | 1080 | 1440; label: string; hint: string }[];
+export type LaunchResolution = ScreenShareOptions['height'];
+export type LaunchFrameRate = ScreenShareOptions['frameRate'];
 
-export type LaunchResolution = (typeof LAUNCH_RESOLUTIONS)[number]['value'];
+/** As resoluções do diálogo de compartilhar. `null` é a "Original": do tamanho da tela, sem reduzir. */
+export const LAUNCH_RESOLUTIONS: readonly { value: LaunchResolution; label: string; badge?: string; hint: string }[] = [
+  { value: 720, label: '720p', hint: 'Mais leve: bom para internet fraca ou computador simples.' },
+  { value: 1080, label: '1080p', hint: 'Nítido e leve para a maioria dos jogos e telas.' },
+  { value: 1440, label: '2K', hint: 'Muito nítido (1440p): pede boa internet e uma placa de vídeo forte. Se a sua tela for menor, sai no tamanho dela.' },
+  {
+    value: null,
+    label: 'Original',
+    badge: 'recomendado',
+    hint: 'Recomendado: a imagem sai exatamente no tamanho da sua tela, sem ser reduzida. Se a sua tela for 4K ou maior, prefira 1080p ou 2K.',
+  },
+];
+
+export const LAUNCH_FRAME_RATES: readonly LaunchFrameRate[] = [15, 30, 60];
 
 /** Quem codifica o vídeo: a placa de vídeo (H.264) ou o processador (VP8). */
 export const ENCODERS = [
@@ -26,14 +34,34 @@ export function loadLaunchEncoder(): ScreenShareOptions['codec'] {
 
 /** A resolução que a pessoa escolheu da última vez (1080p na primeira). */
 export function loadLaunchResolution(): LaunchResolution {
-  const saved = loadScreenOptions().height;
-  return LAUNCH_RESOLUTIONS.some((r) => r.value === saved) ? (saved as LaunchResolution) : 1080;
+  return loadScreenOptions().height;
+}
+
+const FPS_KEY = 'coreto.screenShare.fps';
+
+/** Os quadros por segundo que a pessoa escolheu de propósito da última vez; `null` se nunca escolheu (o Coreto decide). */
+export function loadLaunchFrameRate(): LaunchFrameRate | null {
+  try {
+    const saved = Number(localStorage.getItem(FPS_KEY));
+    return LAUNCH_FRAME_RATES.find((fps) => fps === saved) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveLaunchFrameRate(fps: LaunchFrameRate | null): void {
+  try {
+    if (fps === null) localStorage.removeItem(FPS_KEY);
+    else localStorage.setItem(FPS_KEY, String(fps));
+  } catch {
+    // Sem armazenamento, a escolha vale só agora.
+  }
 }
 
 /**
- * Com esta qualidade toda transmissão começa, na resolução escolhida: 60 fps, Fluidez e, onde o navegador sabe, a placa de
- * vídeo codificando. Quem precisa de outra coisa ajusta nas configurações da transmissão, com ela no ar. 20 Mbps de upload:
- * o servidor de mídia usa o teto cheio e, na malha P2P, quem tem pouca internet não é sufocado.
+ * Com esta qualidade toda transmissão começa, na resolução escolhida: 60 fps (o diálogo troca pelo que a pessoa escolher),
+ * Fluidez e, onde o navegador sabe, a placa de vídeo codificando. 20 Mbps de upload: o servidor de mídia usa o teto cheio e,
+ * na malha P2P, quem tem pouca internet não é sufocado.
  */
 export const bestScreenQuality = (height: LaunchResolution = 1080, codec: ScreenShareOptions['codec'] = 'h264'): ScreenQuality => ({
   height,
@@ -45,7 +73,7 @@ export const bestScreenQuality = (height: LaunchResolution = 1080, codec: Screen
 
 const STORAGE_KEY = 'coreto.screenShare';
 const DEFAULT_SCREEN_OPTIONS: ScreenShareOptions = {
-  // 1080p: é o que a escolha antes de transmitir marca na primeira vez.
+  // 1080p: é o que o diálogo marca na primeira vez.
   height: 1080,
   frameRate: 30,
   audio: true,
@@ -55,22 +83,9 @@ const DEFAULT_SCREEN_OPTIONS: ScreenShareOptions = {
   codec: supportsH264() ? 'h264' : 'vp8',
 };
 
-const RESOLUTIONS: { value: ScreenShareOptions['height']; label: string }[] = [
-  { value: 720, label: '720p' },
-  { value: 1080, label: '1080p' },
-  { value: 1440, label: '2K' },
-  { value: null, label: 'Original' },
-];
-const FRAME_RATES: ScreenShareOptions['frameRate'][] = [15, 30, 60];
-const PRIORITIES: { value: ScreenShareOptions['priority']; label: string }[] = [
-  { value: 'sharp', label: 'Nitidez' },
-  { value: 'smooth', label: 'Fluidez' },
-];
+const PRIORITIES: ScreenShareOptions['priority'][] = ['sharp', 'smooth'];
 const UPLOADS: ScreenShareOptions['uploadMbps'][] = [5, 10, 20, 50];
-const CODECS: { value: ScreenShareOptions['codec']; label: string }[] = [
-  { value: 'h264', label: 'Placa de vídeo (H.264)' },
-  { value: 'vp8', label: 'Processador (VP8)' },
-];
+const CODECS: ScreenShareOptions['codec'][] = ['h264', 'vp8'];
 
 /** A última escolha fica no navegador, como conveniência. */
 export function loadScreenOptions(): ScreenShareOptions {
@@ -78,12 +93,12 @@ export function loadScreenOptions(): ScreenShareOptions {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null') as Partial<ScreenShareOptions> | null;
     return {
-      height: RESOLUTIONS.some((r) => r.value === saved?.height) ? saved!.height! : defaults.height,
-      frameRate: FRAME_RATES.includes(saved?.frameRate as never) ? saved!.frameRate! : defaults.frameRate,
+      height: LAUNCH_RESOLUTIONS.some((r) => r.value === saved?.height) ? saved!.height! : defaults.height,
+      frameRate: LAUNCH_FRAME_RATES.includes(saved?.frameRate as never) ? saved!.frameRate! : defaults.frameRate,
       audio: typeof saved?.audio === 'boolean' ? saved.audio : defaults.audio,
-      priority: PRIORITIES.some((p) => p.value === saved?.priority) ? saved!.priority! : defaults.priority,
+      priority: PRIORITIES.includes(saved?.priority as never) ? saved!.priority! : defaults.priority,
       uploadMbps: UPLOADS.includes(saved?.uploadMbps as never) ? saved!.uploadMbps! : defaults.uploadMbps,
-      codec: CODECS.some((c) => c.value === saved?.codec) ? saved!.codec! : defaults.codec,
+      codec: CODECS.includes(saved?.codec as never) ? saved!.codec! : defaults.codec,
     };
   } catch {
     return defaults;
@@ -98,112 +113,9 @@ export function saveScreenOptions(options: ScreenShareOptions): void {
   }
 }
 
-type Preset = 'game' | 'screen';
-
-/** Jogo e vídeo pedem 60 quadros e fluidez; tela e texto, nitidez com menos quadros. O upload e o som seguem como estão. */
-function presetPatch(preset: Preset): Partial<ScreenQuality> {
-  return preset === 'game'
-    ? { height: 1080, frameRate: 60, priority: 'smooth', ...(supportsH264() && { codec: 'h264' as const }) }
-    : { height: 720, frameRate: 30, priority: 'sharp' };
-}
-
-/** Qual receita as escolhas atuais formam; `null` se foram mexidas uma a uma. O codec fica de fora: não muda o tipo de conteúdo. */
-function matchingPreset(value: ScreenQuality): Preset | null {
-  for (const preset of ['game', 'screen'] as const) {
-    const { height, frameRate, priority } = presetPatch(preset);
-    if (value.height === height && value.frameRate === frameRate && value.priority === priority) return preset;
-  }
-  return null;
-}
-
-/** Resolução, quadros, prioridade e upload: os mesmos controles ao começar e durante a transmissão. */
-export function ScreenQualityFields({ value, onChange }: { value: ScreenQuality; onChange: (patch: Partial<ScreenQuality>) => void }) {
-  const preset = matchingPreset(value);
-  return (
-    <>
-      <fieldset>
-        <legend className={labelClass}>O que você vai transmitir</legend>
-        <Segmented
-          name="receita"
-          options={[
-            { key: 'game', label: 'Jogo ou vídeo', selected: preset === 'game' },
-            { key: 'screen', label: 'Tela e texto', selected: preset === 'screen' },
-          ]}
-          onSelect={(key) => onChange(presetPatch(key as Preset))}
-        />
-        <p className="mt-1.5 text-xs text-faint">
-          Jogo ou vídeo: 1080p, 60 fps e Fluidez, com a placa de vídeo codificando. Tela e texto: 720p, 30 fps e Nitidez. Você pode
-          ajustar cada item abaixo.
-        </p>
-      </fieldset>
-
-      <fieldset className="mt-4">
-        <legend className={labelClass}>Resolução</legend>
-        <Segmented
-          name="resolucao"
-          options={RESOLUTIONS.map((r) => ({ key: String(r.value), label: r.label, selected: value.height === r.value }))}
-          onSelect={(key) => onChange({ height: RESOLUTIONS.find((r) => String(r.value) === key)!.value })}
-        />
-      </fieldset>
-
-      <fieldset className="mt-4">
-        <legend className={labelClass}>Quadros por segundo</legend>
-        <Segmented
-          name="quadros"
-          options={FRAME_RATES.map((fps) => ({ key: String(fps), label: `${fps} fps`, selected: value.frameRate === fps }))}
-          onSelect={(key) => onChange({ frameRate: Number(key) as ScreenShareOptions['frameRate'] })}
-        />
-        <p className="mt-1.5 text-xs text-faint">
-          60 fps para jogos e vídeos; 15 fps deixa texto e código mais nítidos com menos internet.
-        </p>
-      </fieldset>
-
-      <fieldset className="mt-4">
-        <legend className={labelClass}>Prioridade</legend>
-        <Segmented
-          name="prioridade"
-          options={PRIORITIES.map((p) => ({ key: p.value, label: p.label, selected: value.priority === p.value }))}
-          onSelect={(key) => onChange({ priority: key as ScreenShareOptions['priority'] })}
-        />
-        <p className="mt-1.5 text-xs text-faint">
-          Nitidez mantém o texto legível e deixa cair quadros se a internet apertar. Fluidez mantém o movimento e deixa a imagem
-          perder resolução (jogos e vídeos).
-        </p>
-      </fieldset>
-
-      <fieldset className="mt-4">
-        <legend className={labelClass}>Codificação</legend>
-        <Segmented
-          name="codec"
-          options={CODECS.map((c) => ({ key: c.value, label: c.label, selected: value.codec === c.value }))}
-          onSelect={(key) => onChange({ codec: key as ScreenShareOptions['codec'] })}
-        />
-        <p className="mt-1.5 text-xs text-faint">
-          H.264 deixa a placa de vídeo codificar, o que ajuda a manter 60 fps em 1080p sem pesar no processador. Mudar no meio
-          da transmissão faz a imagem sumir por um instante para quem assiste. Vale para o servidor de mídia.
-        </p>
-      </fieldset>
-
-      <fieldset className="mt-4">
-        <legend className={labelClass}>Upload da sua internet</legend>
-        <Segmented
-          name="upload"
-          options={UPLOADS.map((mbps) => ({ key: String(mbps), label: `${mbps} Mbps`, selected: value.uploadMbps === mbps }))}
-          onSelect={(key) => onChange({ uploadMbps: Number(key) as ScreenShareOptions['uploadMbps'] })}
-        />
-        <p className="mt-1.5 text-xs text-faint">
-          Pelo servidor de mídia sai uma cópia só do vídeo, qualquer que seja o número de espectadores. Quando a imagem vai
-          direto (P2P), cada pessoa recebe uma cópia e este limite é dividido entre elas: quanto mais gente, menor a
-          resolução, mas a imagem continua nítida. Se não souber, deixe em 10 Mbps.
-        </p>
-      </fieldset>
-    </>
-  );
-}
-
 export interface SegmentedProps {
   name: string;
-  options: { key: string; label: string; selected: boolean }[];
+  options: { key: string; label: string; selected: boolean; badge?: string }[];
   onSelect: (key: string) => void;
 }
 
@@ -226,6 +138,11 @@ export function Segmented({ name, options, onSelect }: SegmentedProps) {
             className="sr-only"
           />
           {option.label}
+          {option.badge && (
+            <span className={`ml-1.5 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${option.selected ? 'bg-white/20' : 'bg-accent/15 text-accent'}`}>
+              {option.badge}
+            </span>
+          )}
         </label>
       ))}
     </div>

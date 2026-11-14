@@ -38,3 +38,10 @@ export async function probeHardwareH264(width: number, height: number, framerate
 
 /** A largura de uma tela 16:9 com essa altura (1440 → 2560). */
 export const widthFor = (height: number): number => Math.round((height * 16) / 9);
+
+/** O tamanho da tela em pixels de verdade (a "Original" sai assim), arredondado para número par, como os codificadores pedem. */
+export function nativeScreenSize(): { width: number; height: number } {
+  const even = (value: number) => Math.max(2, Math.round(value) & ~1);
+  const ratio = window.devicePixelRatio || 1;
+  return { width: even(window.screen.width * ratio), height: even(window.screen.height * ratio) };
+}

@@ -22,6 +22,30 @@ export interface ChangelogEntry {
 /** Da mais nova para a mais antiga. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-14-12',
+    title: 'Mais escolhas ao compartilhar a tela',
+    items: [
+      {
+        title: 'Resolução Original, quadros por segundo e placa de vídeo',
+        text: 'Ao compartilhar a tela, você agora escolhe a resolução (720p, 1080p, 2K ou Original, a recomendada: do tamanho da sua tela), os quadros por segundo (15, 30 ou 60) e se quem codifica é a placa de vídeo ou o processador.',
+      },
+      {
+        title: 'No ar, só trocar a tela',
+        text: 'Com a transmissão no ar, o botão de configurações saiu: sobrou o de trocar a janela ou a tela. Para mudar a qualidade, pare e comece de novo, que o diálogo já vem com a sua última escolha.',
+      },
+    ],
+  },
+  {
+    id: '2026-11-14-11',
+    title: 'A resolução escolhida agora vale',
+    items: [
+      {
+        title: '1080p sai em 1080p',
+        text: 'Em alguns computadores a tela escolhida em 1080p chegava menor (1080×608), e só a opção "Original" saía no tamanho certo. Agora o Coreto pede a largura e a altura juntas, e o 720p, 1080p e 2K saem no tamanho escolhido.',
+      },
+    ],
+  },
+  {
     id: '2026-11-14-10',
     title: 'Placa de vídeo conferida de verdade',
     items: [

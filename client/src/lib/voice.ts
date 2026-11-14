@@ -17,7 +17,7 @@ import { startBitrateKbps, withVideoStartBitrate } from '@shared/video-sdp';
 import { initialLeveler, levelerStep, LIMIT_HEADROOM, rmsDb, softLimitCurve, type LevelerState } from '@shared/voice-level';
 import type { IceServer, SignalPayload, VoiceJoinResult } from '@shared/protocol';
 import type { ScreenPublishOptions, SfuSession } from './sfu';
-import { resolutionScale, viewerBitrate } from '@shared/stream-quality';
+import { resolutionScale, screenCaptureConstraints, viewerBitrate } from '@shared/stream-quality';
 import {
   DEFAULT_SETTINGS,
   DEFAULT_USER_VOLUME,
@@ -662,8 +662,6 @@ export class VoiceManager {
   /** Fluxos fixos onde câmera e tela viajam; os ids são anunciados a cada pessoa. */
   private cameraCarrier = new MediaStream();
   private screenCarrier = new MediaStream();
-  /** Fila das mudanças de qualidade com a transmissão no ar. */
-  private screenUpdates: Promise<void> = Promise.resolve();
   /** Quem deve receber sua tela agora (quem está assistindo, segundo o servidor). */
   private screenViewers = new Set<Id>();
   /** Sinais são processados um por vez, na ordem de chegada (o candidato não pode passar à frente da oferta). */
@@ -924,10 +922,7 @@ export class VoiceManager {
 
   /** Abre o seletor de tela do navegador e devolve a captura (imagem e, se pedido, som). */
   private async captureScreen(options: ScreenShareOptions): Promise<{ stream: MediaStream; feed: AppAudioFeed | null; audioFailed: boolean }> {
-    const constraints: MediaTrackConstraints = {
-      frameRate: { ideal: options.frameRate, max: options.frameRate },
-      ...(options.height && { height: { ideal: options.height, max: options.height } }),
-    };
+    const constraints: MediaTrackConstraints = screenCaptureConstraints(options.frameRate, options.height);
     let stream: MediaStream;
     let audioFailed = false;
     // No app de desktop do Windows o som vem do helper (só o do programa escolhido), não do navegador.
@@ -1101,56 +1096,6 @@ export class VoiceManager {
     if (!this.sfuAvailable) return;
     if (this.sfuSession) this.sfuSession.watch(userIds);
     else if (userIds.length > 0) void this.connectSfu();
-  }
-
-  /** As opções da transmissão em andamento, ou `null` se você não está transmitindo. */
-  screenOptions(): ScreenShareOptions | null {
-    return this.screen ? { ...this.screen.options } : null;
-  }
-
-  /**
-   * Muda a qualidade com a transmissão no ar: a captura passa a entregar a nova altura e os novos
-   * quadros, a dica de prioridade vai para o codificador, e o bitrate de cada espectador é
-   * recalculado. Ninguém renegocia nem perde a imagem. Devolve as opções agora valendo, ou `null`
-   * se a transmissão já acabou.
-   */
-  async updateScreen(
-    patch: Partial<Pick<ScreenShareOptions, 'height' | 'frameRate' | 'priority' | 'uploadMbps' | 'codec'>>,
-  ): Promise<ScreenShareOptions | null> {
-    const screen = this.screen;
-    if (!screen) return null;
-    const codecChanged = patch.codec !== undefined && patch.codec !== screen.options.codec;
-    screen.options = { ...screen.options, ...patch };
-    // Uma mudança de cada vez, sempre com as opções mais recentes: trocar várias coisas seguidas não pode
-    // deixar a captura de uma e o envio de outra.
-    const run = async (): Promise<ScreenShareOptions | null> => {
-      if (this.screen !== screen) return null;
-      const { options } = screen;
-      const [video] = screen.stream.getVideoTracks();
-      video.contentHint = options.priority === 'sharp' ? 'text' : 'motion';
-      // Sem `height`, a captura volta ao tamanho original da tela. Se o sistema não aceitar mudar a captura,
-      // o limite de quadros e o de resolução do envio (abaixo) continuam valendo.
-      await video
-        .applyConstraints({
-          frameRate: { ideal: options.frameRate, max: options.frameRate },
-          ...(options.height && { height: { ideal: options.height, max: options.height } }),
-        })
-        .catch((err: unknown) => console.warn('[voz] applyConstraints', err));
-      if (this.screen !== screen) return null; // parou enquanto a captura mudava
-      // O codec é escolhido ao publicar: trocar no ar é publicar de novo (a imagem some um instante para quem assiste).
-      if (codecChanged && screen.transport === 'sfu' && this.sfuSession) {
-        const [audio] = screen.stream.getAudioTracks();
-        await this.sfuSession
-          .publishScreen(video, audio ?? null, this.sfuPublishOptions(options))
-          .catch((err: unknown) => console.warn('[voz] republicar com outro codec', err));
-        if (this.screen !== screen) return null;
-      }
-      this.applyScreenViewers();
-      return { ...screen.options };
-    };
-    const result = this.screenUpdates.then(run, run);
-    this.screenUpdates = result.then(() => undefined, () => undefined);
-    return result;
   }
 
   stopScreen(): void {

@@ -4,6 +4,7 @@ import {
   maxBitrate,
   MIN_VIEWER_BITRATE,
   resolutionScale,
+  screenCaptureConstraints,
   viewerBitrate,
   type QualityOptions,
   type StreamDiagnosisInput,
@@ -195,5 +196,21 @@ describe('diagnoseStream', () => {
     expect(diagnoseStream(receiving({ freezes: 3, lossPercent: 0 }))).toBe('freezes-source');
     expect(diagnoseStream(receiving({ freezes: 1 }))).toBeNull();
     expect(diagnoseStream(receiving({ lossPercent: 6 }))).toBe('loss');
+  });
+});
+
+describe('screenCaptureConstraints', () => {
+  it('pede a largura junto com a altura, numa caixa 16:9', () => {
+    expect(screenCaptureConstraints(60, 1080)).toEqual({
+      frameRate: { ideal: 60, max: 60 },
+      width: { ideal: 1920, max: 1920 },
+      height: { ideal: 1080, max: 1080 },
+    });
+    expect(screenCaptureConstraints(30, 720)).toMatchObject({ width: { ideal: 1280, max: 1280 }, height: { ideal: 720, max: 720 } });
+    expect(screenCaptureConstraints(60, 1440)).toMatchObject({ width: { ideal: 2560, max: 2560 }, height: { ideal: 1440, max: 1440 } });
+  });
+
+  it('Original: só os quadros por segundo, sem limite de tamanho', () => {
+    expect(screenCaptureConstraints(60, null)).toEqual({ frameRate: { ideal: 60, max: 60 } });
   });
 });

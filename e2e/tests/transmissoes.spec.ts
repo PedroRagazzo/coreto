@@ -96,7 +96,7 @@ test.describe('transmissões de tela', () => {
 });
 
 test.describe('qualidade para jogos', () => {
-  test('antes de transmitir há uma escolha só (720p, 1080p ou 2K), em 1080p de início, e as configurações com ela no ar mostram o teto', async ({ browser }) => {
+  test('antes de transmitir há resolução (com a Original recomendada), quadros e codificador, e com a transmissão no ar só se troca a tela', async ({ browser }) => {
     const ana = await openPerson(browser, 'Ana');
     const bruno = await openPerson(browser, 'Bruno', { screen: { color: '#1f7a4d', width: 1920, height: 1080 } });
     await joinCall(ana.page);
@@ -104,10 +104,16 @@ test.describe('qualidade para jogos', () => {
 
     await bruno.page.getByRole('button', { name: 'Tela', exact: true }).click();
     const dialog = bruno.page.getByRole('dialog', { name: 'Compartilhar tela' });
-    // Uma escolha só de qualidade: a resolução. O resto sai no melhor, e o som é opcional.
-    await expect(dialog.getByRole('radio')).toHaveCount(5);
-    for (const name of ['720p', '1080p', '2K', 'Placa de vídeo', 'Processador']) await expect(dialog.getByRole('radio', { name, exact: true })).toBeVisible();
+    // Resolução (4), quadros por segundo (3) e quem codifica (2); o resto sai no melhor, e o som é opcional.
+    await expect(dialog.getByRole('radio')).toHaveCount(9);
+    for (const name of ['720p', '1080p', '2K', '15 fps', '30 fps', '60 fps', 'Placa de vídeo', 'Processador']) {
+      await expect(dialog.getByRole('radio', { name, exact: true })).toBeVisible();
+    }
+    // A "Original" é a recomendada: leva a etiqueta e a dica diz isso (1080p continua marcada de início).
+    await expect(dialog.getByRole('radio', { name: /^Original/ })).toBeVisible();
+    await expect(dialog.getByText('recomendado', { exact: true })).toBeVisible();
     await expect(dialog.getByRole('radio', { name: '1080p' })).toBeChecked();
+    await expect(dialog.getByRole('radio', { name: '60 fps' })).toBeChecked();
     // Quem codifica: a placa de vídeo de início, onde o navegador sabe usá-la.
     await expect(dialog.getByRole('radio', { name: 'Placa de vídeo' })).toBeChecked();
     // Sem placa de vídeo que codifique (a resposta do teste é fixa), o diálogo diz que vai usar o processador.
@@ -127,13 +133,9 @@ test.describe('qualidade para jogos', () => {
     // Com o tamanho da captura na frente: é ele que mostra se a imagem foi reduzida depois de capturada.
     await expect(stats).toContainText(/captura \d+×\d+ · \d+ fps \(pedido: 60\)/, { timeout: 15_000 });
 
-    // Com a transmissão no ar, as configurações mostram a melhor qualidade e deixam ajustar.
-    await bruno.page.getByRole('button', { name: 'Configurações da transmissão' }).first().click();
-    const settings = bruno.page.getByRole('dialog', { name: 'Configurações da transmissão' });
-    await expect(settings.getByRole('radio', { name: 'Jogo ou vídeo' })).toBeChecked();
-    await expect(settings.getByRole('radio', { name: '1080p' })).toBeChecked();
-    await expect(settings.getByRole('radio', { name: '60 fps' })).toBeChecked();
-    await expect(settings.getByRole('radio', { name: 'Fluidez' })).toBeChecked();
+    // Com a transmissão no ar só se troca a tela: não há mais engrenagem de configurações.
+    await expect(bruno.page.getByRole('button', { name: 'Trocar a janela ou tela transmitida' }).first()).toBeVisible();
+    await expect(bruno.page.getByRole('button', { name: 'Configurações da transmissão' })).toHaveCount(0);
     await Promise.all([ana, bruno].map((p) => p.context.close()));
   });
 });
@@ -156,17 +158,46 @@ test.describe('escolha da resolução antes de transmitir', () => {
     await ana.page.getByRole('button', { name: `Assistir à tela de ${bruno.name}` }).click();
     await expect(ana.page.getByRole('region', { name: `Tela de ${bruno.name}` }).locator('video')).toBeVisible();
 
-    // Com a transmissão no ar, as configurações mostram o 2K e o teto de bitrate dele (maior que o do 1080p, de 6,8 Mb/s).
+    // As estatísticas mostram o teto de bitrate do 2K (maior que o do 1080p, de 6,8 Mb/s).
     await bruno.page.getByRole('region', { name: 'Sua tela' }).getByRole('button', { name: 'Estatísticas da transmissão' }).click();
     await expect(bruno.page.getByRole('status', { name: 'Estatísticas da transmissão' })).toContainText('teto 9,0 Mb/s', { timeout: 15_000 });
-    await bruno.page.getByRole('button', { name: 'Configurações da transmissão' }).first().click();
-    await expect(bruno.page.getByRole('dialog', { name: 'Configurações da transmissão' }).getByRole('radio', { name: '2K' })).toBeChecked();
-    await bruno.page.keyboard.press('Escape');
 
     // Parar e começar de novo: a escolha anterior já vem marcada.
     await bruno.page.getByRole('button', { name: 'Parar de transmitir' }).first().click();
     await bruno.page.getByRole('button', { name: 'Tela', exact: true }).click();
     await expect(bruno.page.getByRole('dialog', { name: 'Compartilhar tela' }).getByRole('radio', { name: '2K' })).toBeChecked();
+    await Promise.all([ana, bruno].map((p) => p.context.close()));
+  });
+});
+
+test.describe('resolução Original e quadros por segundo', () => {
+  test('Original (recomendada) e os quadros escolhidos valem para a transmissão e ficam lembrados', async ({ browser }) => {
+    const ana = await openPerson(browser, 'Ana');
+    const bruno = await openPerson(browser, 'Bruno', { screen: { color: '#1f7a4d', width: 1920, height: 1080 } });
+    await joinCall(ana.page);
+    await joinCall(bruno.page);
+
+    await bruno.page.getByRole('button', { name: 'Tela', exact: true }).click();
+    const dialog = bruno.page.getByRole('dialog', { name: 'Compartilhar tela' });
+    await dialog.locator('label', { hasText: 'Original' }).click();
+    await expect(dialog.getByRole('radio', { name: /^Original/ })).toBeChecked();
+    await expect(dialog).toContainText('Recomendado: a imagem sai exatamente no tamanho da sua tela');
+    await dialog.getByText('30 fps', { exact: true }).click();
+    await expect(dialog.getByRole('radio', { name: '30 fps' })).toBeChecked();
+    await dialog.getByRole('button', { name: 'Escolher tela' }).click();
+    await expect(bruno.page.getByRole('region', { name: 'Sua tela' })).toBeVisible();
+
+    await ana.page.getByRole('button', { name: `Assistir à tela de ${bruno.name}` }).click();
+    await expect(ana.page.getByRole('region', { name: `Tela de ${bruno.name}` }).locator('video')).toBeVisible();
+    await bruno.page.getByRole('region', { name: 'Sua tela' }).getByRole('button', { name: 'Estatísticas da transmissão' }).click();
+    await expect(bruno.page.getByRole('status', { name: 'Estatísticas da transmissão' })).toContainText('(pedido: 30)', { timeout: 15_000 });
+
+    // Parar e começar de novo: a resolução e os quadros escolhidos já vêm marcados.
+    await bruno.page.getByRole('button', { name: 'Parar de transmitir' }).first().click();
+    await bruno.page.getByRole('button', { name: 'Tela', exact: true }).click();
+    const again = bruno.page.getByRole('dialog', { name: 'Compartilhar tela' });
+    await expect(again.getByRole('radio', { name: /^Original/ })).toBeChecked();
+    await expect(again.getByRole('radio', { name: '30 fps' })).toBeChecked();
     await Promise.all([ana, bruno].map((p) => p.context.close()));
   });
 });
@@ -216,6 +247,8 @@ test.describe('quem codifica a transmissão', () => {
     // 2K: só a 30.
     await dialog.getByText('2K', { exact: true }).click();
     await expect(hint).toContainText('só codifica o 2K a 30 quadros por segundo', { timeout: 10_000 });
+    // E, como a pessoa não mexeu nos quadros, o Coreto já marca 30 fps.
+    await expect(dialog.getByRole('radio', { name: '30 fps' })).toBeChecked();
     await dialog.getByRole('button', { name: 'Escolher tela' }).click();
     await expect(bruno.page.getByRole('region', { name: 'Sua tela' })).toBeVisible();
 
