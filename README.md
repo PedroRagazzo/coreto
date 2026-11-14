@@ -818,8 +818,12 @@ transmite codifica uma vez por espectador. Para a imagem não ficar borrada quan
   **Processador** = VP8; `ENCODERS`), mais o som. A última escolha fica lembrada no navegador. O resto sai no melhor
   (`bestScreenQuality(altura, codificador)`: 60 fps, Fluidez e 20 Mbps de upload).
   A placa de vídeo é de fato usada assim: (1) antes de começar, `probeHardwareH264` (`client/src/lib/encoder.ts`) pergunta
-  ao navegador (`mediaCapabilities.encodingInfo`, perfis High, Main e Baseline, os únicos que a placa codifica) se ela
-  codifica H.264 naquela resolução e o diálogo diz o resultado; (2) pelo servidor de mídia a publicação pede H.264 e
+  ao WebCodecs (`VideoEncoder.isConfigSupported` com `hardwareAcceleration: 'prefer-hardware'`) se ela codifica H.264
+  naquela resolução, a 60 e a 30 fps, e o diálogo diz o resultado. Não se usa `mediaCapabilities.encodingInfo`
+  (`powerEfficient` dá "não" mesmo com a placa codificando) nem `encoderImplementation` (só aparece com uma captura ativa).
+  Medido no Electron 44 com uma RTX: a placa vai até 1080p a 60 fps e, em 2K, só a 30; a 60 o Chromium usa o processador.
+  Por isso o 2K com a placa de vídeo escolhida começa a **30 fps** (`launchFrameRate` em `shared/src/h264.ts`) e o
+  diálogo diz isso; (2) pelo servidor de mídia a publicação pede H.264 e
   põe os perfis da placa na frente (`preferHardwareH264`); na malha P2P o mesmo vale pela ordem dos codecs do
   transceiver (`codecOrderFor`); (3) com a transmissão no ar, se o navegador mesmo assim codificar no processador,
   as estatísticas avisam (`gpu-not-used`). O Chromium nunca amplia a

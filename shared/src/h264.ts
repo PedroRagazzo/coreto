@@ -60,3 +60,31 @@ export function codecOrderFor<T extends VideoCodecCapability>(codecs: readonly T
   }
   return ordered.every((codec, index) => codec === codecs[index]) ? null : ordered;
 }
+
+/**
+ * Quem codifica, pelo que o navegador informa nas estatísticas de envio (`outbound-rtp`): `powerEfficientEncoder` ou o nome
+ * do codificador (`MediaFoundationVideoEncodeAccelerator (NVIDIA H.264 Encoder MFT)` é a placa de vídeo; `OpenH264` e
+ * `libvpx` são o processador). `null` enquanto o navegador ainda não disse (nenhum quadro foi codificado).
+ */
+export function encoderKindOf(outbound: Readonly<Record<string, unknown>>): 'hardware' | 'software' | null {
+  if (outbound['powerEfficientEncoder'] === true) return 'hardware';
+  const impl = String(outbound['encoderImplementation'] ?? '');
+  if (!impl) return null;
+  return /MediaFoundation|VideoToolbox|Nvenc|NVENC|VAAPI|V4L2|Hardware|External/i.test(impl) ? 'hardware' : 'software';
+}
+
+/** O que a sonda da placa de vídeo respondeu para 60 e para 30 quadros por segundo (`null` = não soube dizer). */
+export interface HardwareSupport {
+  fps60: boolean | null;
+  fps30: boolean | null;
+}
+
+/**
+ * Quantos quadros por segundo pedir ao começar. Com a placa de vídeo escolhida, 60; mas se ela só codifica esse tamanho a
+ * 30 (o 2K no Chromium: a 60 o navegador cai para o processador), 30, para a placa de fato codificar. Com o processador
+ * escolhido, ou sem resposta da sonda, 60.
+ */
+export function launchFrameRate(encoder: 'h264' | 'vp8', support: HardwareSupport | undefined): 30 | 60 {
+  if (encoder !== 'h264' || !support) return 60;
+  return support.fps60 === false && support.fps30 === true ? 30 : 60;
+}

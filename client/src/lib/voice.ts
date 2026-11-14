@@ -12,7 +12,7 @@
 import { assess, type ConnectionQuality, ownLevel, type QualitySample } from '@shared/connection-quality';
 import type { Id } from '@shared/models';
 import { withStereoOpus, withVoiceOpus } from '@shared/opus-sdp';
-import { codecOrderFor } from '@shared/h264';
+import { codecOrderFor, encoderKindOf } from '@shared/h264';
 import { startBitrateKbps, withVideoStartBitrate } from '@shared/video-sdp';
 import { initialLeveler, levelerStep, LIMIT_HEADROOM, rmsDb, softLimitCurve, type LevelerState } from '@shared/voice-level';
 import type { IceServer, SignalPayload, VoiceJoinResult } from '@shared/protocol';
@@ -482,6 +482,8 @@ export interface StreamStats {
   wantedEncoder: 'hardware' | 'software' | null;
   /** Só ao transmitir: o tamanho que a captura da tela entrega, antes do codificador (`null` se o navegador não diz). */
   captureSize: { width: number; height: number } | null;
+  /** O que está sendo capturado, como o sistema informa: tela inteira, janela ou aba (`null` se não informa). */
+  captureSurface: 'monitor' | 'window' | 'browser' | null;
   /** Só ao transmitir: quanto o envio reduz a imagem da captura (1 = sem redução), como está nos parâmetros do emissor. */
   scaleDown: number | null;
   /** Só ao assistir: quantas vezes a imagem congelou nos últimos 30 segundos. */
@@ -493,13 +495,12 @@ function codecName(report: RTCStatsReport, codecId: unknown): string | null {
   return codec?.mimeType?.replace(/^video\//, '') ?? null;
 }
 
-/** A placa de vídeo codifica? O navegador diz pelo nome do codificador ou pela marca de eficiência de energia. */
-function encoderKind(outbound: Record<string, unknown>): StreamStats['encoder'] {
-  if (outbound['powerEfficientEncoder'] === true) return 'hardware';
-  const impl = String(outbound['encoderImplementation'] ?? '');
-  if (!impl) return null;
-  return /MediaFoundation|VideoToolbox|Nvenc|NVENC|VAAPI|V4L2|Hardware|External/i.test(impl) ? 'hardware' : 'software';
+/** O tipo de captura que o sistema informa para a faixa (`displaySurface`). */
+function surfaceOf(track: MediaStreamTrack | undefined): StreamStats['captureSurface'] {
+  const surface = (track?.getSettings() as { displaySurface?: string } | undefined)?.displaySurface;
+  return surface === 'monitor' || surface === 'window' || surface === 'browser' ? surface : null;
 }
+
 
 /** Quanto a rede estima que comporta para enviar (kbps), do par de rede em uso; `null` se o navegador não diz. */
 function availableOutgoing(report: RTCStatsReport): number | null {
@@ -1332,6 +1333,7 @@ export class VoiceManager {
       targetFps: null,
       wantedEncoder: null,
       captureSize: null,
+      captureSurface: null,
       scaleDown: null,
       freezes: this.recentIncrease(`freeze:${userId}`, Number(inbound['freezeCount'] ?? 0)),
     };
@@ -1394,7 +1396,7 @@ export class VoiceManager {
       width = Math.max(width, Number(outbound['frameWidth'] ?? 0));
       height = Math.max(height, Number(outbound['frameHeight'] ?? 0));
       codec ??= codecName(report, outbound['codecId']);
-      encoder ??= encoderKind(outbound);
+      encoder ??= encoderKindOf(outbound);
       const reason = String(outbound['qualityLimitationReason'] ?? 'none');
       worst = Math.max(worst, reason === 'none' ? 0 : reason === 'cpu' ? 3 : reason === 'bandwidth' ? 2 : 1);
       const estimate = availableOutgoing(report);
@@ -1429,6 +1431,7 @@ export class VoiceManager {
       targetFps: this.screen.options.frameRate,
       wantedEncoder: this.screen.options.codec === 'h264' && supportsH264() ? 'hardware' : 'software',
       captureSize,
+      captureSurface: surfaceOf(this.screen.stream.getVideoTracks()[0]),
       scaleDown,
       freezes: 0,
     };

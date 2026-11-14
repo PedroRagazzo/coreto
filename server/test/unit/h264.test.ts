@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { codecOrderFor, preferHardwareH264 } from '../../../shared/src/h264.js';
+import { codecOrderFor, encoderKindOf, launchFrameRate, preferHardwareH264 } from '../../../shared/src/h264.js';
 
 const h264 = (profile: string, mode = 1) => ({
   mimeType: 'video/H264',
@@ -98,5 +98,41 @@ describe('codecOrderFor', () => {
     codecOrderFor(chrome, 'h264');
     codecOrderFor(chrome, 'vp8');
     expect(chrome).toEqual(copy);
+  });
+});
+
+describe('launchFrameRate', () => {
+  it('com a placa de vídeo que codifica a 60, pede 60', () => {
+    expect(launchFrameRate('h264', { fps60: true, fps30: true })).toBe(60);
+  });
+
+  it('com a placa de vídeo que só codifica a 30 (o 2K no Chromium), pede 30 para a placa de fato codificar', () => {
+    expect(launchFrameRate('h264', { fps60: false, fps30: true })).toBe(30);
+  });
+
+  it('sem placa que codifique, ou sem resposta, fica em 60', () => {
+    expect(launchFrameRate('h264', { fps60: false, fps30: false })).toBe(60);
+    expect(launchFrameRate('h264', { fps60: null, fps30: null })).toBe(60);
+    expect(launchFrameRate('h264', { fps60: null, fps30: true })).toBe(60);
+    expect(launchFrameRate('h264', undefined)).toBe(60);
+  });
+
+  it('com o processador escolhido, fica em 60 qualquer que seja a placa', () => {
+    expect(launchFrameRate('vp8', { fps60: false, fps30: true })).toBe(60);
+  });
+});
+
+describe('encoderKindOf', () => {
+  it('reconhece a placa de vídeo pelo nome do codificador e pela marca de eficiência de energia', () => {
+    expect(encoderKindOf({ encoderImplementation: 'MediaFoundationVideoEncodeAccelerator (NVIDIA H.264 Encoder MFT)' })).toBe('hardware');
+    expect(encoderKindOf({ encoderImplementation: 'VideoToolbox' })).toBe('hardware');
+    expect(encoderKindOf({ encoderImplementation: 'OpenH264', powerEfficientEncoder: true })).toBe('hardware');
+  });
+
+  it('o resto é o processador, e sem informação do navegador não há resposta', () => {
+    expect(encoderKindOf({ encoderImplementation: 'OpenH264' })).toBe('software');
+    expect(encoderKindOf({ encoderImplementation: 'libvpx' })).toBe('software');
+    expect(encoderKindOf({})).toBeNull();
+    expect(encoderKindOf({ encoderImplementation: '' })).toBeNull();
   });
 });

@@ -56,6 +56,18 @@ const FAKE_SCREEN = ({
   };
 };
 
+/**
+ * A resposta do navegador sobre a placa de vídeo, fixa: o que o computador que roda o teste tem não pode mudar o resultado.
+ * `ate-1080p60` imita uma placa que o Chromium usa até 1080p a 60 quadros e, acima disso, só a 30 (como uma RTX no Windows).
+ */
+const FAKE_GPU = ({ mode }: { mode: 'nenhuma' | 'ate-1080p60' }) => {
+  if (typeof VideoEncoder === 'undefined') return;
+  VideoEncoder.isConfigSupported = async (config: VideoEncoderConfig) => {
+    const rate = config.width * config.height * (config.framerate ?? 30);
+    return { supported: mode === 'ate-1080p60' && rate <= 1920 * 1088 * 60, config };
+  };
+};
+
 /** Guarda cada conexão WebRTC que a página abre, para os testes lerem as estatísticas (a voz chegou de verdade?). */
 const TRACK_PEERS = () => {
   const Original = window.RTCPeerConnection;
@@ -83,7 +95,7 @@ export interface FakeScreen {
 export async function openPerson(
   browser: Browser,
   label: string,
-  options: { viewport?: { width: number; height: number }; screen?: FakeScreen; name?: string } = {},
+  options: { viewport?: { width: number; height: number }; screen?: FakeScreen; name?: string; gpu?: 'nenhuma' | 'ate-1080p60' } = {},
 ): Promise<Person> {
   const name = options.name ?? uniqueName(label);
   const context = await browser.newContext({
@@ -92,6 +104,7 @@ export async function openPerson(
     acceptDownloads: true,
   });
   await context.addInitScript(TRACK_PEERS);
+  await context.addInitScript(FAKE_GPU, { mode: options.gpu ?? 'nenhuma' });
   if (options.screen) {
     const { label: screenLabel = `Tela de ${name}`, color = '#7a2d9e', width = 1280, height = 720, after } = options.screen;
     await context.addInitScript(FAKE_SCREEN, { label: screenLabel, color, width, height, after });

@@ -1,29 +1,36 @@
-// Se este computador codifica H.264 pela placa de vídeo.
+// Se este computador codifica H.264 pela placa de vídeo, num tamanho e numa taxa de quadros.
 //
-// O Chromium só usa a placa de vídeo para H.264 nos perfis High (640032), Main (4d001f) e Baseline (42001f); o Constrained
-// Baseline (42e01f) cai no processador mesmo com placa (ver shared/src/h264.ts). Por isso a pergunta é feita sobre os perfis
-// que o Coreto realmente pede, e não sobre o 42e01f.
+// A pergunta certa é a do WebCodecs: `VideoEncoder.isConfigSupported` com `hardwareAcceleration: 'prefer-hardware'` só diz
+// "sim" quando existe um codificador de placa de vídeo para aquela configuração. Medido no Electron 44 com uma RTX: "sim"
+// até 1080p a 60 fps e em 2K a 30 fps, e "não" em 2K a 60 fps (aí o navegador cai para o processador), e "não" com a
+// codificação por placa desligada. `mediaCapabilities.encodingInfo` (`powerEfficient`) não serve: dá "não" para tudo,
+// mesmo com a placa codificando. E as estatísticas do WebRTC (`encoderImplementation`) só aparecem com uma captura ativa.
 
-const GPU_PROFILES = ['640032', '4d001f', '42001f'] as const;
+/** High e Main no nível 5.2 (qualquer tamanho que a placa aceite) e no 4.2, caso o navegador estranhe o nível alto. */
+const CODECS = ['avc1.640034', 'avc1.4d4034', 'avc1.64002a', 'avc1.4d402a'] as const;
 
 /**
- * `true` se o navegador diz que a placa de vídeo codifica H.264 nesse tamanho e nesses quadros por segundo; `false` se ele
- * sabe codificar mas só pelo processador (ou não suporta); `null` se ele não sabe responder.
+ * `true` se a placa de vídeo codifica H.264 nesse tamanho e nesses quadros por segundo; `false` se não (o navegador usaria o
+ * processador, ou nem suporta); `null` se o navegador não sabe responder (sem WebCodecs).
  */
 export async function probeHardwareH264(width: number, height: number, framerate: number): Promise<boolean | null> {
-  const mediaCapabilities = typeof navigator === 'undefined' ? undefined : navigator.mediaCapabilities;
-  if (!mediaCapabilities?.encodingInfo) return null;
+  if (typeof VideoEncoder === 'undefined' || !VideoEncoder.isConfigSupported) return null;
   let answered = false;
-  for (const profile of GPU_PROFILES) {
+  for (const codec of CODECS) {
     try {
-      const info = await mediaCapabilities.encodingInfo({
-        type: 'webrtc',
-        video: { contentType: `video/H264;profile-level-id=${profile}`, width, height, bitrate: 6_000_000, framerate },
+      const result = await VideoEncoder.isConfigSupported({
+        codec,
+        width,
+        height,
+        framerate,
+        bitrate: 8_000_000,
+        hardwareAcceleration: 'prefer-hardware',
+        latencyMode: 'realtime',
       });
       answered = true;
-      if (info.supported && info.powerEfficient) return true;
+      if (result.supported) return true;
     } catch {
-      // Este perfil o navegador não soube responder; tenta o seguinte.
+      // Este formato o navegador não soube avaliar; tenta o seguinte.
     }
   }
   return answered ? false : null;

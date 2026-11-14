@@ -475,6 +475,8 @@ function useStreamStats(userId: Id, enabled: boolean, read: (userId: Id) => Prom
 
 const mbps = (kbps: number) => `${(kbps / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1, minimumFractionDigits: 1 })} Mb/s`;
 
+const SURFACE = { monitor: 'tela inteira', window: 'janela', browser: 'aba' } as const;
+
 /** O que fazer, em palavras, para cada causa que o diagnóstico (shared/stream-quality.ts) aponta. */
 const ADVICE: Record<StreamAdvice, string> = {
   'gpu-not-used':
@@ -531,7 +533,9 @@ function StatsPanel({ stats }: { stats: StreamStats | null }) {
           </p>
           {stats.role === 'sending' && stats.captureFps !== null && (
             <p>
-              captura {stats.captureSize ? `${stats.captureSize.width}×${stats.captureSize.height} · ` : ''}
+              captura {stats.captureSize ? `${stats.captureSize.width}×${stats.captureSize.height}` : ''}
+              {stats.captureSurface ? ` (${SURFACE[stats.captureSurface]})` : ''}
+              {stats.captureSize || stats.captureSurface ? ' · ' : ''}
               {Math.round(stats.captureFps)} fps{stats.targetFps !== null ? ` (pedido: ${stats.targetFps})` : ''}
             </p>
           )}

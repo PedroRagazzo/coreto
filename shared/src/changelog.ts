@@ -22,6 +22,20 @@ export interface ChangelogEntry {
 /** Da mais nova para a mais antiga. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-14-10',
+    title: 'Placa de vídeo conferida de verdade',
+    items: [
+      {
+        title: '2K pela placa de vídeo sai a 30 quadros',
+        text: 'No navegador, a placa de vídeo só codifica o 2K a 30 quadros por segundo; a 60, o processador assume. Ao escolher 2K com a placa de vídeo, o Coreto agora transmite a 30 fps e avisa isso, para a placa de fato trabalhar. Para 60 fps pela placa, use 1080p.',
+      },
+      {
+        title: 'Diagnóstico acerta a placa de vídeo',
+        text: 'O teste do Diagnóstico dizia que a placa de vídeo não codificava H.264 mesmo quando ela codificava. Agora ele pergunta do jeito certo. O painel de estatísticas também mostra se a captura é da tela inteira ou de uma janela.',
+      },
+    ],
+  },
+  {
     id: '2026-11-14-9',
     title: 'Placa de vídeo ou processador',
     items: [

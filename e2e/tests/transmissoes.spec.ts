@@ -110,7 +110,8 @@ test.describe('qualidade para jogos', () => {
     await expect(dialog.getByRole('radio', { name: '1080p' })).toBeChecked();
     // Quem codifica: a placa de vídeo de início, onde o navegador sabe usá-la.
     await expect(dialog.getByRole('radio', { name: 'Placa de vídeo' })).toBeChecked();
-    await expect(dialog.getByTestId('encoder-hint')).not.toHaveText('Conferindo a placa de vídeo…', { timeout: 10_000 });
+    // Sem placa de vídeo que codifique (a resposta do teste é fixa), o diálogo diz que vai usar o processador.
+    await expect(dialog.getByTestId('encoder-hint')).toContainText('não oferece a placa de vídeo', { timeout: 10_000 });
     await expect(dialog.getByRole('checkbox')).toBeChecked();
     await dialog.getByRole('button', { name: 'Escolher tela' }).click();
     await expect(bruno.page.getByRole('region', { name: 'Sua tela' })).toBeVisible();
@@ -198,6 +199,30 @@ test.describe('quem codifica a transmissão', () => {
     await bruno.page.getByRole('button', { name: 'Parar de transmitir' }).first().click();
     await bruno.page.getByRole('button', { name: 'Tela', exact: true }).click();
     await expect(bruno.page.getByRole('dialog', { name: 'Compartilhar tela' }).getByRole('radio', { name: 'Processador' })).toBeChecked();
+    await Promise.all([ana, bruno].map((p) => p.context.close()));
+  });
+
+  test('em 2K a placa de vídeo só codifica a 30 quadros: o diálogo avisa e a transmissão sai a 30 fps', async ({ browser }) => {
+    const ana = await openPerson(browser, 'Ana');
+    const bruno = await openPerson(browser, 'Bruno', { screen: { color: '#1f7a4d', width: 1920, height: 1080 }, gpu: 'ate-1080p60' });
+    await joinCall(ana.page);
+    await joinCall(bruno.page);
+
+    await bruno.page.getByRole('button', { name: 'Tela', exact: true }).click();
+    const dialog = bruno.page.getByRole('dialog', { name: 'Compartilhar tela' });
+    const hint = dialog.getByTestId('encoder-hint');
+    // 1080p: a placa codifica a 60.
+    await expect(hint).toContainText('a 60 quadros por segundo', { timeout: 10_000 });
+    // 2K: só a 30.
+    await dialog.getByText('2K', { exact: true }).click();
+    await expect(hint).toContainText('só codifica o 2K a 30 quadros por segundo', { timeout: 10_000 });
+    await dialog.getByRole('button', { name: 'Escolher tela' }).click();
+    await expect(bruno.page.getByRole('region', { name: 'Sua tela' })).toBeVisible();
+
+    await ana.page.getByRole('button', { name: `Assistir à tela de ${bruno.name}` }).click();
+    await expect(ana.page.getByRole('region', { name: `Tela de ${bruno.name}` }).locator('video')).toBeVisible();
+    await bruno.page.getByRole('region', { name: 'Sua tela' }).getByRole('button', { name: 'Estatísticas da transmissão' }).click();
+    await expect(bruno.page.getByRole('status', { name: 'Estatísticas da transmissão' })).toContainText('(pedido: 30)', { timeout: 15_000 });
     await Promise.all([ana, bruno].map((p) => p.context.close()));
   });
 

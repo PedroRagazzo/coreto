@@ -223,7 +223,7 @@ export async function probeVideo(): Promise<VideoProbe> {
   } catch {
     // Sem a API: a lista fica vazia e o veredito diz isso.
   }
-  // O que o Coreto pede numa transmissão de jogo: 1080p a 60 quadros, nos perfis que a placa de vídeo codifica.
+  // O que o Coreto pede numa transmissão de jogo: 1080p a 60 quadros.
   const h264Hardware = await probeHardwareH264(1920, 1080, 60);
   return { codecs, h264Hardware };
 }
