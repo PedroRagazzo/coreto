@@ -45,7 +45,7 @@ export async function handleSoundUpload(
   const name = cleanSoundName(header(req.headers['x-sound-name']));
   if (!name) return send(400, { ok: false, error: 'Dê um nome ao som.' });
   const emoji = cleanSoundEmoji(header(req.headers['x-sound-emoji']));
-  const tooBig = () => send(413, { ok: false, error: `O som passa de ${MAX_SOUND_BYTES / 1024} KB.` });
+  const tooBig = () => send(413, { ok: false, error: `O som passa de ${MAX_SOUND_BYTES / 1024 / 1024} MB.` });
   if (Number(req.headers['content-length']) > MAX_SOUND_BYTES) return tooBig();
   if ((await store.soundCount(spaceId)) >= MAX_SOUNDS_PER_SPACE) {
     return send(409, { ok: false, error: `O quadro já tem ${MAX_SOUNDS_PER_SPACE} sons. Remova algum antes.` });

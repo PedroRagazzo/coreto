@@ -22,6 +22,16 @@ export interface ChangelogEntry {
 /** Da mais nova para a mais antiga. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-15',
+    title: 'Sons longos no quadro de som',
+    items: [
+      {
+        title: 'Sem limite de duração',
+        text: 'O quadro de som deixou de limitar o som a poucos segundos: agora aceita qualquer duração, até 10 MB por arquivo (uns 10 minutos de MP3). Para cortar um som longo no meio, use o botão Parar.',
+      },
+    ],
+  },
+  {
     id: '2026-11-14-12',
     title: 'Mais escolhas ao compartilhar a tela',
     items: [

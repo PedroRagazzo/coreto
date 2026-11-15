@@ -736,7 +736,7 @@ o protocolo de `voice:join` / `voice:signal` já isola essa troca em `server/src
 
 O botão **Quadro de som** (a onda, ao lado de Música na barra da chamada, e "Sons" no painel da chamada) abre os sons do
 espaço: um clique toca o som para todo mundo na chamada. Qualquer pessoa do espaço acrescenta um (MP3, OGG, WAV, WebM ou
-M4A, **até 8 s e 1 MB**, com um nome e, se quiser, um emoji; até 24 por espaço) e remove os que enviou; quem gerencia os canais
+M4A, **até 10 MB e sem limite de duração**, com um nome e, se quiser, um emoji; até 24 por espaço) e remove os que enviou; quem gerencia os canais
 remove qualquer um.
 
 - **Como a chamada ouve:** o site baixa o áudio e o toca **dentro do seu microfone** (`MicPipeline.playClip`): o som entra na
@@ -749,7 +749,8 @@ remove qualquer um.
 - **Servidor:** os sons ficam na tabela `SoundClip` e o áudio na pasta dos anexos (`UPLOAD_DIR`, contando na cota
   `UPLOAD_QUOTA_MB`). `POST /sounds` recebe o áudio, que é reconhecido pelo conteúdo (`shared/src/sounds.ts`: nunca pela extensão)
   e servido só como áudio, com `nosniff` e `sandbox`; `GET /sounds/<id>`. Eventos: `sounds:list`, `sound:remove` e
-  `sounds:updated`. O limite de 8 s é conferido no site (que decodifica o áudio antes de enviar); o servidor limita o tamanho.
+  `sounds:updated`. Não há limite de duração, só de tamanho (`MAX_SOUND_BYTES`, 10 MB); o site decodifica o áudio antes de enviar para ver se é áudio de verdade, e
+  guarda os já tocados em memória até 200 MB decodificados. O botão **Parar** corta um som longo.
 
 ### Câmera e visão da chamada
 

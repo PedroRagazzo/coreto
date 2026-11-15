@@ -831,7 +831,15 @@ export class VoiceManager {
     let buffer = this.soundCache.get(id);
     if (!buffer) {
       buffer = await mic.decode(await load());
-      if (this.soundCache.size >= 32) this.soundCache.delete(this.soundCache.keys().next().value!);
+      // Sons longos decodificados ocupam muita memória (um minuto estéreo são uns 23 MB): o limite é pelo tamanho decodificado.
+      const bytesOf = (b: AudioBuffer) => b.length * b.numberOfChannels * 4;
+      let held = 0;
+      for (const cached of this.soundCache.values()) held += bytesOf(cached);
+      while (this.soundCache.size > 0 && held + bytesOf(buffer) > 200 * 1024 * 1024) {
+        const oldest = this.soundCache.keys().next().value!;
+        held -= bytesOf(this.soundCache.get(oldest)!);
+        this.soundCache.delete(oldest);
+      }
       this.soundCache.set(id, buffer);
     }
     if (this.mic !== mic) return; // saiu da chamada enquanto o som carregava

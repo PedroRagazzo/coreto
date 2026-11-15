@@ -1,6 +1,6 @@
 // Quadro de som no site: baixar, conferir e enviar os sons.
 
-import { MAX_SOUND_BYTES, MAX_SOUND_SECONDS } from '@shared/sounds';
+import { MAX_SOUND_BYTES } from '@shared/sounds';
 import type { SoundUploadResponse } from '@shared/protocol';
 import { SERVER_URL } from './socket';
 
@@ -11,14 +11,13 @@ export async function fetchSound(id: string): Promise<ArrayBuffer> {
   return res.arrayBuffer();
 }
 
-/** Motivo para recusar o arquivo antes de enviar, ou `null` se ele puder ir. Confere o tamanho e a duração. */
+/** Motivo para recusar o arquivo antes de enviar, ou `null` se ele puder ir. Confere o tamanho (não há limite de duração). */
 export async function checkSoundFile(file: File): Promise<string | null> {
   if (file.size === 0) return `"${file.name}" está vazio.`;
-  if (file.size > MAX_SOUND_BYTES) return `"${file.name}" passa de ${MAX_SOUND_BYTES / 1024} KB. Use um som mais curto.`;
+  if (file.size > MAX_SOUND_BYTES) return `"${file.name}" passa de ${MAX_SOUND_BYTES / 1024 / 1024} MB. Use um arquivo menor.`;
   try {
-    // Decodificar mostra se é áudio de verdade e quanto dura, sem tocar nada.
-    const audio = await new OfflineAudioContext(1, 1, 44100).decodeAudioData(await file.arrayBuffer());
-    if (audio.duration > MAX_SOUND_SECONDS) return `O som dura ${Math.ceil(audio.duration)} s; o máximo é ${MAX_SOUND_SECONDS} s.`;
+    // Decodificar mostra se é áudio de verdade, sem tocar nada.
+    await new OfflineAudioContext(1, 1, 44100).decodeAudioData(await file.arrayBuffer());
   } catch {
     return `"${file.name}" não é um áudio que o navegador consiga tocar (use MP3, OGG, WAV, WebM ou M4A).`;
   }

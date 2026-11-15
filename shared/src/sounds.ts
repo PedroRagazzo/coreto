@@ -1,8 +1,7 @@
 // Quadro de som: sons curtos que a chamada toda ouve. Os limites e a conferência do arquivo, no servidor e no site.
 
-export const MAX_SOUND_BYTES = 1024 * 1024;
-/** Duração máxima de um som, em segundos (o site confere ao decodificar; o servidor só limita o tamanho). */
-export const MAX_SOUND_SECONDS = 8;
+/** Tamanho máximo de um som (10 MB: uns 10 minutos de MP3). Não há limite de duração: o teto é o tamanho do arquivo. */
+export const MAX_SOUND_BYTES = 10 * 1024 * 1024;
 export const MAX_SOUNDS_PER_SPACE = 24;
 export const MAX_SOUND_NAME = 24;
 
