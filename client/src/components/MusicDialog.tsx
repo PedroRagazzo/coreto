@@ -1,5 +1,21 @@
-import type { MusicControl, MusicState, MusicTrackInfo } from '@shared/protocol';
-import { ArrowUpToLine, ListMusic, Music2, Pause, Play, Shuffle, SkipForward, Square, Trash2, Volume2, X } from 'lucide-react';
+import type { MusicControl, MusicRepeat, MusicState, MusicTrackInfo } from '@shared/protocol';
+import {
+  ArrowUpToLine,
+  FastForward,
+  ListMusic,
+  Music2,
+  Pause,
+  Play,
+  Repeat,
+  Repeat1,
+  Rewind,
+  Shuffle,
+  SkipForward,
+  Square,
+  Trash2,
+  Volume2,
+  X,
+} from 'lucide-react';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useRealtime } from '../state/realtime';
 import { Modal } from './Modal';
@@ -35,6 +51,23 @@ function usePosition(music: { state: MusicState; receivedAt: number } | null): n
   const elapsed = running ? Math.max(0, now - music.receivedAt) : 0;
   const position = current.positionMs + elapsed;
   return current.durationSeconds ? Math.min(position, current.durationSeconds * 1000) : position;
+}
+
+/** A repetição que vem depois da atual, na ordem do botão: desligada, a música, a fila. */
+const NEXT_REPEAT: Record<MusicRepeat, MusicRepeat> = { off: 'one', one: 'all', all: 'off' };
+const REPEAT_LABEL: Record<MusicRepeat, string> = { off: 'desligada', one: 'da música', all: 'da fila' };
+/** De quanto o botão de avançar e o de voltar andam. */
+const SEEK_STEP_SECONDS = 10;
+
+/**
+ * Pular: com até duas pessoas na sala é direto; com mais, é uma votação (a metade mais um), e o texto mostra quantos já votaram.
+ */
+export function skipText(music: MusicState): { label: string; votes: string | null } {
+  const voting = music.skipNeeded > 1;
+  return {
+    label: voting ? `Votar para pular (${music.skipVoters.length}/${music.skipNeeded} votos)` : 'Pular',
+    votes: voting && music.skipVoters.length > 0 ? `${music.skipVoters.length}/${music.skipNeeded}` : null,
+  };
 }
 
 const iconButton =
@@ -147,6 +180,7 @@ function NowPlaying({
 }) {
   const current = music?.current ?? null;
   const duration = current?.durationSeconds ?? null;
+  const skip = music ? skipText(music) : { label: 'Pular', votes: null };
   const percent = duration ? Math.min(100, (positionMs / (duration * 1000)) * 100) : 0;
   // O volume local acompanha o arrastar na hora; o pedido ao servidor sai só quando a mão para.
   const [volume, setVolume] = useState(music?.volume ?? 100);
@@ -164,6 +198,13 @@ function NowPlaying({
       onControl({ action: 'volume', volume: value });
     }, 200);
   };
+
+  /** Vai para um ponto da música (em segundos), sem passar do fim. */
+  const seekTo = (seconds: number) => {
+    if (!duration) return;
+    onControl({ action: 'seek', seconds: Math.min(Math.max(0, Math.round(seconds)), Math.max(0, duration - 2)) });
+  };
+  const seekBy = (delta: number) => seekTo(positionMs / 1000 + delta);
 
   if (!music || !current) {
     return (
@@ -188,9 +229,35 @@ function NowPlaying({
         </div>
       </div>
 
-      <div className="mt-3" role="progressbar" aria-label="Progresso da música" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(percent)}>
-        <div className="h-1.5 overflow-hidden rounded-full bg-elevated">
-          <div className="h-full rounded-full bg-accent" style={{ width: `${duration ? percent : 0}%` }} />
+      <div className="mt-3">
+        {/* Clicar na barra vai para aquele ponto; com o foco nela, as setas andam de 10 em 10 segundos. */}
+        <div
+          role="slider"
+          tabIndex={duration ? 0 : -1}
+          aria-label="Posição da música"
+          aria-valuemin={0}
+          aria-valuemax={duration ?? 0}
+          aria-valuenow={Math.round(positionMs / 1000)}
+          aria-valuetext={`${formatClock(positionMs / 1000)}${duration ? ` de ${formatClock(duration)}` : ''}`}
+          aria-disabled={!duration}
+          onClick={(e) => {
+            if (!duration) return;
+            const box = e.currentTarget.getBoundingClientRect();
+            const fraction = Math.min(1, Math.max(0, (e.clientX - box.left) / box.width));
+            seekTo(Math.floor(fraction * duration));
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowRight') seekBy(SEEK_STEP_SECONDS);
+            else if (e.key === 'ArrowLeft') seekBy(-SEEK_STEP_SECONDS);
+            else return;
+            e.preventDefault();
+          }}
+          title={duration ? 'Clique para ir a um ponto da música' : undefined}
+          className={`rounded-full py-1.5 ${duration ? 'cursor-pointer focus-visible:outline-2 focus-visible:outline-accent' : ''}`}
+        >
+          <div className="h-1.5 overflow-hidden rounded-full bg-elevated">
+            <div className="h-full rounded-full bg-accent" style={{ width: `${duration ? percent : 0}%` }} />
+          </div>
         </div>
         <div className="mt-1 flex justify-between text-xs text-faint">
           <span>{formatClock(positionMs / 1000)}</span>
@@ -198,7 +265,7 @@ function NowPlaying({
         </div>
       </div>
 
-      <div className="mt-2 flex items-center gap-2">
+      <div className="mt-2 flex flex-wrap items-center gap-2">
         <button
           type="button"
           onClick={() => onControl({ action: music.paused ? 'resume' : 'pause' })}
@@ -208,8 +275,43 @@ function NowPlaying({
         >
           {music.paused ? <Play size={18} /> : <Pause size={18} />}
         </button>
-        <button type="button" onClick={() => onControl({ action: 'skip' })} aria-label="Pular" title="Pular" className={iconButton}>
+        <button
+          type="button"
+          onClick={() => seekBy(-SEEK_STEP_SECONDS)}
+          disabled={!duration}
+          aria-label={`Voltar ${SEEK_STEP_SECONDS} segundos`}
+          title={`Voltar ${SEEK_STEP_SECONDS} segundos`}
+          className={iconButton}
+        >
+          <Rewind size={18} />
+        </button>
+        <button
+          type="button"
+          onClick={() => seekBy(SEEK_STEP_SECONDS)}
+          disabled={!duration}
+          aria-label={`Avançar ${SEEK_STEP_SECONDS} segundos`}
+          title={`Avançar ${SEEK_STEP_SECONDS} segundos`}
+          className={iconButton}
+        >
+          <FastForward size={18} />
+        </button>
+        <button type="button" onClick={() => onControl({ action: 'skip' })} aria-label={skip.label} title={skip.label} className={iconButton}>
           <SkipForward size={18} />
+        </button>
+        {skip.votes && (
+          <span aria-hidden className="-ml-1 text-xs text-muted tabular-nums" title={skip.label}>
+            {skip.votes}
+          </span>
+        )}
+        <button
+          type="button"
+          onClick={() => onControl({ action: 'repeat', mode: NEXT_REPEAT[music.repeat] })}
+          aria-label={`Repetição ${REPEAT_LABEL[music.repeat]}`}
+          title={`Repetição ${REPEAT_LABEL[music.repeat]} (clique para trocar)`}
+          aria-pressed={music.repeat !== 'off'}
+          className={`${iconButton} ${music.repeat !== 'off' ? 'text-accent ring-2 ring-accent' : ''}`}
+        >
+          {music.repeat === 'one' ? <Repeat1 size={18} /> : <Repeat size={18} />}
         </button>
         <button type="button" onClick={() => onControl({ action: 'stop' })} aria-label="Parar e tirar o bot da chamada" title="Parar e tirar o bot da chamada" className={iconButton}>
           <Square size={16} />

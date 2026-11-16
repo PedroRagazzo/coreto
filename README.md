@@ -286,8 +286,9 @@ npm run e2e
   local e rode com `E2E_LIVEKIT_URL=ws://localhost:7880`: os testes de transmissão passam a usá-lo e um teste a mais
   (trocar a janela com a transmissão no ar) roda. Sem a variável, e no CI, a tela vai pela malha P2P.
 - Não há microfone, tela nem internet de verdade: o microfone é o falso do Chromium (um tom), a tela transmitida é um
-  canvas desenhado (`e2e/support/app.ts`), e a pré-visualização de links responde "nada" (`e2e/start-server.ts`). A
-  transmissão vai pela malha P2P, como numa instalação sem LiveKit.
+  canvas desenhado (`e2e/support/app.ts`), e a pré-visualização de links responde "nada" (`e2e/start-server.ts`). O
+  bot de música está ligado, mas com um tom de 4 s no lugar do YouTube (`server/test/support/fake-music-source.ts`; ele
+  precisa do WebRTC nativo, o mesmo dos testes do servidor). A transmissão vai pela malha P2P, como numa instalação sem LiveKit.
 - Quando um teste falha, o Playwright guarda uma captura de tela e o trace em `e2e/test-results`
   (`npx playwright show-trace <trace.zip>` mostra passo a passo). No CI, essa pasta sobe como artefato da execução.
 
@@ -746,6 +747,9 @@ remove qualquer um.
   mesma saída que vai para a chamada, então todo mundo o ouve como se viesse de você (o anel de "falando" acende), sem o
   servidor misturar nada. "Ouvir o som que eu toco" liga o retorno para você (desligue com caixa de som, senão o
   microfone repete o som). O volume do quadro e essa opção ficam só no seu computador.
+- **Volume por som:** o ícone de alto-falante de cada som abre um controle de 10% a 200% (acima de 100% é ganho), com um botão para
+  ouvir o som já com o volume escolhido. Vale para o clique e para o atalho (volume do quadro × volume do som), aparece no som
+  quando difere de 100% e fica só no seu aparelho (`soundVolumes` em `client/src/lib/settings.ts`); sai junto com o som removido.
 - **Atalho por som:** passando o mouse num som aparece o ícone de teclado; clique, aperte a tecla (ou as teclas juntas, até 4) e o atalho fica no som. Apertá-lo numa chamada toca o som sem abrir o quadro (com o Coreto em foco, uma tecla sem Ctrl/Alt/Win não dispara enquanto você digita). Cada atalho é só do seu aparelho (`soundKeybinds` em `client/src/lib/settings.ts`, pelo id do som) e não pode repetir o de mutar, o de ensurdecer nem o de outro som. O componente `Shortcuts` (`client/src/components/VoiceEffects.tsx`) trata mutar, ensurdecer e os sons do mesmo jeito; os sons de espaços já carregados valem (o do espaço na tela é carregado sozinho). **No app de desktop** (a partir da 0.7.3) cada som com atalho vira uma ação `snd0`, `snd1`... (até 48) no leitor de teclado nativo, então vale também em jogos em tela cheia; nas versões anteriores vale só com o Coreto em foco.
 - **Mutado também toca:** com o microfone mutado, o som sai só durante o som: a saída abre e o microfone em si fica sem volume,
   então ninguém ouve você falar (conferido com um microfone ruidoso: os outros ouviram só o som). Com o som da chamada
@@ -892,7 +896,9 @@ comandos são mensagens de chat comuns; o robô responde no mesmo canal. Entre n
 |---|---|
 | `/play <link ou nome da música>` (`/tocar`, `/p`) | toca agora ou entra na fila |
 | `/playnext <link ou nome>` (`/tocarseguir`, `/pn`) | põe na frente da fila, para tocar logo depois da atual |
-| `/skip` (`/pular`) · `/pause` · `/resume` | pula, pausa e continua |
+| `/skip` (`/pular`, `/voteskip`) · `/pause` · `/resume` | pula (ver "Votação para pular"), pausa e continua |
+| `/seek <ponto>` (`/avancar`) | vai para um ponto da música: `/seek 1:30`, `/seek +30` (avança), `/seek -15` (volta) |
+| `/repeat` (`/repetir`, `/loop`) | repete a música ou a fila: `/repeat musica`, `/repeat fila`, `/repeat off`; sem nada, passa para o modo seguinte |
 | `/queue` (`/fila`) · `/now` · `/clear` | mostra a fila, o que toca, esvazia a fila |
 | `/shuffle` (`/embaralhar`) | embaralha as músicas da fila (a que toca não muda) |
 | `/volume <0 a 150>` | volume do robô para todos (100 é o normal) |
@@ -904,6 +910,14 @@ fazê-la **tocar a seguir**, de **embaralhar** e de limpar), pausa, pula, para, 
 faixa da chamada aparece também uma minifaixa com a música e os botões de pausar e pular. Os pedidos do painel não
 escrevem no chat. Por baixo, o servidor manda `music:state` a todos da sala a cada mudança (e a quem entra depois), e o
 painel pede com `music:play` e controla com `music:control`, com as mesmas regras do chat.
+
+**Repetir, ir a um ponto e votar para pular.** *Repetir a música* abre a mesma de novo quando ela acaba (só se ela chegou a
+tocar: uma música que falha não fica em laço); *repetir a fila* põe no fim da fila a música que acabou ou foi pulada. *Ir a um ponto*
+abre o áudio de novo a partir dali (`open(track, startSeconds)`: o ffmpeg descarta o que vem antes do ponto, `-ss` depois da
+entrada, porque a entrada é um pipe), então só funciona quando a duração é conhecida; no painel, é um clique na barra de
+progresso (ou as setas, com o foco nela) e os botões de voltar e avançar 10 segundos. **Votação para pular:** com até duas pessoas na sala,
+pular é direto; com mais, precisa da metade da sala mais um (`skipStatus`, em `server/src/music/bot.ts`), os votos valem só para a música de
+agora e só contam quem ainda está na sala, e quem pediu a música pula direto. `music:state` leva `repeat`, `skipVoters` e `skipNeeded`.
 
 **Estéreo.** A música toca em estéreo, em Opus a até 128 kbps. O Opus do WebRTC só usa estéreo se quem recebe pedir (`stereo=1` no SDP), então o site ajusta o SDP da conexão com o robô (`shared/src/opus-sdp.ts`); com as pessoas a voz continua mono. Um navegador que não pedisse estéreo ouviria a música em mono, sem quebrar.
 

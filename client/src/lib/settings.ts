@@ -84,7 +84,12 @@ export interface Settings {
   keybinds: Keybinds;
   /** Atalho de cada som do quadro de som, pelo id do som (cada um é só deste aparelho). */
   soundKeybinds: Record<string, string[]>;
+  /** Volume de cada som do quadro de som, pelo id do som (1 = como veio; só guarda o que difere). Só deste aparelho. */
+  soundVolumes: Record<string, number>;
 }
+
+/** Quanto o volume de um som do quadro pode ser mexido (acima de 1 é ganho). */
+export const SOUND_GAIN_RANGE = { min: 0.1, max: 2 } as const;
 
 export const MESSAGE_FONT_SIZES = { min: 12, max: 20 } as const;
 
@@ -109,6 +114,7 @@ export const DEFAULT_SETTINGS: Settings = {
   notifications: { enabled: true, preview: true },
   keybinds: { mute: null, deafen: null },
   soundKeybinds: {},
+  soundVolumes: {},
 };
 
 const STORAGE_KEY = 'coreto.settings';
@@ -138,6 +144,17 @@ function soundKeybinds(value: unknown): Record<string, string[]> {
   return result;
 }
 
+/** O volume de cada som: id do som → ganho dentro do limite (o que é igual ao padrão não precisa ficar guardado). */
+function soundVolumes(value: unknown): Record<string, number> {
+  const result: Record<string, number> = {};
+  if (!value || typeof value !== 'object') return result;
+  for (const [id, gain] of Object.entries(value).slice(0, 200)) {
+    const g = clamp(gain, SOUND_GAIN_RANGE.min, SOUND_GAIN_RANGE.max, 1);
+    if (g !== 1 && id.length > 0 && id.length <= 64) result[id] = g;
+  }
+  return result;
+}
+
 function userVolumes(value: unknown): Record<string, UserVolume> {
   const result: Record<string, UserVolume> = {};
   if (!value || typeof value !== 'object') return result;
@@ -160,6 +177,7 @@ export function loadSettings(): Settings {
     notifications: Partial<NotificationPrefs>;
     keybinds: Partial<Keybinds>;
     soundKeybinds: unknown;
+    soundVolumes: unknown;
   }> = {};
   try {
     raw = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}') ?? {};
@@ -201,6 +219,7 @@ export function loadSettings(): Settings {
     notifications: { enabled: bool(n.enabled, d.notifications.enabled), preview: bool(n.preview, d.notifications.preview) },
     keybinds: { mute: sanitizeKeybind(k.mute), deafen: sanitizeKeybind(k.deafen) },
     soundKeybinds: soundKeybinds(raw.soundKeybinds),
+    soundVolumes: soundVolumes(raw.soundVolumes),
   };
 }
 

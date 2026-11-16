@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseCommand } from '../../src/music/commands.js';
+import { parseCommand, parseRepeatMode, parseSeekTarget } from '../../src/music/commands.js';
 import { parseMusicRequest } from '../../src/music/links.js';
 import { describeTrack, formatDuration, TrackQueue, type NewTrack } from '../../src/music/queue.js';
 import { parseEmbed } from '../../src/music/spotify.js';
@@ -93,6 +93,36 @@ describe('comandos do bot de música', () => {
   });
 });
 
+describe('repetir e avançar no tempo (comandos)', () => {
+  it('lê o modo de repetição, e sem nada passa para o seguinte', () => {
+    expect(parseRepeatMode('')).toBe('next');
+    expect(parseRepeatMode('off')).toBe('off');
+    expect(parseRepeatMode('Música')).toBe('one');
+    expect(parseRepeatMode('fila')).toBe('all');
+    expect(parseRepeatMode('talvez')).toBeNull();
+  });
+
+  it('lê um ponto da música, ou um deslocamento com + ou -', () => {
+    expect(parseSeekTarget('90')).toEqual({ relative: false, seconds: 90 });
+    expect(parseSeekTarget('1:30')).toEqual({ relative: false, seconds: 90 });
+    expect(parseSeekTarget('1:02:05')).toEqual({ relative: false, seconds: 3725 });
+    expect(parseSeekTarget('+30')).toEqual({ relative: true, seconds: 30 });
+    expect(parseSeekTarget('- 1:00')).toEqual({ relative: true, seconds: -60 });
+  });
+
+  it('recusa o que não é tempo', () => {
+    for (const bad of ['', 'abc', '1:75', '1:5', '1:2:3:4', '-', '99999', '1.5']) expect(parseSeekTarget(bad)).toBeNull();
+  });
+
+  it('reconhece /repeat, /seek e os apelidos, e /voteskip pula', () => {
+    expect(parseCommand('/repeat fila')).toEqual({ name: 'repeat', args: 'fila' });
+    expect(parseCommand('/repetir')).toEqual({ name: 'repeat', args: '' });
+    expect(parseCommand('/seek +30')).toEqual({ name: 'seek', args: '+30' });
+    expect(parseCommand('/avançar 1:20')).toEqual({ name: 'seek', args: '1:20' });
+    expect(parseCommand('/voteskip')).toEqual({ name: 'skip', args: '' });
+  });
+});
+
 describe('fila de músicas', () => {
   const track = (title: string): NewTrack => ({ requestedBy: 'Ana', title, artist: null, durationSeconds: 100, source: title });
 
@@ -130,6 +160,15 @@ describe('fila de músicas', () => {
     queue.add([track('a'), track('b')]);
     expect(queue.add([track('x'), track('y')], { front: true })).toHaveLength(2);
     expect(queue.upcoming().map((t) => t.title)).toEqual(['x', 'y', 'a', 'b']);
+  });
+
+  it('põe de volta no fim uma música que já tocou (repetir a fila), se há lugar', () => {
+    const queue = new TrackQueue(2);
+    const [a] = queue.add([track('a'), track('b')]);
+    queue.advance();
+    expect(queue.requeue(a)).toBe(true);
+    expect(queue.upcoming().map((t) => t.title)).toEqual(['b', 'a']);
+    expect(queue.requeue(a)).toBe(false);
   });
 
   it('passa uma música que espera para a frente', () => {

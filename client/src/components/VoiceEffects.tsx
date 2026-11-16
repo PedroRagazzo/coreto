@@ -108,7 +108,7 @@ export function Shortcuts() {
   const { state, actions } = useRealtime();
   const { settings } = useSettings();
   const { mute, deafen } = settings.keybinds;
-  const { soundKeybinds } = settings;
+  const { soundKeybinds, soundVolumes } = settings;
   const actionsRef = useRef(actions);
   actionsRef.current = actions;
   const stateRef = useRef(state);
@@ -133,8 +133,8 @@ export function Shortcuts() {
     ...soundBinds,
   ];
   const bindsKey = binds.map((b) => `${b.id}=${b.keys.join('+')}`).join('|');
-  const latest = useRef({ mute, deafen, binds, soundBinds });
-  latest.current = { mute, deafen, binds, soundBinds };
+  const latest = useRef({ mute, deafen, binds, soundBinds, soundVolumes });
+  latest.current = { mute, deafen, binds, soundBinds, soundVolumes };
 
   // Os sons só chegam quando o quadro é aberto: com atalhos guardados, carrega os do espaço que está na tela.
   const spaceId = state.snapshot?.space.id;
@@ -155,7 +155,7 @@ export function Shortcuts() {
       .find((c) => c.id === bind.clipId);
     if (!clip) return;
     const { volume, hearMine } = readSoundboardPrefs();
-    void actionsRef.current.playSound(clip, volume, hearMine ? 0.8 : 0);
+    void actionsRef.current.playSound(clip, volume * (latest.current.soundVolumes[clip.id] ?? 1), hearMine ? 0.8 : 0);
   });
 
   // Na janela do Coreto.

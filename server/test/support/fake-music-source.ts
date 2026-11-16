@@ -9,6 +9,8 @@ import { FRAME_BYTES, MusicError, type AudioHandle, type MusicSource } from '../
  */
 export class FakeMusicSource implements MusicSource {
   readonly opened: string[] = [];
+  /** De onde cada abertura começou (em segundos), na ordem em que aconteceram: título e ponto. */
+  readonly starts: { title: string; startSeconds: number }[] = [];
 
   async resolve(request: MusicRequest, requestedBy: string): Promise<NewTrack[]> {
     const make = (title: string, source = `fake:${title}`, durationSeconds = 4): NewTrack => ({
@@ -31,13 +33,14 @@ export class FakeMusicSource implements MusicSource {
     }
   }
 
-  open(track: Track): AudioHandle {
+  open(track: Track, startSeconds = 0): AudioHandle {
     this.opened.push(track.title);
+    this.starts.push({ title: track.title, startSeconds });
     if (track.source === 'fake-quebrada') {
       const pcm = new Readable({ read() { this.push(null); } });
       return { pcm, stop() {}, finished: Promise.resolve({ bytes: 0, error: 'Esse vídeo é privado.' }) };
     }
-    const totalFrames = (track.durationSeconds ?? 4) * 100;
+    const totalFrames = Math.max(1, ((track.durationSeconds ?? 4) - startSeconds) * 100);
     let produced = 0;
     let t = 0;
     let stopped = false;

@@ -20,7 +20,8 @@ export interface AudioHandle {
 export interface MusicSource {
   /** Transforma o pedido em músicas; lança `MusicError` com o motivo se não der. */
   resolve(request: MusicRequest, requestedBy: string, limit: number): Promise<NewTrack[]>;
-  open(track: Track): AudioHandle;
+  /** Abre o áudio da música, a partir de `startSeconds` (para avançar ou voltar no tempo). */
+  open(track: Track, startSeconds?: number): AudioHandle;
 }
 
 export const SAMPLE_RATE = 48000;

@@ -10,16 +10,20 @@ import type { MusicBot } from './bot.js';
 
 const MAX_INPUT_LENGTH = 600;
 const MAX_ID_LENGTH = 100;
+/** Maior ponto de uma música a que o painel pode ir (a duração máxima de uma música já é menor que isso). */
+const MAX_SEEK_SECONDS = 24 * 3600;
 const SIMPLE_ACTIONS = new Set(['skip', 'pause', 'resume', 'stop', 'clear', 'shuffle']);
 
 /** Confere o formato de um controle vindo do cliente. */
 export function readControl(raw: unknown): MusicControl | null {
   if (typeof raw !== 'object' || raw === null) return null;
-  const { action, id, volume } = raw as Record<string, unknown>;
+  const { action, id, volume, mode, seconds } = raw as Record<string, unknown>;
   if (typeof action !== 'string') return null;
   if (SIMPLE_ACTIONS.has(action)) return { action: action as 'skip' | 'pause' | 'resume' | 'stop' | 'clear' | 'shuffle' };
   if (action === 'remove' || action === 'top') return typeof id === 'string' && id.length > 0 && id.length <= MAX_ID_LENGTH ? { action, id } : null;
   if (action === 'volume') return typeof volume === 'number' && Number.isFinite(volume) ? { action, volume } : null;
+  if (action === 'repeat') return mode === 'off' || mode === 'one' || mode === 'all' ? { action, mode } : null;
+  if (action === 'seek') return typeof seconds === 'number' && Number.isFinite(seconds) && seconds >= 0 && seconds <= MAX_SEEK_SECONDS ? { action, seconds } : null;
   return null;
 }
 

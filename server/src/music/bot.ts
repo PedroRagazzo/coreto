@@ -6,7 +6,14 @@
 
 import type { Channel, Id, Message } from '../../../shared/src/models.js';
 import { hasPermission, Permission } from '../../../shared/src/permissions.js';
-import { MAX_MESSAGE_LENGTH, type MusicControl, type MusicState, type MusicTrackInfo, type SignalPayload } from '../../../shared/src/protocol.js';
+import {
+  MAX_MESSAGE_LENGTH,
+  type MusicControl,
+  type MusicRepeat,
+  type MusicState,
+  type MusicTrackInfo,
+  type SignalPayload,
+} from '../../../shared/src/protocol.js';
 import { joinPublicSpaces } from '../realtime/membership.js';
 import { rooms, type IO } from '../realtime/types.js';
 import { bumpUnread } from '../realtime/unread.js';
@@ -14,7 +21,7 @@ import { broadcastRoster, endVoiceSession } from '../realtime/voice.js';
 import type { Store, VoiceObserver, VoiceSession } from '../store.js';
 import type { IceConfig } from '../turn.js';
 import { BotVoice, type Wrtc } from './bot-voice.js';
-import { HELP_TEXT, parseCommand, type MusicCommand } from './commands.js';
+import { HELP_TEXT, parseCommand, parseRepeatMode, parseSeekTarget, type MusicCommand } from './commands.js';
 import type { MusicConfig } from './config.js';
 import { parseMusicRequest } from './links.js';
 import { FramePacer } from './pacer.js';
@@ -40,7 +47,19 @@ interface Playing {
   handle: AudioHandle;
   /** O download está parado porque já há áudio de sobra. */
   throttled: boolean;
+  /** De onde esta reprodução começou, em ms (0, ou o ponto para onde se avançou ou voltou). */
+  startMs: number;
+  /** Quem já votou para pular esta música. */
+  skipVotes: Set<Id>;
 }
+
+/** O que `/repeat` sem argumento faz: passa para o modo seguinte. */
+const NEXT_REPEAT: Record<MusicRepeat, MusicRepeat> = { off: 'one', one: 'all', all: 'off' };
+const REPEAT_TEXT: Record<MusicRepeat, string> = {
+  off: 'Repetição desligada.',
+  one: 'Repetindo a música que está tocando.',
+  all: 'Repetindo a fila: o que acaba volta para o fim dela.',
+};
 
 interface Room {
   channelId: Id;
@@ -52,6 +71,7 @@ interface Room {
   now: Playing | null;
   paused: boolean;
   volume: number;
+  repeat: MusicRepeat;
   /** Onde responder no chat: o canal do último comando de chat; `null` se só se usou o painel. */
   textChannel: Channel | null;
   /** Último problema ao tocar, para o painel mostrar. */
@@ -129,6 +149,10 @@ export class MusicBot implements VoiceObserver {
       case 'remove':
       case 'top':
         return this.fromPanel(authorId, { name: control.action, args: String(control.id) });
+      case 'repeat':
+        return this.fromPanel(authorId, { name: 'repeat', args: control.mode });
+      case 'seek':
+        return this.fromPanel(authorId, { name: 'seek', args: String(Math.round(control.seconds)) });
     }
   }
 
@@ -200,10 +224,30 @@ export class MusicBot implements VoiceObserver {
     if (channel) room.textChannel = channel;
 
     switch (command.name) {
-      case 'skip':
-        if (!room.now) return reply('Não há nada tocando.', true);
-        await reply(`Pulei **${room.now.track.title}**.`);
-        return this.playNext(room);
+      case 'skip': {
+        const { now } = room;
+        if (!now) return reply('Não há nada tocando.', true);
+        const vote = this.voteSkip(room, now, authorId);
+        if (!vote.done) {
+          this.publish(room);
+          return reply(
+            vote.already
+              ? `Você já votou para pular (${vote.votes}/${vote.needed}).`
+              : `Voto para pular registrado (${vote.votes}/${vote.needed}). Faltam ${vote.needed - vote.votes}.`,
+          );
+        }
+        await reply(`Pulei **${now.track.title}**.`);
+        return this.playNext(room, 'skip');
+      }
+      case 'repeat': {
+        const mode = parseRepeatMode(command.args);
+        if (mode === null) return reply('Use `/repeat off`, `/repeat musica` ou `/repeat fila` (sem nada, passa para o modo seguinte).', true);
+        room.repeat = mode === 'next' ? NEXT_REPEAT[room.repeat] : mode;
+        this.publish(room);
+        return reply(REPEAT_TEXT[room.repeat]);
+      }
+      case 'seek':
+        return this.seek(room, command.args, reply);
       case 'pause':
         if (!room.now) return reply('Não há nada tocando.', true);
         room.paused = true;
@@ -290,6 +334,8 @@ export class MusicBot implements VoiceObserver {
       throw err;
     }
 
+    found = found.map((track) => ({ ...track, requesterId: authorId }));
+
     // Quem pediu pode ter saído da sala enquanto a busca rodava.
     const still = store.voice.get(authorId);
     if (!still || still.channelId !== author.channelId) return;
@@ -301,7 +347,7 @@ export class MusicBot implements VoiceObserver {
     const added = room.queue.add(found, { front });
     room.idleSince = null;
     if (wasIdle) {
-      await this.playNext(room);
+      await this.playNext(room, 'ended');
       if (added.length > 1) await reply(`Mais ${added.length - 1} músicas na fila.`);
     } else {
       this.publish(room);
@@ -340,11 +386,14 @@ export class MusicBot implements VoiceObserver {
   private state(room: Room): MusicState {
     return {
       channelId: room.channelId,
-      current: room.now ? { ...trackInfo(room.now.track), positionMs: room.pacer.playedMs } : null,
+      current: room.now ? { ...trackInfo(room.now.track), positionMs: room.now.startMs + room.pacer.playedMs } : null,
       paused: room.paused,
       volume: room.volume,
       queue: room.queue.upcoming().map(trackInfo),
       notice: room.notice,
+      repeat: room.repeat,
+      skipVoters: this.skipStatus(room).votes,
+      skipNeeded: this.skipStatus(room).needed,
     };
   }
 
@@ -402,6 +451,7 @@ export class MusicBot implements VoiceObserver {
       now: null,
       paused: false,
       volume: 100,
+      repeat: 'off',
       textChannel: channel,
       notice: null,
       emptySince: null,
@@ -463,12 +513,24 @@ export class MusicBot implements VoiceObserver {
 
   // ── Reprodução ─────────────────────────────────────────────────────────────
 
-  /** Para a música de agora (se houver) e começa a próxima da fila. */
-  private async playNext(room: Room): Promise<void> {
+  /**
+   * Para a música de agora (se houver) e começa a próxima. `ended`: ela acabou sozinha (com a repetição de uma música,
+   * toca a mesma de novo); `skip`: pularam. Com a repetição da fila, a que saiu volta para o fim dela.
+   */
+  private async playNext(room: Room, reason: 'ended' | 'skip'): Promise<void> {
+    const previous = room.now;
+    // Só repete o que de fato tocou: uma música que falhou não pode ficar em laço.
+    const played = reason === 'skip' || room.pacer.playedMs > 0 || (previous?.startMs ?? 0) > 0;
     room.now?.handle.stop();
     room.now = null;
     room.pacer.stop();
-    const track = room.queue.advance();
+    let track: Track | null;
+    if (previous && reason === 'ended' && room.repeat === 'one' && played) {
+      track = previous.track;
+    } else {
+      if (previous && room.repeat === 'all' && played) room.queue.requeue(previous.track);
+      track = room.queue.advance();
+    }
     if (!track) {
       this.setActivity(room, null);
       room.idleSince = Date.now();
@@ -477,8 +539,17 @@ export class MusicBot implements VoiceObserver {
     }
     room.idleSince = null;
     room.notice = null;
-    const handle = this.deps.source.open(track);
-    const playing: Playing = { track, handle, throttled: false };
+    this.startTrack(room, track, 0);
+    // Repetindo a mesma música, não enche o chat de "Tocando agora".
+    if (room.textChannel && track !== previous?.track) {
+      await this.say(room.textChannel, `▶ Tocando agora: ${describeTrack(track)} · pedido por ${track.requestedBy}`);
+    }
+  }
+
+  /** Abre o áudio da música (a partir de `startSeconds`) e liga tudo; quem chama já parou a anterior. */
+  private startTrack(room: Room, track: Track, startSeconds: number, votes: Set<Id> = new Set()): void {
+    const handle = this.deps.source.open(track, startSeconds);
+    const playing: Playing = { track, handle, throttled: false, startMs: startSeconds * 1000, skipVotes: votes };
     room.now = playing;
     room.pacer.gain = room.volume / 100;
     this.setActivity(room, track.title);
@@ -502,13 +573,55 @@ export class MusicBot implements VoiceObserver {
     });
     if (!room.paused) room.pacer.start();
     this.publish(room);
-    if (room.textChannel) await this.say(room.textChannel, `▶ Tocando agora: ${describeTrack(track)} · pedido por ${track.requestedBy}`);
+  }
+
+  /** Vai para um ponto da música que está tocando: abre o áudio de novo a partir dele. */
+  private async seek(room: Room, args: string, reply: Reply): Promise<void> {
+    const { now } = room;
+    if (!now) return reply('Não há nada tocando.', true);
+    const target = parseSeekTarget(args);
+    if (!target) return reply('Use `/seek 1:30` para ir a um ponto, ou `/seek +30` e `/seek -15` para avançar ou voltar.', true);
+    const duration = now.track.durationSeconds;
+    if (duration === null) return reply('Não sei a duração dessa música, então não dá para ir a um ponto dela.', true);
+    const current = (now.startMs + room.pacer.playedMs) / 1000;
+    const wanted = Math.max(0, target.relative ? current + target.seconds : target.seconds);
+    if (wanted >= duration - 1) return reply(`Essa música tem ${formatDuration(duration)}. Use \`/skip\` para ir para a próxima.`, true);
+    const at = Math.floor(wanted);
+    now.handle.stop();
+    room.pacer.stop();
+    this.startTrack(room, now.track, at, now.skipVotes);
+    return reply(`Fui para ${formatDuration(at)}.`);
+  }
+
+  // ── Votação para pular ─────────────────────────────────────────────────────
+
+  /** Quem está na sala (sem o bot), quantos votos pulam a música e quem já votou entre os que ainda estão. */
+  private skipStatus(room: Room): { humans: Set<Id>; needed: number; votes: Id[] } {
+    const humans = new Set(
+      this.deps.store
+        .voiceIn(room.channelId)
+        .filter((s) => s.socketId !== BOT_SOCKET_ID)
+        .map((s) => s.userId),
+    );
+    // Até duas pessoas, qualquer uma pula; com mais, é preciso a metade da sala mais um.
+    const needed = humans.size <= 2 ? 1 : Math.floor(humans.size / 2) + 1;
+    const votes = room.now ? [...room.now.skipVotes].filter((id) => humans.has(id)) : [];
+    return { humans, needed, votes };
+  }
+
+  /** Conta o voto de `voter`; `done` quando a música deve pular (quem pediu a música pula direto). */
+  private voteSkip(room: Room, now: Playing, voter: Id): { done: boolean; already: boolean; votes: number; needed: number } {
+    const already = now.skipVotes.has(voter);
+    now.skipVotes.add(voter);
+    const { needed, votes } = this.skipStatus(room);
+    const done = now.track.requesterId === voter || votes.length >= needed;
+    return { done, already, votes: votes.length, needed };
   }
 
   private onTrackEnded(): void {
     const room = this.room;
     if (!room) return;
-    this.enqueue(() => this.playNext(room)).catch((err: unknown) => console.error('[música] próxima', err));
+    this.enqueue(() => this.playNext(room, 'ended')).catch((err: unknown) => console.error('[música] próxima', err));
   }
 
   private setActivity(room: Room, text: string | null): void {

@@ -22,6 +22,34 @@ export interface ChangelogEntry {
 /** Da mais nova para a mais antiga. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-15-6',
+    title: 'Volume de cada som do quadro de som',
+    items: [
+      {
+        title: 'Cada som no seu volume',
+        text: 'No quadro de som, o ícone de alto-falante de cada som deixa você acertar o volume dele, de 10% a 200%, e ouvir o resultado na hora. Serve para o som que estoura ou o que mal se escuta. Vale só no seu aparelho.',
+      },
+    ],
+  },
+  {
+    id: '2026-11-15-5',
+    title: 'Música: repetir, avançar no tempo e votar para pular',
+    items: [
+      {
+        title: 'Repetir',
+        text: 'No painel de música, o botão de repetir alterna entre repetir a música que toca e repetir a fila inteira. No chat, use /repeat.',
+      },
+      {
+        title: 'Ir a um ponto da música',
+        text: 'Clique na barra de progresso, ou use os botões de voltar e avançar 10 segundos. No chat, use /seek 1:30 (ou /seek +30 e /seek -15).',
+      },
+      {
+        title: 'Votar para pular',
+        text: 'Com mais de duas pessoas na sala, pular passa a ser uma votação: é preciso a metade da sala mais um. Quem pediu a música pula direto. Com duas pessoas ou menos, nada muda.',
+      },
+    ],
+  },
+  {
     id: '2026-11-15-4',
     title: 'App de desktop 0.7.3',
     items: [

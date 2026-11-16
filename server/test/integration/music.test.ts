@@ -244,6 +244,88 @@ describe.skipIf(!hasTestDatabase)('bot de música', () => {
     expect(await quiet).toBe('calado');
   }, 15_000);
 
+  it('repete a música e a fila, e a repetição acaba quando a música falha', async () => {
+    const ana = await person('Ana');
+    await ana.say('/play um');
+    expect(await ana.say('/repeat musica')).toContain('Repetindo a música');
+    // A fake dura 4 s: ao acabar, com a repetição de uma música, abre a mesma de novo (sem "Tocando agora" de novo).
+    const opened = () => source.starts.filter((s) => s.title === 'um').length;
+    const before = opened();
+    await until(() => opened() >= before + 1, 12_000);
+    expect(opened()).toBeGreaterThanOrEqual(before + 1);
+
+    // Repetir a fila: a que sai volta para o fim.
+    expect(await ana.say('/repeat fila')).toContain('Repetindo a fila');
+    await ana.say('/play dois');
+    expect(await ana.say('/skip', 2)).toContain('Pulei **um**');
+    const queue = await ana.say('/fila');
+    expect(queue).toContain('Tocando: **dois**');
+    expect(queue).toContain('1. **um**');
+
+    // Sem argumento passa para o modo seguinte (fila -> desligado) e entende modos escritos de outro jeito.
+    expect(await ana.say('/repeat')).toContain('desligada');
+    expect(await ana.say('/repeat talvez')).toContain('Use `/repeat off`');
+    await ana.say('/stop');
+
+    // Uma música que falha não fica em laço, mesmo com a repetição ligada.
+    const bruno = await person('Bruno');
+    await bruno.say('/repeat musica');
+    const failedBefore = source.starts.filter((s) => s.title === 'quebrada').length;
+    await bruno.say('/play quebrada');
+    await wait(1500);
+    expect(source.starts.filter((s) => s.title === 'quebrada').length).toBe(failedBefore + 1);
+    await bruno.say('/stop');
+  }, 60_000);
+
+  it('vai para um ponto da música, avança e volta, e recusa o que não cabe', async () => {
+    const ana = await person('Ana');
+    await ana.say('/play ponto');
+    expect(await ana.say('/seek 2')).toContain('Fui para 0:02');
+    expect(source.starts.at(-1)).toEqual({ title: 'ponto', startSeconds: 2 });
+    expect(await ana.say('/seek 1')).toContain('Fui para 0:01');
+    expect(await ana.say('/seek +1')).toMatch(/Fui para 0:0[2]/);
+    expect(source.starts.at(-1)!.startSeconds).toBe(2);
+    expect(await ana.say('/seek -100')).toContain('Fui para 0:00');
+    expect(source.starts.at(-1)!.startSeconds).toBe(0);
+    expect(await ana.say('/seek 9:00')).toContain('Essa música tem 0:04');
+    expect(await ana.say('/seek abc')).toContain('Use `/seek 1:30`');
+    expect(await ana.say('/now')).toContain('**ponto**');
+    await ana.say('/stop');
+  }, 40_000);
+
+  it('com mais de duas pessoas, pular é uma votação; quem pediu a música pula direto', async () => {
+    const ana = await person('Ana');
+    const bruno = await person('Bruno');
+    const carla = await person('Carla');
+    await ana.say('/play da ana');
+    await ana.say('/play seguinte');
+    await wait(300); // os avisos do bot chegam a todos: deixa os de Ana passarem antes de Bruno esperar o dele
+    // Bruno e Carla votam; com 3 pessoas na sala bastam 2 votos.
+    expect(await bruno.say('/skip')).toContain('Voto para pular registrado (1/2)');
+    expect(await bruno.say('/skip')).toContain('Você já votou para pular (1/2)');
+    await wait(300);
+    expect(await carla.say('/skip', 2)).toContain('Pulei **da ana**');
+
+    // Quem pediu a música pula sem votação.
+    await wait(300);
+    await bruno.say('/play do bruno');
+    await wait(300);
+    expect(await ana.say('/skip', 2)).toContain('Pulei **seguinte**');
+    expect(await ana.say('/now')).toContain('**do bruno**');
+    // Os votos de uma música não valem para a seguinte.
+    expect(await ana.say('/skip')).toContain('Voto para pular registrado (1/2)');
+    await ana.say('/stop');
+  }, 60_000);
+
+  it('com até duas pessoas, qualquer uma pula direto', async () => {
+    const ana = await person('Ana');
+    const bruno = await person('Bruno');
+    await ana.say('/play da ana');
+    await ana.say('/play outra');
+    expect(await bruno.say('/skip', 2)).toContain('Pulei **da ana**');
+    await ana.say('/stop');
+  }, 40_000);
+
   describe('painel da sala', () => {
     const state = (p: Person, check: (s: MusicState | null) => boolean = () => true, ms = 8_000) =>
       nextEvent(p.client.socket, 'music:state', check, ms);
@@ -305,6 +387,33 @@ describe.skipIf(!hasTestDatabase)('bot de música', () => {
 
       // Nada disso falou no chat: o painel não tem canal de texto.
       expect(chatReplies).toEqual([]);
+    }, 40_000);
+
+    it('repete, avança no tempo e vota para pular pelo painel', async () => {
+      const ana = await person('Ana');
+      const bruno = await person('Bruno');
+      await person('Carla');
+      let next = state(ana, (s) => s?.current?.title === 'painel');
+      await play(ana, 'painel');
+      expect((await next)!).toMatchObject({ repeat: 'off', skipVoters: [], skipNeeded: 2 });
+
+      next = state(ana, (s) => s?.repeat === 'all');
+      ok(await control(ana, { action: 'repeat', mode: 'all' }));
+      await next;
+
+      next = state(ana, (s) => (s?.current?.positionMs ?? 0) >= 2000);
+      ok(await control(ana, { action: 'seek', seconds: 2 }));
+      expect((await next)!.current!.positionMs).toBeGreaterThanOrEqual(2000);
+      expect(await control(ana, { action: 'seek', seconds: 600 })).toMatchObject({ ok: false });
+
+      // Um voto de quem não pediu: aparece no estado, e a música continua.
+      next = state(ana, (s) => (s?.skipVoters.length ?? 0) === 1);
+      const voted = await control(bruno, { action: 'skip' });
+      ok(voted);
+      const s = (await next)!;
+      expect(s.skipVoters).toEqual([bruno.client.user.id]);
+      expect(s.current?.title).toBe('painel');
+      ok(await control(ana, { action: 'stop' }));
     }, 40_000);
 
     it('toca a seguir e embaralha pelo painel', async () => {

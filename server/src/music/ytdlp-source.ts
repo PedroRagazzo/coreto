@@ -154,14 +154,33 @@ export class YtDlpSource implements MusicSource {
     }
   }
 
-  open(track: Track): AudioHandle {
+  open(track: Track, startSeconds = 0): AudioHandle {
     const ytdlp = spawn(this.config.ytdlpPath, [...this.baseArgs(), '-f', 'bestaudio/best', '--no-playlist', '-o', '-', track.source], {
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
     });
     const ffmpeg = spawn(
       this.config.ffmpegPath,
-      ['-hide_banner', '-loglevel', 'error', '-nostdin', '-i', 'pipe:0', '-vn', '-f', 's16le', '-acodec', 'pcm_s16le', '-ar', '48000', '-ac', String(CHANNELS), 'pipe:1'],
+      [
+        '-hide_banner',
+        '-loglevel',
+        'error',
+        '-nostdin',
+        '-i',
+        'pipe:0',
+        // Depois da entrada: o ffmpeg decodifica e descarta até o ponto pedido (a entrada é um pipe, não dá para saltar).
+        ...(startSeconds > 0 ? ['-ss', String(Math.floor(startSeconds))] : []),
+        '-vn',
+        '-f',
+        's16le',
+        '-acodec',
+        'pcm_s16le',
+        '-ar',
+        '48000',
+        '-ac',
+        String(CHANNELS),
+        'pipe:1',
+      ],
       { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true },
     );
     ytdlp.stdout.pipe(ffmpeg.stdin);

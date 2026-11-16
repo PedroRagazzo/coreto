@@ -126,6 +126,9 @@ export interface MusicTrackInfo {
   requestedBy: string;
 }
 
+/** O que fazer quando a música acaba: nada (`off`), tocar a mesma de novo (`one`) ou recomeçar a fila (`all`). */
+export type MusicRepeat = 'off' | 'one' | 'all';
+
 /** O que o bot de música está fazendo na sala de voz; chega a quem está nela. */
 export interface MusicState {
   channelId: Id;
@@ -137,12 +140,20 @@ export interface MusicState {
   queue: MusicTrackInfo[];
   /** Último problema ao tocar (ex.: vídeo privado); some quando a próxima música começa. */
   notice: string | null;
+  repeat: MusicRepeat;
+  /** Quem da sala já votou para pular a música de agora. */
+  skipVoters: Id[];
+  /** Quantos votos pulam a música (a metade da sala mais um; com até duas pessoas, um só). */
+  skipNeeded: number;
 }
 
 export type MusicControl =
   | { action: 'skip' | 'pause' | 'resume' | 'stop' | 'clear' | 'shuffle' }
   | { action: 'remove' | 'top'; id: string }
-  | { action: 'volume'; volume: number };
+  | { action: 'volume'; volume: number }
+  | { action: 'repeat'; mode: MusicRepeat }
+  /** Vai para um ponto da música que está tocando. */
+  | { action: 'seek'; seconds: number };
 
 export interface IceServer {
   urls: string | string[];

@@ -95,3 +95,44 @@ test.describe('atalhos dos sons', () => {
     await ana.context.close();
   });
 });
+
+test.describe('volume de cada som', () => {
+  test('ajusta o volume de um som, que aparece no som, fica guardado e some com o som', async ({ browser }) => {
+    const ana = await openPerson(browser, 'Ana');
+    const { page } = ana;
+    await joinCall(page);
+
+    await page.getByRole('button', { name: 'Quadro de som' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Quadro de som' });
+    await dialog.locator('input[type=file]').setInputFiles({ name: 'sirene.wav', mimeType: 'audio/wav', buffer: silentWav(2) });
+    await dialog.getByRole('textbox', { name: 'Nome do som' }).fill('Sirene');
+    await dialog.getByRole('button', { name: 'Acrescentar' }).click();
+    const tile = dialog.getByRole('listitem').filter({ hasText: 'Sirene' });
+    await expect(tile).toBeVisible();
+
+    // Sem ajuste, o som não mostra volume nenhum; o controle começa em 100%.
+    await tile.hover();
+    await tile.getByRole('button', { name: 'Ajustar o volume do som Sirene' }).click();
+    const slider = tile.getByRole('slider', { name: 'Volume do som Sirene' });
+    await expect(slider).toHaveValue('100');
+    await slider.fill('150');
+    await expect(tile).toContainText('150%');
+    await tile.getByRole('button', { name: 'Fechar o volume do som Sirene' }).click();
+    await expect(tile).toContainText('150%');
+
+    // Fica guardado neste aparelho.
+    await page.reload();
+    await joinCall(page);
+    await page.getByRole('button', { name: 'Quadro de som' }).click();
+    const again = page.getByRole('dialog', { name: 'Quadro de som' }).getByRole('listitem').filter({ hasText: 'Sirene' });
+    await expect(again).toContainText('150%');
+
+    // Voltar a 100% tira a marca do som.
+    await again.hover();
+    await again.getByRole('button', { name: 'Ajustar o volume do som Sirene' }).click();
+    await again.getByRole('slider', { name: 'Volume do som Sirene' }).fill('100');
+    await again.getByRole('button', { name: 'Fechar o volume do som Sirene' }).click();
+    await expect(again).not.toContainText('%');
+    await ana.context.close();
+  });
+});

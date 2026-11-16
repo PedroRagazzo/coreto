@@ -14,6 +14,8 @@ export interface Track {
   durationSeconds: number | null;
   /** O que o `MusicSource` precisa para abrir o áudio (url do YouTube ou busca). */
   source: string;
+  /** Quem pediu (o id), para a votação de pular: quem pediu pula direto. Ausente em quem veio de fora do chat. */
+  requesterId?: string;
 }
 
 /** O que uma fonte devolve: a música ainda sem id (a fila dá). */
@@ -66,6 +68,13 @@ export class TrackQueue {
   advance(): Track | null {
     this.current = this.waiting.shift() ?? null;
     return this.current;
+  }
+
+  /** Põe uma música que já tocou de volta no fim (repetir a fila); `false` se a fila está cheia. */
+  requeue(track: Track): boolean {
+    if (this.waiting.length >= this.maxWaiting) return false;
+    this.waiting.push(track);
+    return true;
   }
 
   /** Tira uma música que ainda espera; `false` se ela não está mais na fila. */

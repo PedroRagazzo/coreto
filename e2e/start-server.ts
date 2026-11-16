@@ -7,12 +7,14 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startServer } from '../server/src/app.js';
+import { createMusic, musicConfigFromEnv } from '../server/src/music/index.js';
 import { createDb } from '../server/src/db/client.js';
 import { seedIfEmpty } from '../server/src/seed.js';
 import { sfuConfigFromEnv } from '../server/src/sfu.js';
 import { Store } from '../server/src/store.js';
 import { iceConfigFromEnv } from '../server/src/turn.js';
 import { assertTestDatabase } from '../server/test/support/database.js';
+import { FakeMusicSource } from '../server/test/support/fake-music-source.js';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const url = process.env.TEST_DATABASE_URL;
@@ -50,6 +52,8 @@ const server = await startServer(await Store.load(db), {
     : null,
   // Nenhum teste visita a internet: a pré-visualização de links responde sempre "nada para mostrar".
   embeds: { preview: async () => null, image: async () => null },
+  // O bot de música, como em produção, mas com um tom no lugar do YouTube (sem rede, sem yt-dlp nem ffmpeg).
+  music: createMusic(musicConfigFromEnv({}), { source: new FakeMusicSource(), checkTools: false }),
 });
 console.log(`Coreto (testes do site) em http://localhost:${server.port}`);
 

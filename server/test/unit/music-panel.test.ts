@@ -39,6 +39,15 @@ describe('controles vindos do painel', () => {
     }
   });
 
+  it('aceita repetir (com um modo conhecido) e ir a um ponto da música (segundos válidos)', () => {
+    for (const mode of ['off', 'one', 'all']) expect(readControl({ action: 'repeat', mode })).toEqual({ action: 'repeat', mode });
+    expect(readControl({ action: 'seek', seconds: 95 })).toEqual({ action: 'seek', seconds: 95 });
+    expect(readControl({ action: 'seek', seconds: 0 })).toEqual({ action: 'seek', seconds: 0 });
+    for (const bad of [{ action: 'repeat' }, { action: 'repeat', mode: 'sempre' }, { action: 'repeat', mode: 1 }, { action: 'seek' }, { action: 'seek', seconds: '5' }, { action: 'seek', seconds: -1 }, { action: 'seek', seconds: Number.NaN }, { action: 'seek', seconds: 1e9 }]) {
+      expect(readControl(bad)).toBeNull();
+    }
+  });
+
   it('ignora campos extras em ações simples (nada de passar lixo adiante)', () => {
     expect(readControl({ action: 'skip', id: 'x', volume: 3, extra: true })).toEqual({ action: 'skip' });
   });

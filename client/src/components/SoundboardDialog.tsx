@@ -1,8 +1,9 @@
 import type { SoundClip } from '@shared/models';
 import { cleanSoundEmoji, cleanSoundName, MAX_SOUND_NAME, MAX_SOUNDS_PER_SPACE } from '@shared/sounds';
-import { Keyboard, Music2, Square, Trash2, Upload, X } from 'lucide-react';
+import { Check, Keyboard, Music2, Play, Square, Trash2, Upload, Volume2, X } from 'lucide-react';
 import { useEffect, useState, type FormEvent } from 'react';
 import { formatKeybind, sameKeys } from '../lib/keybinds';
+import { SOUND_GAIN_RANGE } from '../lib/settings';
 import { SOUNDBOARD_HEAR_MINE_KEY, SOUNDBOARD_VOLUME_KEY } from '../lib/soundboard';
 import { useKeybindRecorder } from '../lib/useKeybindRecorder';
 import { useRealtime } from '../state/realtime';
@@ -46,6 +47,9 @@ export function SoundboardDialog({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const { settings, update } = useSettings();
   const binds = settings.soundKeybinds;
+  const gains = settings.soundVolumes;
+  /** O som cujo volume está sendo ajustado agora. */
+  const [adjusting, setAdjusting] = useState<string | null>(null);
   /** O som cujo atalho está sendo gravado agora. */
   const [target, setTarget] = useState<string | null>(null);
 
@@ -73,7 +77,27 @@ export function SoundboardDialog({ onClose }: { onClose: () => void }) {
 
   async function play(clip: SoundClip) {
     setError(null);
-    setError(await actions.playSound(clip, volume, hearMine ? 0.8 : 0));
+    setError(await actions.playSound(clip, volume * (gains[clip.id] ?? 1), hearMine ? 0.8 : 0));
+  }
+
+  function setGain(clipId: string, gain: number) {
+    update((s) => {
+      const next = { ...s.soundVolumes };
+      if (gain === 1) delete next[clipId];
+      else next[clipId] = gain;
+      return { ...s, soundVolumes: next };
+    });
+  }
+
+  /** O som saiu do quadro: o atalho e o volume dele não servem mais. */
+  function forget(clipId: string) {
+    update((s) => {
+      const keybinds = { ...s.soundKeybinds };
+      const volumes = { ...s.soundVolumes };
+      delete keybinds[clipId];
+      delete volumes[clipId];
+      return { ...s, soundKeybinds: keybinds, soundVolumes: volumes };
+    });
   }
 
   return (
@@ -84,30 +108,37 @@ export function SoundboardDialog({ onClose }: { onClose: () => void }) {
       {clips.length === 0 ? (
         <p className="rounded-md bg-rail px-3 py-6 text-center text-sm text-muted">Nenhum som ainda. Acrescente o primeiro abaixo.</p>
       ) : (
-        <ul className="grid max-h-64 grid-cols-3 gap-2 overflow-y-auto">
-          {clips.map((clip) => (
-            <ClipButton
-              key={clip.id}
-              clip={clip}
-              disabled={!inCall || deafened}
-              mine={clip.uploaderId === state.me?.id}
-              onPlay={() => void play(clip)}
-              bind={binds[clip.id] ?? null}
-              recording={recorder.recording && target === clip.id}
-              held={recorder.held}
-              onRecord={() => {
-                setError(null);
-                if (recorder.recording && target === clip.id) return recorder.setRecording(false);
-                setTarget(clip.id);
-                recorder.setRecording(true);
-              }}
-              onClearBind={() => setBind(clip.id, null)}
-            />
-          ))}
-        </ul>
+          <ul className="grid max-h-64 grid-cols-3 gap-2 overflow-y-auto">
+            {clips.map((clip) => (
+              <ClipButton
+                key={clip.id}
+                clip={clip}
+                disabled={!inCall || deafened}
+                mine={clip.uploaderId === state.me?.id}
+                onPlay={() => void play(clip)}
+                bind={binds[clip.id] ?? null}
+                recording={recorder.recording && target === clip.id}
+                held={recorder.held}
+                onRecord={() => {
+                  setError(null);
+                  if (recorder.recording && target === clip.id) return recorder.setRecording(false);
+                  setTarget(clip.id);
+                  recorder.setRecording(true);
+                }}
+                onClearBind={() => setBind(clip.id, null)}
+                onForget={() => forget(clip.id)}
+                gain={gains[clip.id] ?? 1}
+                adjusting={adjusting === clip.id}
+                onAdjust={() => setAdjusting((current) => (current === clip.id ? null : clip.id))}
+                onGain={(gain) => setGain(clip.id, gain)}
+              />
+            ))}
+          </ul>
       )}
       {clips.length > 0 && (
-        <p className="mt-2 text-xs text-faint">O ícone de teclado em cada som cria um atalho para tocá-lo sem abrir o quadro (só vale neste aparelho).</p>
+        <p className="mt-2 text-xs text-faint">
+          Em cada som, o ícone de teclado cria um atalho para tocá-lo sem abrir o quadro, e o de volume acerta o quanto ele toca (só vale neste aparelho).
+        </p>
       )}
 
       <div className="mt-4 flex items-center gap-3">
@@ -170,6 +201,11 @@ function ClipButton({
   held,
   onRecord,
   onClearBind,
+  onForget,
+  gain,
+  adjusting,
+  onAdjust,
+  onGain,
 }: {
   clip: SoundClip;
   disabled: boolean;
@@ -183,64 +219,124 @@ function ClipButton({
   held: string[];
   onRecord: () => void;
   onClearBind: () => void;
+  /** O som foi removido do quadro. */
+  onForget: () => void;
+  /** O volume deste som (1 = como veio). */
+  gain: number;
+  /** Está ajustando o volume deste som agora. */
+  adjusting: boolean;
+  onAdjust: () => void;
+  onGain: (gain: number) => void;
 }) {
   const { actions } = useRealtime();
   const [removing, setRemoving] = useState(false);
   const iconButton = 'rounded p-1 text-faint hover:bg-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-accent';
   return (
     <li className="group relative">
-      <button
-        type="button"
-        onClick={onPlay}
-        disabled={disabled}
-        title={bind ? `${clip.name} (atalho: ${formatKeybind(bind)})` : clip.name}
-        className={`flex h-16 w-full flex-col items-center justify-center gap-0.5 rounded-md bg-rail px-1 text-center hover:bg-hover focus-visible:outline-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50 ${
-          recording ? 'bg-accent/20 ring-2 ring-accent' : ''
-        }`}
-      >
-        {clip.emoji ? <span className="text-xl leading-none">{clip.emoji}</span> : <Music2 size={18} className="text-muted" aria-hidden />}
-        <span className="w-full truncate text-xs font-medium">{recording ? (held.length ? formatKeybind(held) : 'Aperte as teclas…') : clip.name}</span>
-        {bind && !recording && (
-          <span className="flex items-center gap-1 rounded bg-black/30 px-1.5 text-[10px] leading-4 font-semibold text-muted">
-            <Keyboard size={10} aria-hidden />
-            {formatKeybind(bind)}
-          </span>
-        )}
-      </button>
-      <div className="absolute top-0.5 right-0.5 flex opacity-0 group-focus-within:opacity-100 group-hover:opacity-100">
+      {adjusting ? (
+        <div className="flex h-16 w-full flex-col justify-center gap-1 rounded-md bg-accent/20 px-2 ring-2 ring-accent">
+          <span className="truncate pr-6 text-xs font-medium">{clip.name}</span>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={onPlay}
+              disabled={disabled}
+              aria-label={`Ouvir o som ${clip.name}`}
+              title="Ouvir com este volume"
+              className="shrink-0 rounded p-0.5 hover:bg-hover disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <Play size={12} />
+            </button>
+            <input
+              type="range"
+              min={SOUND_GAIN_RANGE.min * 100}
+              max={SOUND_GAIN_RANGE.max * 100}
+              step={5}
+              value={Math.round(gain * 100)}
+              onChange={(e) => onGain(Number(e.target.value) / 100)}
+              aria-label={`Volume do som ${clip.name}`}
+              className="min-w-0 flex-1 accent-[var(--color-accent)]"
+            />
+            <span className="w-9 shrink-0 text-right text-[10px] tabular-nums">{Math.round(gain * 100)}%</span>
+          </div>
+        </div>
+      ) : (
         <button
           type="button"
-          onClick={onRecord}
-          aria-label={`${recording ? 'Cancelar o atalho' : bind ? 'Mudar o atalho' : 'Dar um atalho'} do som ${clip.name}`}
-          title={recording ? 'Cancelar' : bind ? 'Mudar o atalho' : 'Dar um atalho'}
+          onClick={onPlay}
+          disabled={disabled}
+          title={bind ? `${clip.name} (atalho: ${formatKeybind(bind)})` : clip.name}
+          className={`flex h-16 w-full flex-col items-center justify-center gap-0.5 rounded-md bg-rail px-1 text-center hover:bg-hover focus-visible:outline-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50 ${
+            recording ? 'bg-accent/20 ring-2 ring-accent' : ''
+          }`}
+        >
+          {clip.emoji ? <span className="text-xl leading-none">{clip.emoji}</span> : <Music2 size={18} className="text-muted" aria-hidden />}
+          <span className="w-full truncate text-xs font-medium">{recording ? (held.length ? formatKeybind(held) : 'Aperte as teclas…') : clip.name}</span>
+          {(bind || gain !== 1) && !recording && (
+            <span className="flex items-center gap-1">
+              {bind && (
+                <span className="flex items-center gap-1 rounded bg-black/30 px-1.5 text-[10px] leading-4 font-semibold text-muted">
+                  <Keyboard size={10} aria-hidden />
+                  {formatKeybind(bind)}
+                </span>
+              )}
+              {gain !== 1 && (
+                <span className="flex items-center gap-0.5 rounded bg-black/30 px-1.5 text-[10px] leading-4 font-semibold text-muted">
+                  <Volume2 size={10} aria-hidden />
+                  {Math.round(gain * 100)}%
+                </span>
+              )}
+            </span>
+          )}
+        </button>
+      )}
+      <div className={`absolute top-0.5 right-0.5 flex ${adjusting ? '' : 'opacity-0 group-focus-within:opacity-100 group-hover:opacity-100'}`}>
+        <button
+          type="button"
+          onClick={onAdjust}
+          aria-label={`${adjusting ? 'Fechar o volume' : 'Ajustar o volume'} do som ${clip.name}`}
+          title={adjusting ? 'Pronto' : 'Ajustar o volume deste som'}
           className={iconButton}
         >
-          <Keyboard size={12} />
+          {adjusting ? <Check size={12} /> : <Volume2 size={12} />}
         </button>
-        {bind && !recording && (
-          <button type="button" onClick={onClearBind} aria-label={`Remover o atalho do som ${clip.name}`} title="Remover o atalho" className={iconButton}>
-            <X size={12} />
-          </button>
-        )}
-        {mine && (
-          <button
-            type="button"
-            disabled={removing}
-            onClick={() => {
-              setRemoving(true);
-              void actions
-                .removeSound(clip.id)
-                .then((problem) => {
-                  if (!problem) onClearBind();
-                })
-                .finally(() => setRemoving(false));
-            }}
-            aria-label={`Remover o som ${clip.name}`}
-            title="Remover"
-            className="rounded p-1 text-faint hover:bg-dnd/20 hover:text-dnd focus-visible:outline-2 focus-visible:outline-accent"
-          >
-            <Trash2 size={12} />
-          </button>
+        {!adjusting && (
+          <>
+            <button
+              type="button"
+              onClick={onRecord}
+              aria-label={`${recording ? 'Cancelar o atalho' : bind ? 'Mudar o atalho' : 'Dar um atalho'} do som ${clip.name}`}
+              title={recording ? 'Cancelar' : bind ? 'Mudar o atalho' : 'Dar um atalho'}
+              className={iconButton}
+            >
+              <Keyboard size={12} />
+            </button>
+            {bind && !recording && (
+              <button type="button" onClick={onClearBind} aria-label={`Remover o atalho do som ${clip.name}`} title="Remover o atalho" className={iconButton}>
+                <X size={12} />
+              </button>
+            )}
+            {mine && (
+              <button
+                type="button"
+                disabled={removing}
+                onClick={() => {
+                  setRemoving(true);
+                  void actions
+                    .removeSound(clip.id)
+                    .then((problem) => {
+                      if (!problem) onForget();
+                    })
+                    .finally(() => setRemoving(false));
+                }}
+                aria-label={`Remover o som ${clip.name}`}
+                title="Remover"
+                className="rounded p-1 text-faint hover:bg-dnd/20 hover:text-dnd focus-visible:outline-2 focus-visible:outline-accent"
+              >
+                <Trash2 size={12} />
+              </button>
+            )}
+          </>
         )}
       </div>
     </li>

@@ -1,7 +1,7 @@
 import { AudioLines, Eye, Headphones, HeadphoneOff, Mic, MicOff, MonitorUp, MonitorX, Music2, Pause, PhoneOff, Play, Replace, SkipForward, Video, VideoOff, X } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { useRealtime } from '../state/realtime';
-import { MusicDialog, useMusic } from './MusicDialog';
+import { MusicDialog, skipText, useMusic } from './MusicDialog';
 import { SoundboardDialog } from './SoundboardDialog';
 import { ScreenShareDialog } from './ScreenShareDialog';
 import { LiveBadge } from './StreamStage';
@@ -127,7 +127,7 @@ export function VoiceStatusBar() {
               type="button"
               onClick={() => void actions.musicControl({ action: 'skip' })}
               aria-label="Pular a música"
-              title="Pular"
+              title={skipText(music.state).label}
               className="rounded p-1 text-muted hover:bg-hover hover:text-fg"
             >
               <SkipForward size={15} />
