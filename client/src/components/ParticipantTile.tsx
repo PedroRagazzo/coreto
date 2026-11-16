@@ -18,8 +18,8 @@ export function useVideo(stream: MediaStream | null) {
   return ref;
 }
 
-/** O quadro de uma pessoa na chamada: a câmera ou o avatar, com o anel de quem fala. `compact` é o das colunas estreitas. */
-export function ParticipantTile({ participant, isMe, compact = false }: { participant: VoiceParticipant; isMe: boolean; compact?: boolean }) {
+/** O quadro de uma pessoa na chamada: a câmera ou o avatar, com o anel de quem fala. */
+export function ParticipantTile({ participant, isMe }: { participant: VoiceParticipant; isMe: boolean }) {
   const { state } = useRealtime();
   const { userId } = participant;
   const name = displayNameOf(state.snapshot, state.users, userId);
@@ -49,9 +49,7 @@ export function ParticipantTile({ participant, isMe, compact = false }: { partic
           className={`h-full w-full object-cover ${isMe ? '-scale-x-100' : ''}`}
         />
       ) : (
-        <span className={compact ? '-mt-3' : undefined}>
-          <Avatar name={name} color={user?.avatarColor ?? '#555'} size={compact ? 'md' : 'lg'} speaking={speaking} />
-        </span>
+        <Avatar name={name} color={user?.avatarColor ?? '#555'} size="lg" speaking={speaking} />
       )}
       <span className="absolute bottom-2 left-2 flex max-w-[calc(100%-1rem)] items-center gap-1.5 rounded bg-black/60 px-2 py-0.5 text-sm text-white">
         {participant.deafened ? (

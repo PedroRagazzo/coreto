@@ -33,10 +33,6 @@ export const CHANGELOG: ChangelogEntry[] = [
         title: 'Botões da chamada acima do seu nome',
         text: 'Microfone, som, câmera e tela ficam em quatro botões redondos logo acima do seu nome, com Música, Sons e Sair embaixo deles. A música que está tocando aparece num cartão azul logo acima.',
       },
-      {
-        title: 'Pessoas ao lado da sua transmissão',
-        text: 'Enquanto você vê a prévia da sua própria tela, as pessoas da chamada aparecem numa coluna à direita. Ao assistir a transmissão de outra pessoa, a coluna some e a tela dela ocupa o espaço todo.',
-      },
     ],
   },
   {
