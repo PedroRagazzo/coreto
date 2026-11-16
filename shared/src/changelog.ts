@@ -22,6 +22,16 @@ export interface ChangelogEntry {
 /** Da mais nova para a mais antiga. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-15-4',
+    title: 'App de desktop 0.7.3',
+    items: [
+      {
+        title: 'Atalhos dos sons no jogo',
+        text: 'Os atalhos que você der aos sons do quadro de som agora também funcionam com o Coreto em segundo plano e com um jogo em tela cheia, como os de mutar. O app se atualiza sozinho.',
+      },
+    ],
+  },
+  {
     id: '2026-11-15-3',
     title: 'Atalhos para os sons do quadro de som',
     items: [
