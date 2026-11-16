@@ -22,6 +22,16 @@ export interface ChangelogEntry {
 /** Da mais nova para a mais antiga. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-16-3',
+    title: 'Novo endereço do Coreto',
+    items: [
+      {
+        title: 'coreto.hubdev.app',
+        text: 'O Coreto mudou de endereço: agora é https://coreto.hubdev.app. O app do Windows 0.7.5 já abre o endereço novo; quem usa o app antigo precisa baixar a versão nova.',
+      },
+    ],
+  },
+  {
     id: '2026-11-16-2',
     title: 'Pequenos acertos',
     items: [

@@ -5,7 +5,7 @@
 Plataforma aberta de comunidades com chat em tempo real e salas de voz.
 Front-end em React + TypeScript + Tailwind CSS; tempo real em Node.js + socket.io; voz por WebRTC.
 
-**No ar:** https://coreto.2.28.229.48.nip.io · [baixar o app para Windows](https://github.com/PedroRagazzo/coreto/releases/latest)
+**No ar:** https://coreto.hubdev.app · [baixar o app para Windows](https://github.com/PedroRagazzo/coreto/releases/latest)
 
 > [!WARNING]
 > **Protótipo: não use em produção.** O login é só nome + PIN de 4 dígitos, todo espaço é

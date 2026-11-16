@@ -6,7 +6,7 @@
 // sessão de verdade. Teste uma transmissão: o painel de estatísticas mostra "servidor de mídia".
 //
 //   node deploy/livekit/check.mjs <domínio> <IP-da-VPS>
-//   ex.: node deploy/livekit/check.mjs livekit.2.28.229.48.nip.io 2.28.229.48
+//   ex.: node deploy/livekit/check.mjs livekit.exemplo.com 203.0.113.10
 // Sai com código 1 se alguma checagem falhar.
 
 import net from 'node:net';
