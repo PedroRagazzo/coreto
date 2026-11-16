@@ -47,3 +47,51 @@ test.describe('quadro de som', () => {
     await Promise.all([ana, bruno].map((p) => p.context.close()));
   });
 });
+
+test.describe('atalhos dos sons', () => {
+  test('dá um atalho a um som e o toca com o quadro fechado', async ({ browser }) => {
+    const ana = await openPerson(browser, 'Ana');
+    const { page } = ana;
+    await joinCall(page);
+
+    await page.getByRole('button', { name: 'Quadro de som' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Quadro de som' });
+    for (const name of ['Palmas', 'Buzina']) {
+      await dialog.locator('input[type=file]').setInputFiles({ name: `${name}.wav`, mimeType: 'audio/wav', buffer: silentWav(2) });
+      await dialog.getByRole('textbox', { name: 'Nome do som' }).fill(name);
+      await dialog.getByRole('button', { name: 'Acrescentar' }).click();
+      await expect(dialog.getByRole('button', { name, exact: true })).toBeVisible();
+    }
+
+    // Grava um atalho para "Palmas": a combinação aparece no próprio som.
+    const palmas = dialog.getByRole('listitem').filter({ hasText: 'Palmas' });
+    await palmas.hover();
+    await palmas.getByRole('button', { name: 'Dar um atalho do som Palmas' }).click();
+    await page.keyboard.press('Shift+KeyU');
+    await expect(palmas).toContainText('Shift + U');
+
+    // A mesma combinação em outro som é recusada.
+    const buzina = dialog.getByRole('listitem').filter({ hasText: 'Buzina' });
+    await buzina.hover();
+    await buzina.getByRole('button', { name: 'Dar um atalho do som Buzina' }).click();
+    await page.keyboard.press('Shift+KeyU');
+    await expect(dialog.getByRole('alert')).toContainText('já está em uso');
+    await expect(buzina).not.toContainText('Shift + U');
+
+    // Com o quadro fechado, o atalho toca o som (o áudio é baixado na primeira vez que toca).
+    await dialog.getByRole('button', { name: 'Fechar' }).click();
+    await expect(dialog).toBeHidden();
+    const played = page.waitForRequest((req) => req.method() === 'GET' && /\/sounds\/[^/?]+$/.test(new URL(req.url()).pathname));
+    await page.keyboard.press('Shift+KeyU');
+    await played;
+
+    // Tirar o atalho some com a combinação do som.
+    await page.getByRole('button', { name: 'Quadro de som' }).click();
+    const again = page.getByRole('dialog', { name: 'Quadro de som' });
+    const row = again.getByRole('listitem').filter({ hasText: 'Palmas' });
+    await row.hover();
+    await row.getByRole('button', { name: 'Remover o atalho do som Palmas' }).click();
+    await expect(row).not.toContainText('Shift + U');
+    await ana.context.close();
+  });
+});

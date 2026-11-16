@@ -5,8 +5,10 @@ import {
   isUsableKeybind,
   keyOf,
   KeyTracker,
+  MAX_SOUND_BINDS,
   orderKeys,
   sameKeys,
+  soundActionName,
   toGlobalAccelerator,
   toScanSpec,
 } from '../../../shared/src/keybinds.js';
@@ -155,3 +157,17 @@ describe('toGlobalAccelerator', () => {
     expect(toGlobalAccelerator(null)).toBeNull();
   });
 });
+
+describe('atalhos dos sons do quadro de som', () => {
+  it('dá a cada som um nome que o app de desktop e o leitor nativo aceitam', () => {
+    // O app confere o nome com /^(mute|deafen|snd\d{1,2})$/ e o leitor aceita até 32 caracteres.
+    const accepted = /^snd\d{1,2}$/;
+    for (let i = 0; i < MAX_SOUND_BINDS; i++) {
+      expect(soundActionName(i)).toMatch(accepted);
+      expect(soundActionName(i).length).toBeLessThanOrEqual(32);
+    }
+    expect(soundActionName(0)).toBe('snd0');
+    expect(new Set(Array.from({ length: MAX_SOUND_BINDS }, (_, i) => soundActionName(i))).size).toBe(MAX_SOUND_BINDS);
+  });
+});
+

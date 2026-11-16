@@ -98,3 +98,33 @@ test.describe('configurações de voz', () => {
     await Promise.all([ana, bruno].map((p) => p.context.close()));
   });
 });
+
+test.describe('atalhos de teclado', () => {
+  test('grava o atalho de mutar, recusa o que já está em uso e remove', async ({ browser }) => {
+    const ana = await openPerson(browser, 'Ana');
+    const { page } = ana;
+    await page.getByRole('button', { name: 'Configurações' }).click();
+    await page.getByRole('button', { name: 'Atalhos', exact: true }).click();
+
+    const mute = page.locator('div.border-b', { hasText: 'Ativar/desativar microfone' });
+    await mute.getByRole('button', { name: 'Gravar' }).click();
+    await page.keyboard.press('Shift+KeyV');
+    await expect(mute).toContainText('Shift + V');
+
+    // O mesmo atalho no outro botão é recusado.
+    const deafen = page.locator('div.border-b', { hasText: 'Ativar/desativar som' });
+    await deafen.getByRole('button', { name: 'Gravar' }).click();
+    await page.keyboard.press('Shift+KeyV');
+    await expect(page.getByRole('alert')).toContainText('já está em uso');
+    await expect(deafen).toContainText('Sem atalho');
+
+    // Fica guardado ao recarregar e dá para remover.
+    await page.reload();
+    await page.getByRole('button', { name: 'Configurações' }).click();
+    await page.getByRole('button', { name: 'Atalhos', exact: true }).click();
+    await expect(mute).toContainText('Shift + V');
+    await mute.getByRole('button', { name: /Remover o atalho de/ }).click();
+    await expect(mute).toContainText('Sem atalho');
+    await ana.context.close();
+  });
+});

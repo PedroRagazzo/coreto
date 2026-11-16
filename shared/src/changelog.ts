@@ -22,6 +22,20 @@ export interface ChangelogEntry {
 /** Da mais nova para a mais antiga. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-15-3',
+    title: 'Atalhos para os sons do quadro de som',
+    items: [
+      {
+        title: 'Um atalho para cada som',
+        text: 'No quadro de som, passe o mouse num som e clique no ícone de teclado para dar um atalho a ele (como V ou Shift + V). Na chamada, apertar a tecla toca o som sem abrir o quadro. O atalho é só do seu aparelho.',
+      },
+      {
+        title: 'No app de desktop, até no jogo',
+        text: 'Depois de atualizar o app de desktop, os atalhos dos sons também funcionam com o Coreto em segundo plano e com um jogo em tela cheia, como os de mutar.',
+      },
+    ],
+  },
+  {
     id: '2026-11-15-2',
     title: 'Canais que guardam os arquivos para sempre',
     items: [

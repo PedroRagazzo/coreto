@@ -111,6 +111,12 @@ export class KeyTracker {
   }
 }
 
+/** Quantos sons do quadro de som podem ter atalho ao mesmo tempo (cabe em "snd0".."snd47" no leitor nativo). */
+export const MAX_SOUND_BINDS = 48;
+
+/** O nome que o app de desktop e o leitor nativo dão ao atalho do som de número `index` ("snd0", "snd1"...). */
+export const soundActionName = (index: number) => `snd${index}`;
+
 /** Com algum desses, o atalho pode ser acionado mesmo digitando (não conflita com o texto). */
 export const hasCommandModifier = (keys: readonly string[]) => keys.some((k) => k === 'Ctrl' || k === 'Alt' || k === 'Meta');
 

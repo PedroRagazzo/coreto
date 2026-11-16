@@ -151,7 +151,9 @@ const fromCoreto = (/** @type {Electron.IpcMainEvent | Electron.IpcMainInvokeEve
 
 // ── Atalhos que valem com o app em segundo plano, ou com um jogo em primeiro plano ────────────
 
-const SHORTCUT_ACTIONS = ['mute', 'deafen'];
+// Mutar, ensurdecer e os sons do quadro de som ("snd0", "snd1"...: o site numera os sons que têm atalho).
+const SHORTCUT_ACTION = /^(mute|deafen|snd\d{1,2})$/;
+const MAX_SHORTCUTS = 50;
 
 // O Electron (`globalShortcut`, que usa RegisterHotKey) não alcança um jogo em tela cheia: o Windows não entrega
 // esses atalhos a quem está atrás dele, e uma tecla sozinha, como "V", nem pode ser registrada. Quem vigia o teclado
@@ -170,13 +172,15 @@ const KEY_WATCHER_MAX_RESTARTS = 5;
 let keyWatcher = null;
 /** Ação → combinação que o helper vigia agora. @type {Record<string, string>} */
 let watchedBinds = {};
+/** As ações que o helper já recebeu, para tirar dele as que o site deixou de pedir. @type {Set<string>} */
+let pushedActions = new Set();
 /** Ação → atalho do Electron que vale no lugar, se o helper cair de vez. @type {Record<string, string>} */
 let fallbackAccelerators = {};
 let keyWatcherRestarts = 0;
 
 /** Manda ao site que a ação foi pedida. @param {string} action */
 const fireShortcut = (action) => {
-  if (SHORTCUT_ACTIONS.includes(action) && mainWindow && !mainWindow.isDestroyed()) {
+  if (SHORTCUT_ACTION.test(action) && mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('desktop:shortcut', action);
   }
 };
@@ -184,7 +188,10 @@ const fireShortcut = (action) => {
 function pushWatchedBinds() {
   const stdin = keyWatcher?.stdin;
   if (!stdin?.writable) return;
-  for (const action of SHORTCUT_ACTIONS) stdin.write(`set ${action} ${watchedBinds[action] ?? ''}\n`);
+  for (const action of new Set([...pushedActions, ...Object.keys(watchedBinds)])) {
+    stdin.write(`set ${action} ${watchedBinds[action] ?? ''}\n`);
+  }
+  pushedActions = new Set(Object.keys(watchedBinds));
 }
 
 /**
@@ -244,6 +251,7 @@ function startKeyWatcher() {
 function stopKeyWatcher() {
   const child = keyWatcher;
   keyWatcher = null;
+  pushedActions = new Set();
   if (!child) return;
   // Fechar a entrada é o aviso combinado para o helper parar; o kill é só garantia.
   child.stdin?.destroy();
@@ -251,7 +259,7 @@ function stopKeyWatcher() {
 }
 
 /**
- * O site pede os atalhos de mutar e de ensurdecer; cada pedido substitui os anteriores. Cada atalho vem com a
+ * O site pede os atalhos de mutar, de ensurdecer e dos sons do quadro de som; cada pedido substitui os anteriores. Cada atalho vem com a
  * combinação no formato do helper (`spec`, qualquer combinação) e, se tem modificador, o acelerador do Electron
  * (`accelerator`), para o caso de o helper não existir. Responde como cada um ficou: `watcher` (vale em qualquer
  * programa, inclusive jogos), `hotkey` (vale com o Coreto em segundo plano), `taken` (outro programa já usa a
@@ -264,8 +272,9 @@ function setKeyBinds(binds) {
   const result = { mute: 'off', deafen: 'off' };
   watchedBinds = {};
   fallbackAccelerators = {};
-  for (const action of SHORTCUT_ACTIONS) {
-    const item = binds && typeof binds === 'object' ? /** @type {Record<string, any>} */ (binds)[action] : null;
+  const requested = binds && typeof binds === 'object' ? Object.keys(binds).filter((name) => SHORTCUT_ACTION.test(name)) : [];
+  for (const action of requested.slice(0, MAX_SHORTCUTS)) {
+    const item = /** @type {Record<string, any>} */ (binds)[action];
     const spec = typeof item?.spec === 'string' && SCAN_SPEC.test(item.spec) ? item.spec : null;
     const accelerator = typeof item?.accelerator === 'string' && item.accelerator.length <= 40 ? item.accelerator : null;
     if (accelerator) fallbackAccelerators[action] = accelerator;

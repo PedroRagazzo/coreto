@@ -4,6 +4,27 @@ import { MAX_SOUND_BYTES } from '@shared/sounds';
 import type { SoundUploadResponse } from '@shared/protocol';
 import { SERVER_URL } from './socket';
 
+export const SOUNDBOARD_VOLUME_KEY = 'coreto.soundboard.volume';
+export const SOUNDBOARD_HEAR_MINE_KEY = 'coreto.soundboard.hearMine';
+
+/** Volume do quadro e se você ouve o que toca: as escolhas feitas no quadro de som, que valem também para os atalhos. */
+export function readSoundboardPrefs(): { volume: number; hearMine: boolean } {
+  const read = (key: string): unknown => {
+    try {
+      const raw = localStorage.getItem(key);
+      return raw === null ? undefined : JSON.parse(raw);
+    } catch {
+      return undefined;
+    }
+  };
+  const volume = read(SOUNDBOARD_VOLUME_KEY);
+  const hearMine = read(SOUNDBOARD_HEAR_MINE_KEY);
+  return {
+    volume: typeof volume === 'number' && Number.isFinite(volume) ? Math.min(1, Math.max(0.1, volume)) : 0.8,
+    hearMine: typeof hearMine === 'boolean' ? hearMine : true,
+  };
+}
+
 /** Baixa o áudio de um som (o servidor responde com `Access-Control-Allow-Origin`, para valer também com o site em outra porta). */
 export async function fetchSound(id: string): Promise<ArrayBuffer> {
   const res = await fetch(`${SERVER_URL}/sounds/${id}`);

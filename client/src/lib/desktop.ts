@@ -69,9 +69,9 @@ export interface DesktopBridge {
    * formato do leitor de teclado (`spec`, qualquer combinação, até uma tecla sozinha) e, se tem modificador, o acelerador
    * do Electron, para o caso de o leitor não existir. Substitui os anteriores e resolve com como cada um ficou.
    */
-  setKeyBinds?(binds: Record<KeybindAction, { spec: string | null; accelerator: string | null }>): Promise<Record<KeybindAction, KeyBindMode> | null>;
-  /** Um atalho global foi apertado. */
-  onShortcut?(listener: (action: KeybindAction) => void): () => void;
+  setKeyBinds?(binds: Record<string, { spec: string | null; accelerator: string | null }>): Promise<Record<string, KeyBindMode> | null>;
+  /** Um atalho global foi apertado: "mute", "deafen" ou "snd0", "snd1"... (os sons do quadro de som, a partir da 0.7.3). */
+  onShortcut?(listener: (action: string) => void): () => void;
   /** Traz o Coreto para a frente (da bandeja ou minimizado), ao clicar numa notificação. Ausente antes da 0.6.0. */
   focusWindow?(): void;
 }

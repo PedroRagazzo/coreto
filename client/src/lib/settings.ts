@@ -82,6 +82,8 @@ export interface Settings {
   sounds: SoundPrefs;
   notifications: NotificationPrefs;
   keybinds: Keybinds;
+  /** Atalho de cada som do quadro de som, pelo id do som (cada um é só deste aparelho). */
+  soundKeybinds: Record<string, string[]>;
 }
 
 export const MESSAGE_FONT_SIZES = { min: 12, max: 20 } as const;
@@ -106,6 +108,7 @@ export const DEFAULT_SETTINGS: Settings = {
   sounds: { enabled: true, volume: 0.5 },
   notifications: { enabled: true, preview: true },
   keybinds: { mute: null, deafen: null },
+  soundKeybinds: {},
 };
 
 const STORAGE_KEY = 'coreto.settings';
@@ -122,6 +125,17 @@ function sanitizeKeybind(value: unknown): string[] | null {
   if (!Array.isArray(value)) return null;
   const keys = [...new Set(value.filter((k): k is string => typeof k === 'string' && k.length > 0 && k.length <= 24))];
   return keys.length > 0 && keys.length <= MAX_KEYBIND_KEYS ? orderKeys(keys) : null;
+}
+
+/** Os atalhos dos sons: id do som → combinação válida (descarta o que estiver fora do esperado). */
+function soundKeybinds(value: unknown): Record<string, string[]> {
+  const result: Record<string, string[]> = {};
+  if (!value || typeof value !== 'object') return result;
+  for (const [id, keys] of Object.entries(value).slice(0, 200)) {
+    const bind = sanitizeKeybind(keys);
+    if (bind && id.length > 0 && id.length <= 64) result[id] = bind;
+  }
+  return result;
 }
 
 function userVolumes(value: unknown): Record<string, UserVolume> {
@@ -145,6 +159,7 @@ export function loadSettings(): Settings {
     sounds: Partial<SoundPrefs>;
     notifications: Partial<NotificationPrefs>;
     keybinds: Partial<Keybinds>;
+    soundKeybinds: unknown;
   }> = {};
   try {
     raw = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}') ?? {};
@@ -185,6 +200,7 @@ export function loadSettings(): Settings {
     sounds: { enabled: bool(so.enabled, d.sounds.enabled), volume: clamp(so.volume, 0, 1, d.sounds.volume) },
     notifications: { enabled: bool(n.enabled, d.notifications.enabled), preview: bool(n.preview, d.notifications.preview) },
     keybinds: { mute: sanitizeKeybind(k.mute), deafen: sanitizeKeybind(k.deafen) },
+    soundKeybinds: soundKeybinds(raw.soundKeybinds),
   };
 }
 

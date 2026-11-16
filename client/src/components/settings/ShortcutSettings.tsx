@@ -1,22 +1,11 @@
 import { Keyboard, X } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { desktop } from '../../lib/desktop';
-import {
-  formatKeybind,
-  isUsableKeybind,
-  keybindRecording,
-  KeyTracker,
-  keyOf,
-  orderKeys,
-  sameKeys,
-  toGlobalAccelerator,
-  type KeybindAction,
-} from '../../lib/keybinds';
+import { formatKeybind, sameKeys, toGlobalAccelerator, type KeybindAction } from '../../lib/keybinds';
+import { useKeybindRecorder } from '../../lib/useKeybindRecorder';
 import { useSettings } from '../../state/settings';
 import { useGlobalShortcutStatus, type GlobalStatus } from '../VoiceEffects';
 import { SettingsGroup } from './SettingsModal';
-
-const MAX_KEYS = 4;
 
 const ROWS: { action: KeybindAction; label: string; description: string }[] = [
   { action: 'mute', label: 'Ativar/desativar microfone', description: 'Liga e desliga o seu microfone na chamada.' },
@@ -104,56 +93,14 @@ function KeybindRow({
   watcher: boolean;
   onChange: (keys: string[] | null) => void;
 }) {
-  const [recording, setRecording] = useState(false);
-  const [held, setHeld] = useState<string[]>([]);
   const [hint, setHint] = useState<string | null>(null);
-  const onChangeRef = useRef(onChange);
-  onChangeRef.current = onChange;
-
-  useEffect(() => {
-    if (!recording) return;
-    keybindRecording.active = true;
-    const tracker = new KeyTracker();
-    // Tudo que foi segurado desde a primeira tecla; vale quando todas são soltas.
-    const combo = new Set<string>();
-    const finish = () => {
-      const result = orderKeys(combo);
-      setRecording(false);
-      if (result.length === 0) return;
-      if (result.length === 1 && result[0] === 'Escape') return; // Esc cancela
-      if (!isUsableKeybind(result)) setHint('Use também uma tecla comum, não só Shift, Ctrl, Alt ou Win.');
-      else if (result.length > MAX_KEYS) setHint(`No máximo ${MAX_KEYS} teclas juntas.`);
-      else {
-        setHint(null);
-        onChangeRef.current(result);
-      }
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      // Enquanto grava, nenhuma tecla faz o que faria normalmente (Tab, Esc, F5...).
-      event.preventDefault();
-      event.stopPropagation();
-      if (event.repeat) return;
-      tracker.press(event);
-      combo.add(keyOf(event));
-      setHeld(orderKeys(combo));
-    };
-    const onKeyUp = (event: KeyboardEvent) => {
-      event.preventDefault();
-      event.stopPropagation();
-      if (tracker.release(event).length === 0) finish();
-    };
-    const cancel = () => setRecording(false);
-    window.addEventListener('keydown', onKeyDown, true);
-    window.addEventListener('keyup', onKeyUp, true);
-    window.addEventListener('blur', cancel);
-    return () => {
-      keybindRecording.active = false;
-      window.removeEventListener('keydown', onKeyDown, true);
-      window.removeEventListener('keyup', onKeyUp, true);
-      window.removeEventListener('blur', cancel);
-      setHeld([]);
-    };
-  }, [recording]);
+  const { recording, held, setRecording } = useKeybindRecorder(
+    (result) => {
+      setHint(null);
+      onChange(result);
+    },
+    setHint,
+  );
 
   const shown = recording
     ? held.length

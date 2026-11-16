@@ -746,6 +746,7 @@ remove qualquer um.
   mesma saída que vai para a chamada, então todo mundo o ouve como se viesse de você (o anel de "falando" acende), sem o
   servidor misturar nada. "Ouvir o som que eu toco" liga o retorno para você (desligue com caixa de som, senão o
   microfone repete o som). O volume do quadro e essa opção ficam só no seu computador.
+- **Atalho por som:** passando o mouse num som aparece o ícone de teclado; clique, aperte a tecla (ou as teclas juntas, até 4) e o atalho fica no som. Apertá-lo numa chamada toca o som sem abrir o quadro (com o Coreto em foco, uma tecla sem Ctrl/Alt/Win não dispara enquanto você digita). Cada atalho é só do seu aparelho (`soundKeybinds` em `client/src/lib/settings.ts`, pelo id do som) e não pode repetir o de mutar, o de ensurdecer nem o de outro som. O componente `Shortcuts` (`client/src/components/VoiceEffects.tsx`) trata mutar, ensurdecer e os sons do mesmo jeito; os sons de espaços já carregados valem (o do espaço na tela é carregado sozinho). **No app de desktop** (a partir da 0.7.3) cada som com atalho vira uma ação `snd0`, `snd1`... (até 48) no leitor de teclado nativo, então vale também em jogos em tela cheia; nas versões anteriores vale só com o Coreto em foco.
 - **Mutado também toca:** com o microfone mutado, o som sai só durante o som: a saída abre e o microfone em si fica sem volume,
   então ninguém ouve você falar (conferido com um microfone ruidoso: os outros ouviram só o som). Com o som da chamada
   desativado (ensurdecido), não toca.
