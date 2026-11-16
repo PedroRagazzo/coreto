@@ -22,6 +22,16 @@ export interface ChangelogEntry {
 /** Da mais nova para a mais antiga. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-15-2',
+    title: 'Canais que guardam os arquivos para sempre',
+    items: [
+      {
+        title: 'Fotos e arquivos que não somem',
+        text: 'Quem gerencia canais pode ligar "Guardar os arquivos e fotos para sempre" em Editar canal. Nesse canal, os anexos não são apagados depois de 20 dias, como nos outros.',
+      },
+    ],
+  },
+  {
     id: '2026-11-15',
     title: 'Sons longos no quadro de som',
     items: [

@@ -121,7 +121,7 @@ export function registerManagement(io: IO, socket: AppSocket, store: Store, limi
     const channel = manageableChannel(req?.channelId);
     if (!channel) return ack({ ok: false, error: 'Você não tem permissão para editar este canal.' });
 
-    const patch: { name?: string; topic?: string | null; categoryId?: string | null } = {};
+    const patch: { name?: string; topic?: string | null; categoryId?: string | null; keepFiles?: boolean } = {};
     if (req.name !== undefined) {
       const name = typeof req.name === 'string' ? normalizeChannelName(req.name, channel.kind) : '';
       if (!name) return ack({ ok: false, error: 'Dê um nome ao canal.' });
@@ -130,6 +130,8 @@ export function registerManagement(io: IO, socket: AppSocket, store: Store, limi
     if (req.topic !== undefined && channel.kind === 'text') {
       patch.topic = typeof req.topic === 'string' ? normalizeTopic(req.topic) : null;
     }
+    // Guardar os arquivos para sempre só faz sentido em canal de texto (é onde se anexa).
+    if (typeof req.keepFiles === 'boolean' && channel.kind === 'text') patch.keepFiles = req.keepFiles;
     if (req.categoryId !== undefined) {
       const categoryId = typeof req.categoryId === 'string' ? req.categoryId : null;
       if (categoryId && !store.categoryIn(channel.spaceId, categoryId)) {

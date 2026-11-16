@@ -224,6 +224,8 @@ export interface UpdateChannelRequest {
   name?: string;
   topic?: string | null;
   categoryId?: Id | null;
+  /** Guarda os arquivos e fotos do canal para sempre (só canal de texto). */
+  keepFiles?: boolean;
 }
 
 // `channelId` em history/send/typing aceita um canal de texto ou uma conversa direta.

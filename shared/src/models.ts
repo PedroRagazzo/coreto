@@ -47,6 +47,8 @@ export interface Channel {
   kind: ChannelKind;
   position: number;
   topic: string | null;
+  /** Os arquivos e fotos do canal não são apagados depois de `ATTACHMENT_RETENTION_DAYS` dias. Só canal de texto. */
+  keepFiles: boolean;
   overwrites: PermissionOverwrite[];
 }
 

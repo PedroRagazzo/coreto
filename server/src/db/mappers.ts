@@ -69,6 +69,7 @@ export const toChannel = (row: Db.Channel & { overwrites: Db.PermissionOverwrite
   kind: row.kind === 'TEXT' ? 'text' : 'voice',
   position: row.position,
   topic: row.topic,
+  keepFiles: row.keepFiles,
   overwrites: row.overwrites.map(toOverwrite),
 });
 

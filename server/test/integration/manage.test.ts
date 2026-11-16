@@ -81,6 +81,26 @@ describe.skipIf(!hasTestDatabase)('gestão de espaços e canais', () => {
     expect(cleared.topic).toBeNull();
   });
 
+  it('liga e desliga "guardar os arquivos para sempre" só em canal de texto, e só quem gerencia canais', async () => {
+    const { ana, bruno, snapshot } = await spaceWithMember();
+    const geral = channelNamed(snapshot, 'geral');
+    const sala = channelNamed(snapshot, 'Geral');
+    expect(geral.keepFiles).toBe(false);
+
+    expect((await bruno.socket.emitWithAck('channel:update', { channelId: geral.id, keepFiles: true })).ok).toBe(false);
+
+    const announced = nextEvent(bruno.socket, 'channel:updated');
+    const on = ok(await ana.socket.emitWithAck('channel:update', { channelId: geral.id, keepFiles: true }));
+    expect(on.keepFiles).toBe(true);
+    expect((await announced).keepFiles).toBe(true);
+    // Editar outra coisa não desliga a opção.
+    expect(ok(await ana.socket.emitWithAck('channel:update', { channelId: geral.id, topic: 'museu' })).keepFiles).toBe(true);
+    expect(ok(await ana.socket.emitWithAck('channel:update', { channelId: geral.id, keepFiles: false })).keepFiles).toBe(false);
+
+    // Sala de voz não tem anexos: o pedido é ignorado.
+    expect(ok(await ana.socket.emitWithAck('channel:update', { channelId: sala.id, keepFiles: true })).keepFiles).toBe(false);
+  });
+
   it('exclui o canal com as mensagens e desconecta quem estava na sala de voz', async () => {
     const { ana, bruno, snapshot } = await spaceWithMember();
     const geral = channelNamed(snapshot, 'geral');

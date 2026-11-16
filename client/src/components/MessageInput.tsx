@@ -64,6 +64,8 @@ export function MessageInput({ targetId, label, canSend }: MessageInputProps) {
 
   // Só vale a resposta que começou neste canal ou conversa.
   const replyingTo = state.replyingTo?.channelId === targetId ? state.replyingTo : null;
+  // Canal que guarda os arquivos para sempre (o aviso de validade muda).
+  const keepsFiles = state.snapshot?.channels.some((c) => c.id === targetId && c.keepFiles) ?? false;
   const candidates = mentionCandidates(state, targetId);
   const autocomplete = useMentionAutocomplete(textareaRef, draft, setDraft, candidates);
 
@@ -263,7 +265,7 @@ export function MessageInput({ targetId, label, canSend }: MessageInputProps) {
         <div className="flex items-end gap-2 px-3 py-2.5">
           <button
             type="button"
-            title={`Anexar arquivo (fica ${ATTACHMENT_RETENTION_DAYS} dias no servidor)`}
+            title={keepsFiles ? 'Anexar arquivo (este canal guarda os arquivos para sempre)' : `Anexar arquivo (fica ${ATTACHMENT_RETENTION_DAYS} dias no servidor)`}
             aria-label="Anexar arquivo"
             disabled={!canSend || pending.length >= MAX_ATTACHMENTS_PER_MESSAGE}
             onClick={() => fileInputRef.current?.click()}

@@ -42,6 +42,7 @@ const channel = (overwrites: PermissionOverwrite[] = []): Channel => ({
   kind: 'text',
   position: 0,
   topic: null,
+  keepFiles: false,
   overwrites,
 });
 

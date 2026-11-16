@@ -569,7 +569,10 @@ Como o servidor visita endereços que estranhos escrevem, as defesas ficam em `s
   **arquivo** do disco e marca o anexo como vencido (`Attachment.expiredAt`). A mensagem e o nome do arquivo ficam, com um
   aviso "apagado depois de 20 dias" no lugar da imagem ou do cartão; o link deixa de funcionar (404) e o tamanho deixa de
   contar na cota. O espelho do backup guarda as imagens até 8 MB por até 30 dias de idade, então elas saem dele um pouco
-  depois. Para mudar o prazo, troque a constante e faça o deploy. O link de um anexo é aleatório e não
+  depois. Para mudar o prazo, troque a constante e faça o deploy. **Canal que guarda tudo:** quem gerencia canais liga
+  "Guardar os arquivos e fotos para sempre" em Editar canal (`Channel.keepFiles`, só canal de texto); a limpeza
+  (`sweepUploads`) pula os anexos das mensagens desse canal, que continuam contando na cota. Desligar a opção volta a valer o
+  prazo: o que já passou de 20 dias é apagado na limpeza seguinte (de hora em hora). O link de um anexo é aleatório e não
   exige login, como num CDN: quem tem o link baixa o arquivo. A busca tem os filtros "Com imagem" e "Com arquivo".
 - **Envio em pedaços (limite de tempo do proxy):** o Traefik do Dokploy corta qualquer pedido que leve mais de 60 s para
   chegar (`readTimeout` padrão de 60 s, que vale para o corpo inteiro: conferido em 2026-11-14, o `traefik.yml` do

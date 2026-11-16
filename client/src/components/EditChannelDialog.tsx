@@ -1,6 +1,6 @@
 import type { Channel, Id } from '@shared/models';
 import { MAX_CHANNEL_NAME, MAX_CHANNEL_TOPIC, normalizeChannelName, normalizeTopic } from '@shared/names';
-import type { UpdateChannelRequest } from '@shared/protocol';
+import { ATTACHMENT_RETENTION_DAYS, type UpdateChannelRequest } from '@shared/protocol';
 import { Hash, Volume2 } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
 import { useRealtime } from '../state/realtime';
@@ -26,6 +26,7 @@ function EditChannelForm({ channel, onDelete, onClose }: EditChannelFormProps) {
   const [name, setName] = useState(channel.name);
   const [topic, setTopic] = useState(channel.topic ?? '');
   const [categoryId, setCategoryId] = useState<Id | null>(channel.categoryId);
+  const [keepFiles, setKeepFiles] = useState(channel.keepFiles);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -38,6 +39,7 @@ function EditChannelForm({ channel, onDelete, onClose }: EditChannelFormProps) {
   if (normalized !== channel.name) patch.name = normalized;
   if (isText && normalizeTopic(topic) !== channel.topic) patch.topic = normalizeTopic(topic);
   if (categoryId !== channel.categoryId) patch.categoryId = categoryId;
+  if (isText && keepFiles !== channel.keepFiles) patch.keepFiles = keepFiles;
   const changed = Object.keys(patch).length > 1;
 
   async function submit(e: FormEvent) {
@@ -104,6 +106,26 @@ function EditChannelForm({ channel, onDelete, onClose }: EditChannelFormProps) {
             </option>
           ))}
         </select>
+
+        {isText && (
+          <label className="mt-5 flex cursor-pointer items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={keepFiles}
+              onChange={(e) => setKeepFiles(e.target.checked)}
+              className="mt-0.5 h-4 w-4 accent-accent"
+            />
+            <span>
+              Guardar os arquivos e fotos para sempre
+              <span className="mt-0.5 block text-xs text-faint">
+                {keepFiles
+                  ? `Os anexos deste canal não são apagados depois de ${ATTACHMENT_RETENTION_DAYS} dias (eles continuam ocupando espaço no servidor).`
+                  : `Nos outros canais, os anexos são apagados depois de ${ATTACHMENT_RETENTION_DAYS} dias.`}
+                {channel.keepFiles && !keepFiles && ` Ao desligar, os anexos com mais de ${ATTACHMENT_RETENTION_DAYS} dias deste canal serão apagados em até uma hora.`}
+              </span>
+            </span>
+          </label>
+        )}
 
         {error && (
           <p role="alert" className="mt-3 text-sm text-dnd">

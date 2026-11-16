@@ -185,10 +185,16 @@ export async function sweepUploads(db: Db, dir: UploadDir, now = Date.now(), ret
   });
   await db.attachment.deleteMany({ where: { id: { in: stale.map((a) => a.id) } } });
 
-  // Passou do prazo: o registro fica (a mensagem mostra "arquivo apagado"), mas deixa de contar como conhecido logo abaixo,
+  // Passou do prazo (menos nos canais que guardam tudo): o registro fica (a mensagem mostra "arquivo apagado"), mas deixa de contar como conhecido logo abaixo,
   // e o arquivo sai do disco junto com os órfãos. Se o servidor cair no meio, a próxima limpeza termina o serviço.
   await db.attachment.updateMany({
-    where: { messageId: { not: null }, expiredAt: null, createdAt: { lt: new Date(now - retentionMs) } },
+    where: {
+      messageId: { not: null },
+      expiredAt: null,
+      createdAt: { lt: new Date(now - retentionMs) },
+      // Os canais que guardam os arquivos (`Channel.keepFiles`) ficam de fora.
+      NOT: { message: { channel: { keepFiles: true } } },
+    },
     data: { expiredAt: new Date(now) },
   });
 

@@ -128,6 +128,8 @@ model Channel {
   kind       ChannelKind
   position   Int
   topic      String?               @db.VarChar(1024)
+  /// Os arquivos e fotos deste canal não passam pela limpeza de `ATTACHMENT_RETENTION_DAYS`: ficam até alguém apagar.
+  keepFiles  Boolean               @default(false)
   overwrites PermissionOverwrite[]
   messages   Message[]
 

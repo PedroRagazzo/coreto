@@ -324,8 +324,8 @@ export class Store {
       { id: randomUUID(), spaceId: space.id, name: 'Canais de voz', position: 1 },
     ];
     const channels: Channel[] = [
-      { id: randomUUID(), spaceId: space.id, categoryId: categories[0].id, name: 'geral', kind: 'text', position: 0, topic: null, overwrites: [] },
-      { id: randomUUID(), spaceId: space.id, categoryId: categories[1].id, name: 'Geral', kind: 'voice', position: 0, topic: null, overwrites: [] },
+      { id: randomUUID(), spaceId: space.id, categoryId: categories[0].id, name: 'geral', kind: 'text', position: 0, topic: null, keepFiles: false, overwrites: [] },
+      { id: randomUUID(), spaceId: space.id, categoryId: categories[1].id, name: 'Geral', kind: 'voice', position: 0, topic: null, keepFiles: false, overwrites: [] },
     ];
     const joinedAt = new Date();
     const members: Member[] = [...this.users.keys()].map((userId) => ({
@@ -407,10 +407,10 @@ export class Store {
     return channel;
   }
 
-  /** Altera nome, tópico ou categoria. Ao mudar de categoria, o canal vai para o fim dela. */
+  /** Altera nome, tópico, categoria ou se guarda os arquivos. Ao mudar de categoria, o canal vai para o fim dela. */
   async updateChannel(
     channelId: Id,
-    patch: { name?: string; topic?: string | null; categoryId?: Id | null },
+    patch: { name?: string; topic?: string | null; categoryId?: Id | null; keepFiles?: boolean },
   ): Promise<Channel> {
     const current = this.channels.get(channelId);
     if (!current) throw new Error(`Canal inexistente: ${channelId}`);

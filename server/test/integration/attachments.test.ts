@@ -349,6 +349,33 @@ describe.skipIf(!hasTestDatabase)('anexos', () => {
         expect((await server.db.attachment.findUnique({ where: { id: file.id } }))!.expiredAt).toEqual(expiredAt);
       });
 
+      it('um canal que guarda os arquivos não perde os anexos no prazo; os outros canais perdem, e desligar a opção volta a valer o prazo', async () => {
+        const { ana, geral } = await inGeral();
+        // O canal "ajuda" do espaço de demonstração faz o papel do museu.
+        const museu = (await server.db.channel.findFirstOrThrow({ where: { spaceId: geral.spaceId, name: 'ajuda' } }));
+        await server.db.channel.update({ where: { id: museu.id }, data: { keepFiles: true } });
+        const kept = await uploaded(ana, Buffer.from('lembranca'), 'lembranca.txt');
+        const keptImage = await uploaded(ana, fakePng(64, 48), 'foto.png');
+        const lost = await uploaded(ana, Buffer.from('comum'), 'comum.txt');
+        ok(await ana.socket.emitWithAck('message:send', { channelId: museu.id, content: 'museu', attachmentIds: [kept.id, keptImage.id] }));
+        ok(await ana.socket.emitWithAck('message:send', { channelId: geral.id, content: 'comum', attachmentIds: [lost.id] }));
+        for (const id of [kept.id, keptImage.id, lost.id]) await age(id, ATTACHMENT_RETENTION_MS + 60_000);
+
+        await sweepUploads(server.db, new UploadDir(server.uploadDir));
+        for (const id of [kept.id, keptImage.id]) {
+          expect(existsSync(join(server.uploadDir, id))).toBe(true);
+          expect((await fetchFile(id)).status).toBe(200);
+          expect((await server.db.attachment.findUnique({ where: { id } }))!.expiredAt).toBeNull();
+        }
+        expect(existsSync(join(server.uploadDir, lost.id))).toBe(false);
+
+        // Desligada a opção, a próxima limpeza apaga o que passou do prazo.
+        await server.db.channel.update({ where: { id: museu.id }, data: { keepFiles: false } });
+        await sweepUploads(server.db, new UploadDir(server.uploadDir));
+        expect(existsSync(join(server.uploadDir, kept.id))).toBe(false);
+        expect((await server.db.attachment.findUnique({ where: { id: kept.id } }))!.expiredAt).not.toBeNull();
+      });
+
       it('apagar a mensagem depois do prazo não deixa o registro para trás', async () => {
         const { ana, geral } = await inGeral();
         const file = await uploaded(ana, Buffer.from('some'), 'some.txt');
