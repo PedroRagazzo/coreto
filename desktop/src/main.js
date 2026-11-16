@@ -484,7 +484,7 @@ async function openPicker(parent) {
     minimizable: false,
     maximizable: false,
     title: 'Compartilhar tela',
-    backgroundColor: '#191c21',
+    backgroundColor: '#121212',
     autoHideMenuBar: true,
     show: false,
     webPreferences: { preload: join(here, 'picker-preload.cjs'), contextIsolation: true, sandbox: true },
@@ -585,7 +585,7 @@ function createWindow(visible = true) {
     minWidth: 940,
     minHeight: 560,
     title: 'Coreto',
-    backgroundColor: '#121417',
+    backgroundColor: '#0b0b0b',
     autoHideMenuBar: true,
     show: false,
     webPreferences: {

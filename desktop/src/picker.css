@@ -1,11 +1,11 @@
 :root {
   color-scheme: dark;
-  --bg: #191c21;
-  --panel: #20242a;
-  --hover: #313741;
-  --fg: #e6e8eb;
-  --muted: #a0a7b1;
-  --accent: #2bb39a;
+  --bg: #121212;
+  --panel: #171717;
+  --hover: #333333;
+  --fg: #f2f4f7;
+  --muted: #a9aeb5;
+  --accent: #005885;
 }
 
 * {
@@ -39,7 +39,7 @@ h1 {
   gap: 4px;
   padding: 4px;
   border-radius: 8px;
-  background: #121417;
+  background: #0b0b0b;
 }
 
 [role="tab"] {
@@ -116,7 +116,7 @@ footer {
   justify-content: flex-end;
   gap: 8px;
   padding: 12px 20px 16px;
-  border-top: 1px solid #2d323a;
+  border-top: 1px solid #2e2e2e;
 }
 
 footer button {
