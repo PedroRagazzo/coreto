@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { readdir, readFile, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { Attachment } from '../../../shared/src/models.js';
 import { MAX_ATTACHMENT_BYTES, type UploadChunkResponse } from '../../../shared/src/protocol.js';
 import { ATTACHMENT_RETENTION_MS, cleanFileName, PENDING_UPLOAD_TTL_MS, sweepUploads, UploadDir } from '../../src/uploads.js';
@@ -572,6 +572,37 @@ describe.skipIf(!hasTestDatabase)('cota de espaço dos anexos', () => {
     expect((await readdir(server.uploadDir)).filter((n) => n.endsWith('.part'))).toEqual([]);
     const small = await server.upload(ana.token, Buffer.alloc(300, 3), 'c.bin');
     expect(small.status).toBe(201);
+  });
+});
+
+describe.skipIf(!hasTestDatabase)('cota de espaço reservada antes do envio', () => {
+  // Um servidor novo por teste: um envio pela metade continuaria reservando espaço no seguinte.
+  let server: TestServer;
+  beforeEach(async () => {
+    server = await TestServer.start({ uploadQuotaBytes: 1000 });
+  });
+  afterEach(() => server?.stop());
+
+  const chunk = (token: string, id: string, total: number, sent: number) =>
+    server.uploadChunk(token, { id, offset: 0, total, data: Buffer.alloc(sent, 7) });
+
+  it('um envio em pedaços já reservou o espaço: o segundo que não cabe junto é recusado no começo', async () => {
+    const ana = await server.connect('Ana');
+    // Nada foi gravado no banco ainda, mas 600 bytes já estão reservados: mais 600 não cabem nos 1000.
+    expect((await chunk(ana.token, randomUUID(), 600, 300)).status).toBe(200);
+    expect((await chunk(ana.token, randomUUID(), 600, 300)).status).toBe(507);
+    // O que cabe junto passa (aqui o envio inteiro vai num pedaço só).
+    expect((await chunk(ana.token, randomUUID(), 300, 300)).status).toBe(201);
+  });
+
+  it('recomeçar um envio troca a reserva antiga pela nova', async () => {
+    const ana = await server.connect('Ana');
+    const again = randomUUID();
+    expect((await chunk(ana.token, again, 900, 100)).status).toBe(200);
+    expect((await server.upload(ana.token, Buffer.alloc(500, 1), 'a.bin')).status).toBe(507);
+    // O mesmo envio recomeça menor: os 900 reservados viram 200.
+    expect((await chunk(ana.token, again, 200, 100)).status).toBe(200);
+    expect((await server.upload(ana.token, Buffer.alloc(500, 1), 'a.bin')).status).toBe(201);
   });
 });
 

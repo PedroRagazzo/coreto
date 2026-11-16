@@ -77,6 +77,10 @@ const MAX_CHUNKED_UPLOADS_PER_USER = 12;
 export class UploadDir {
   /** Os envios em pedaços abertos, por id (o que quem envia escolheu). Os parados são esquecidos na limpeza. */
   readonly chunked = new Map<string, ChunkedUpload>();
+  /** Bytes que os envios em andamento já prometeram ocupar (o que ainda não virou anexo no banco). */
+  private reserved = 0;
+  /** Fila do registro de anexos: um de cada vez, para dois envios não conferirem o espaço ao mesmo tempo. */
+  private commitQueue: Promise<unknown> = Promise.resolve();
 
   constructor(
     readonly path: string,
@@ -86,6 +90,34 @@ export class UploadDir {
 
   async ensure(): Promise<void> {
     await mkdir(this.path, { recursive: true });
+  }
+
+  /** O que os envios em andamento reservaram (conta junto com o que já está gravado nas cotas de espaço). */
+  get reservedBytes(): number {
+    return this.reserved;
+  }
+
+  /**
+   * Cabem mais `bytes`, somando o que já está gravado (`used`) ao que os outros envios em andamento reservaram?
+   * `own` é o que este próprio envio já reservou (não conta contra ele).
+   */
+  hasRoom(used: number, bytes: number, own = 0): boolean {
+    return used + (this.reserved - own) + bytes <= this.quotaBytes;
+  }
+
+  reserve(bytes: number): void {
+    this.reserved += bytes;
+  }
+
+  release(bytes: number): void {
+    this.reserved = Math.max(0, this.reserved - bytes);
+  }
+
+  /** Roda `task` depois de todas as anteriores: o registro de um anexo confere o espaço sem outro conferir junto. */
+  serialize<T>(task: () => Promise<T>): Promise<T> {
+    const run = this.commitQueue.then(task);
+    this.commitQueue = run.catch(() => {});
+    return run;
   }
 
   file(id: string): string {
@@ -165,7 +197,10 @@ export class UploadDir {
   async dropChunked(id: string): Promise<void> {
     const upload = this.chunked.get(id);
     this.chunked.delete(id);
-    if (upload) await rm(upload.part, { force: true });
+    if (upload) {
+      this.release(upload.total);
+      await rm(upload.part, { force: true });
+    }
   }
 
   /** Dá ao arquivo provisório o nome definitivo (o id do anexo). */
@@ -235,12 +270,17 @@ export async function handleUpload(req: IncomingMessage, res: ServerResponse, st
   if (req.headers['x-upload-id'] !== undefined) return handleChunk(req, send, user, store, dir);
   const declared = Number(req.headers['content-length']);
   if (declared > MAX_ATTACHMENT_BYTES) return tooBig();
-  const used = await store.attachmentBytes();
-  if (used + (Number.isFinite(declared) ? declared : 0) > dir.quotaBytes) return noRoom();
-
-  const received = await dir.receive(req, MAX_ATTACHMENT_BYTES);
-  if (!received) return tooBig();
-  return finishUpload(send, user, store, dir, received, used, req.headers['x-file-name']);
+  // O espaço é reservado antes de receber o corpo: envios ao mesmo tempo não passam juntos da cota.
+  const own = Number.isFinite(declared) ? declared : 0;
+  if (!dir.hasRoom(await store.attachmentBytes(), own)) return noRoom();
+  dir.reserve(own);
+  try {
+    const received = await dir.receive(req, MAX_ATTACHMENT_BYTES);
+    if (!received) return tooBig();
+    return await finishUpload(send, user, store, dir, received, own, req.headers['x-file-name']);
+  } finally {
+    dir.release(own);
+  }
 }
 
 const NO_ROOM = 'O servidor está sem espaço para novos anexos. Avise quem cuida dele.';
@@ -277,10 +317,13 @@ async function handleChunk(
     if (!upload && [...dir.chunked.values()].filter((open) => open.userId === user.id).length >= MAX_CHUNKED_UPLOADS_PER_USER) {
       return send(429, { ok: false, error: 'Você já tem envios demais em andamento. Espere um terminar.' });
     }
-    if ((await store.attachmentBytes()) + total > dir.quotaBytes) {
+    // Recomeçar um envio troca a reserva antiga (do mesmo id) pela nova.
+    if (!dir.hasRoom(await store.attachmentBytes(), total, upload?.total ?? 0)) {
       await dir.dropChunked(id);
       return send(507, { ok: false, error: NO_ROOM });
     }
+    if (upload) dir.release(upload.total);
+    dir.reserve(total);
     upload = { userId: user.id, part: join(dir.path, `${id}.part`), total, size: 0, busy: false, updatedAt: Date.now() };
     dir.chunked.set(id, upload);
   } else {
@@ -314,21 +357,30 @@ async function handleChunk(
   }
   if (upload.size < upload.total) return send(200, { ok: true, received: upload.size });
 
-  // O arquivo está completo: segue como se tivesse chegado de uma vez.
+  // O arquivo está completo: segue como se tivesse chegado de uma vez. A reserva só sai depois de virar anexo.
   dir.chunked.delete(id);
-  const whole = upload.total <= MAX_IMAGE_BYTES ? await readFile(upload.part) : null;
-  const used = await store.attachmentBytes();
-  return finishUpload(send, user, store, dir, { part: upload.part, size: upload.size, whole }, used, req.headers['x-file-name']);
+  try {
+    const whole = upload.total <= MAX_IMAGE_BYTES ? await readFile(upload.part) : null;
+    return await finishUpload(send, user, store, dir, { part: upload.part, size: upload.size, whole }, upload.total, req.headers['x-file-name']);
+  } catch (err) {
+    await rm(upload.part, { force: true });
+    throw err;
+  } finally {
+    dir.release(upload.total);
+  }
 }
 
-/** Com o arquivo provisório completo: confere o espaço, reconhece imagem, registra o anexo e dá ao arquivo o nome definitivo. */
+/**
+ * Com o arquivo provisório completo: confere o espaço de novo (outros envios podem ter ocupado o lugar enquanto este
+ * chegava), reconhece imagem, registra o anexo e dá ao arquivo o nome definitivo. `own` é o que este envio reservou.
+ */
 async function finishUpload(
   send: (status: number, body: UploadChunkResponse) => void,
   user: User,
   store: Store,
   dir: UploadDir,
   { part, size, whole }: ReceivedUpload,
-  used: number,
+  own: number,
   fileNameHeader: string | string[] | undefined,
 ): Promise<void> {
   try {
@@ -336,31 +388,32 @@ async function finishUpload(
       await rm(part, { force: true });
       return send(400, { ok: false, error: 'O arquivo está vazio.' });
     }
-    if (used + size > dir.quotaBytes) {
+    // Imagem pelo conteúdo (não pela extensão nem pelo tipo declarado); o resto é só um arquivo.
+    const image = whole ? imageInfo(whole) : null;
+    const data = image
+      ? {
+          uploaderId: user.id,
+          fileName: cleanFileName(fileNameHeader, EXTENSIONS[image.contentType]),
+          contentType: image.contentType,
+          size,
+          width: image.width,
+          height: image.height,
+        }
+      : {
+          uploaderId: user.id,
+          fileName: cleanFileName(fileNameHeader),
+          contentType: FILE_CONTENT_TYPE,
+          size,
+          width: null,
+          height: null,
+        };
+    const attachment = await dir.serialize(async () =>
+      dir.hasRoom(await store.attachmentBytes(), size, own) ? store.createAttachment(data) : null,
+    );
+    if (!attachment) {
       await rm(part, { force: true });
       return send(507, { ok: false, error: NO_ROOM });
     }
-    // Imagem pelo conteúdo (não pela extensão nem pelo tipo declarado); o resto é só um arquivo.
-    const image = whole ? imageInfo(whole) : null;
-    const attachment = await store.createAttachment(
-      image
-        ? {
-            uploaderId: user.id,
-            fileName: cleanFileName(fileNameHeader, EXTENSIONS[image.contentType]),
-            contentType: image.contentType,
-            size,
-            width: image.width,
-            height: image.height,
-          }
-        : {
-            uploaderId: user.id,
-            fileName: cleanFileName(fileNameHeader),
-            contentType: FILE_CONTENT_TYPE,
-            size,
-            width: null,
-            height: null,
-          },
-    );
     try {
       await dir.adopt(part, attachment.id);
     } catch (err) {

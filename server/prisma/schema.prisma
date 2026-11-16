@@ -176,7 +176,8 @@ model Message {
   authorId  String
   author    User                @relation(fields: [authorId], references: [id])
   /// Pode ser vazio quando a mensagem tem anexos.
-  content     String              @db.VarChar(2000)
+  /// Até `MAX_STORED_MESSAGE_LENGTH` (shared/src/protocol.ts): as menções ficam guardadas como `<@id>`, bem mais compridas.
+  content     String              @db.VarChar(8000)
   /// `searchKey(content)` (shared/src/search.ts): sem acentos, minúsculo, sem menções.
   searchText  String              @default("")
   createdAt   DateTime            @default(now())

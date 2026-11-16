@@ -1,6 +1,6 @@
 import { randomInt } from 'node:crypto';
 import { MAX_REACTION_KINDS, isReactionEmoji } from '../../../shared/src/emoji.js';
-import { mentionedUserIds } from '../../../shared/src/markup.js';
+import { mentionedUserIds, typedLength } from '../../../shared/src/markup.js';
 import { SEARCH_PAGE_SIZE, searchWords } from '../../../shared/src/search.js';
 import type { Channel, Id, Message } from '../../../shared/src/models.js';
 import { hasPermission, Permission } from '../../../shared/src/permissions.js';
@@ -9,6 +9,7 @@ import {
   HISTORY_PAGE_SIZE,
   MAX_ATTACHMENTS_PER_MESSAGE,
   MAX_MESSAGE_LENGTH,
+  MAX_STORED_MESSAGE_LENGTH,
   MAX_PINS_PER_CHANNEL,
 } from '../../../shared/src/protocol.js';
 import { TOO_FAST, type RateLimits } from '../rate-limit.js';
@@ -25,7 +26,9 @@ const MAX_HISTORY_PAGE = 100;
 function validateContent(raw: unknown, allowEmpty = false): { ok: true; content: string } | { ok: false; error: string } {
   const content = typeof raw === 'string' ? raw.trim() : '';
   if (!content && !allowEmpty) return { ok: false, error: 'A mensagem está vazia.' };
-  if (content.length > MAX_MESSAGE_LENGTH) return { ok: false, error: `Limite de ${MAX_MESSAGE_LENGTH} caracteres.` };
+  // O limite vale para o que a pessoa digitou: uma menção guardada como `<@id>` conta só como o `@Nome` que ela escreveu.
+  if (typedLength(content) > MAX_MESSAGE_LENGTH) return { ok: false, error: `Limite de ${MAX_MESSAGE_LENGTH} caracteres.` };
+  if (content.length > MAX_STORED_MESSAGE_LENGTH) return { ok: false, error: 'Menções demais na mesma mensagem.' };
   return { ok: true, content };
 }
 

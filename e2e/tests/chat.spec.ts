@@ -1,7 +1,23 @@
 import { expect, test } from '@playwright/test';
-import { hoverMessage, messageRow, openPerson, send, uniqueName } from '../support/app';
+import { hoverMessage, joinCall, messageRow, openPerson, send, startScreen, uniqueName } from '../support/app';
 
 test.describe('conversa', () => {
+  test('o texto ainda não enviado continua lá depois de abrir a prévia da transmissão e voltar', async ({ browser }) => {
+    const ana = await openPerson(browser, 'Ana', { screen: { color: '#7a2d9e', width: 1280, height: 720 } });
+    const box = ana.page.getByRole('textbox', { name: /^Mensagem para / });
+    await box.fill('rascunho importante');
+
+    // A chamada e a prévia da transmissão tomam o lugar da conversa; ao voltar para ela, o texto está onde ficou.
+    await joinCall(ana.page);
+    await startScreen(ana.page);
+    await expect(box).toHaveCount(0);
+    await ana.page.getByRole('button', { name: 'Fechar prévia' }).first().click();
+    await ana.page.getByRole('button', { name: 'geral', exact: true }).click();
+    await expect(box).toHaveValue('rascunho importante');
+
+    await Promise.all([ana].map((p) => p.context.close()));
+  });
+
   test('uma mensagem chega para os outros na hora, e quem entra depois a vê no histórico', async ({ browser }) => {
     const ana = await openPerson(browser, 'Ana');
     const bruno = await openPerson(browser, 'Bruno');

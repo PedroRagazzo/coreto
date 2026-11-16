@@ -50,7 +50,7 @@ export async function handleSoundUpload(
   if ((await store.soundCount(spaceId)) >= MAX_SOUNDS_PER_SPACE) {
     return send(409, { ok: false, error: `O quadro já tem ${MAX_SOUNDS_PER_SPACE} sons. Remova algum antes.` });
   }
-  if ((await store.attachmentBytes()) + (await store.soundBytes()) > dir.quotaBytes) {
+  if ((await store.attachmentBytes()) + (await store.soundBytes()) + dir.reservedBytes > dir.quotaBytes) {
     return send(507, { ok: false, error: 'O servidor está sem espaço. Avise quem cuida dele.' });
   }
 

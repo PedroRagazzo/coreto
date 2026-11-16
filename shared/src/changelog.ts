@@ -22,6 +22,24 @@ export interface ChangelogEntry {
 /** Da mais nova para a mais antiga. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-16-2',
+    title: 'Pequenos acertos',
+    items: [
+      {
+        title: 'O texto que você digitou fica guardado',
+        text: 'Ao abrir uma transmissão ou a chamada no meio de uma mensagem, o que você já tinha escrito continua lá quando voltar para a conversa. Cada canal e cada conversa guarda o seu rascunho.',
+      },
+      {
+        title: 'Menções não gastam o limite da mensagem',
+        text: 'Marcar alguém com @ agora conta só o que você digitou. Antes, cada menção pesava uns 40 caracteres no limite de 2000 e a mensagem podia ser recusada sem motivo aparente.',
+      },
+      {
+        title: 'Envio de arquivos com o servidor cheio',
+        text: 'Se vários arquivos sobem ao mesmo tempo, o servidor reserva o espaço de cada um antes de receber. Assim ninguém envia um arquivo grande até o fim só para ouvir que não coube.',
+      },
+    ],
+  },
+  {
     id: '2026-11-16',
     title: 'Visual novo, em azul',
     items: [

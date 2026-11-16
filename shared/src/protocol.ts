@@ -25,6 +25,8 @@ import type {
 export type Ack<T> = { ok: true; data: T } | { ok: false; error: string };
 
 export const MAX_MESSAGE_LENGTH = 2000;
+/** O que cabe guardado: com as menções em `<@id>` (uns 40 caracteres cada), a mensagem ocupa mais do que o digitado. */
+export const MAX_STORED_MESSAGE_LENGTH = MAX_MESSAGE_LENGTH * 4;
 /** Mensagens por página do histórico; uma página menor que isso significa que chegou ao começo. */
 export const HISTORY_PAGE_SIZE = 50;
 

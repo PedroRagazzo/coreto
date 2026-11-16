@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { decodeMentions, encodeMentions, mentionedUserIds, parseMarkup } from '../../../shared/src/markup.js';
+import { decodeMentions, encodeMentions, mentionedUserIds, parseMarkup, typedLength } from '../../../shared/src/markup.js';
 
 const text = (t: string) => ({ type: 'text', text: t });
 
@@ -104,5 +104,12 @@ describe('menções', () => {
 
   it('lista quem foi mencionado, sem repetir e ignorando código', () => {
     expect(mentionedUserIds('<@u1> **<@u2>** <@u1> `<@u3>`')).toEqual(['u1', 'u2']);
+  });
+
+  it('conta uma menção guardada (uns 40 caracteres) como o "@Nome" que a pessoa digitou, no mínimo', () => {
+    const id = '3f2b8c1e-9a47-4d0b-8e65-1c2d3e4f5a6b';
+    expect(`<@${id}>`.length).toBe(39);
+    expect(typedLength(`oi <@${id}>!`)).toBe('oi @x!'.length);
+    expect(typedLength('sem menção')).toBe('sem menção'.length);
   });
 });

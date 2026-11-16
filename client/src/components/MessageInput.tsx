@@ -38,6 +38,12 @@ interface PendingFile {
   upload: UploadHandle | null;
 }
 
+/**
+ * O que cada pessoa começou a digitar e ainda não enviou, por canal ou conversa. Fica fora do componente porque ele
+ * some da tela (ao abrir uma transmissão ou a chamada, por exemplo) e o texto não pode ir junto.
+ */
+const drafts = new Map<Id, string>();
+
 interface MessageInputProps {
   /** Canal de texto ou conversa direta. */
   targetId: Id;
@@ -48,7 +54,12 @@ interface MessageInputProps {
 
 export function MessageInput({ targetId, label, canSend }: MessageInputProps) {
   const { state, actions } = useRealtime();
-  const [draft, setDraft] = useState('');
+  const [draft, setDraftState] = useState(() => drafts.get(targetId) ?? '');
+  const setDraft = (text: string) => {
+    if (text) drafts.set(targetId, text);
+    else drafts.delete(targetId);
+    setDraftState(text);
+  };
   const [pending, setPending] = useState<PendingFile[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
@@ -83,9 +94,9 @@ export function MessageInput({ targetId, label, canSend }: MessageInputProps) {
     };
   }, [extrasOpen]);
 
-  // Trocar de conversa descarta o rascunho e os anexos ainda não enviados.
+  // Trocar de conversa traz o rascunho dela (se tiver) e descarta os anexos ainda não enviados.
   useEffect(() => {
-    setDraft('');
+    setDraftState(drafts.get(targetId) ?? '');
     setError(null);
     setExtrasOpen(false);
     setDialog(null);

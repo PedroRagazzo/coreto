@@ -33,6 +33,24 @@ describe.skipIf(!hasTestDatabase)('menções', () => {
     expect(later.mentions).toEqual([]);
   });
 
+  it('o limite de caracteres conta o que foi digitado, não as menções guardadas em <@id>', async () => {
+    const ana = await server.connect('Ana');
+    const bruno = await server.connect('Bruno');
+    const snapshot = await joinDemoSpace(ana);
+    const geral = channelNamed(snapshot, 'geral');
+
+    // 60 menções guardadas ocupam 2400 caracteres, mas digitadas ("@Bruno ") dariam uns 420: cabe nos 2000.
+    const mentions = Array.from({ length: 60 }, () => mention(bruno.user.id)).join(' ');
+    expect(mentions.length).toBeGreaterThan(2000);
+    ok(await ana.socket.emitWithAck('message:send', { channelId: geral.id, content: mentions }));
+
+    // Texto puro passando de 2000 continua recusado.
+    const tooLong = await ana.socket.emitWithAck('message:send', { channelId: geral.id, content: 'a'.repeat(2001) });
+    expect(tooLong.ok).toBe(false);
+    // As menções ficam no banco, que os outros testes deste arquivo dividem e contam.
+    await server.db.mention.deleteMany();
+  });
+
   it('não conta autoria, robôs, ids desconhecidos, menção em código nem conversas diretas', async () => {
     const ana = await server.connect('Ana');
     const bruno = await server.connect('Bruno');

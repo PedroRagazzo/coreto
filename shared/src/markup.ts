@@ -133,6 +133,15 @@ export function mentionedUserIds(content: string): Id[] {
   return [...ids];
 }
 
+/**
+ * Quantos caracteres a mensagem tem para quem a escreveu. Guardada, cada menção vira `<@id>` (uns 40 caracteres), mas
+ * quem digitou só escreveu `@Nome`: cada menção vale aqui o mínimo que ela tinha digitado ("@" e uma letra), então o
+ * limite da mensagem nunca recusa algo que o campo de texto aceitou.
+ */
+export function typedLength(content: string): number {
+  return content.replace(/<@[\w-]{1,64}>/g, '@x').length;
+}
+
 export interface MentionCandidate {
   id: Id;
   name: string;
