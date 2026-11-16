@@ -222,7 +222,7 @@ export function MessageInput({ targetId, label, canSend }: MessageInputProps) {
       {dragging && (
         <div
           aria-hidden
-          className="pointer-events-none absolute right-4 bottom-full left-4 mb-2 rounded-lg border-2 border-dashed border-accent bg-panel/90 py-6 text-center text-sm font-medium text-accent"
+          className="pointer-events-none absolute right-4 bottom-full left-4 mb-2 rounded-lg border-2 border-dashed border-accent bg-panel/90 py-6 text-center text-sm font-medium text-accent-text"
         >
           Solte para anexar a {label}
         </div>
@@ -373,7 +373,7 @@ export function MessageInput({ targetId, label, canSend }: MessageInputProps) {
             aria-label="Enviar mensagem"
             title={uploading ? 'Aguarde o envio das imagens' : undefined}
             disabled={!canSubmit}
-            className="rounded p-1 text-muted hover:text-accent disabled:opacity-40 disabled:hover:text-muted"
+            className="rounded p-1 text-muted hover:text-accent-text disabled:opacity-40 disabled:hover:text-muted"
           >
             <SendHorizontal size={20} />
           </button>

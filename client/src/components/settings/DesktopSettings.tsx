@@ -22,7 +22,7 @@ function describe(state: UpdateState | null): { icon: ReactNode; text: string } 
     case 'available':
     case 'downloading':
       return {
-        icon: <Download size={18} className="text-accent" />,
+        icon: <Download size={18} className="text-accent-text" />,
         text: `Baixando a versão ${state.version ?? 'nova'}… ${Math.round(state.percent ?? 0)}%`,
       };
     case 'ready':

@@ -494,11 +494,11 @@ function MessageEditor({ message, onDone }: { message: Message; onDone: () => vo
       />
       <p className="mt-1 text-xs text-faint">
         Esc para{' '}
-        <button type="button" onClick={onDone} className="text-accent hover:underline">
+        <button type="button" onClick={onDone} className="text-accent-text hover:underline">
           cancelar
         </button>{' '}
         · Enter para{' '}
-        <button type="submit" disabled={busy} className="text-accent hover:underline">
+        <button type="submit" disabled={busy} className="text-accent-text hover:underline">
           salvar
         </button>
       </p>

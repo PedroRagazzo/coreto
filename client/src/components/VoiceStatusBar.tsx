@@ -32,39 +32,15 @@ export function VoiceStatusBar() {
   return (
     <>
       {alert}
-      <div className="border-t border-line bg-rail/40 px-3 py-2">
-        <div className="flex items-center gap-1">
-          <div className="min-w-0 flex-1">
-            <p className={`text-sm font-semibold ${voice.connecting ? 'text-idle' : 'text-online'}`}>
-              {voice.connecting ? 'Conectando…' : 'Voz conectada'}
+      <div className="border-t border-line px-3 py-3">
+        <div className="min-w-0">
+          <p className={`text-sm font-semibold ${voice.connecting ? 'text-idle' : 'text-online'}`}>
+            {voice.connecting ? 'Conectando…' : 'Voz conectada'}
+          </p>
+          {voice.channelName && (
+            <p className="truncate text-xs text-muted">
+              {voice.channelName} / {voice.spaceName}
             </p>
-            {voice.channelName && (
-              <p className="truncate text-xs text-muted">
-                {voice.channelName} / {voice.spaceName}
-              </p>
-            )}
-          </div>
-          {voice.channelId && (
-            <>
-              <VoiceButton
-                label={voice.muted ? 'Ativar microfone' : 'Desativar microfone'}
-                active={voice.muted}
-                disabled={!voice.canSpeak}
-                onClick={actions.toggleMute}
-              >
-                {voice.muted ? <MicOff size={18} /> : <Mic size={18} />}
-              </VoiceButton>
-              <VoiceButton
-                label={voice.deafened ? 'Ativar som' : 'Desativar som'}
-                active={voice.deafened}
-                onClick={actions.toggleDeafen}
-              >
-                {voice.deafened ? <HeadphoneOff size={18} /> : <Headphones size={18} />}
-              </VoiceButton>
-              <VoiceButton label="Sair da chamada" onClick={actions.leaveVoice}>
-                <PhoneOff size={18} />
-              </VoiceButton>
-            </>
           )}
         </div>
 
@@ -104,14 +80,16 @@ export function VoiceStatusBar() {
 
         {/* O que o bot de música está tocando, com os controles principais; o painel completo abre no botão "Música". */}
         {voice.channelId && music?.state.current && (
-          <div className="mt-2 flex items-center gap-1.5 rounded-md bg-elevated/60 px-2 py-1.5">
+          <div className="mt-2 flex items-center gap-2 rounded-2xl bg-gradient-to-br from-deep to-accent p-2.5">
             <button
               type="button"
               onClick={() => setMusicOpen(true)}
               title="Abrir o painel de música"
-              className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-xs text-muted hover:text-fg"
+              className="flex min-w-0 flex-1 items-center gap-2 text-left text-sm font-medium text-white"
             >
-              <Music2 size={14} className="shrink-0 text-accent" aria-hidden />
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-black/35">
+                <Music2 size={16} aria-hidden />
+              </span>
               <span className="truncate">{music.state.current.title}</span>
             </button>
             <button
@@ -119,64 +97,92 @@ export function VoiceStatusBar() {
               onClick={() => void actions.musicControl({ action: music.state.paused ? 'resume' : 'pause' })}
               aria-label={music.state.paused ? 'Continuar a música' : 'Pausar a música'}
               title={music.state.paused ? 'Continuar' : 'Pausar'}
-              className="rounded p-1 text-muted hover:bg-hover hover:text-fg"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white text-deep hover:bg-white/85"
             >
-              {music.state.paused ? <Play size={15} /> : <Pause size={15} />}
+              {music.state.paused ? <Play size={14} /> : <Pause size={14} />}
             </button>
             <button
               type="button"
               onClick={() => void actions.musicControl({ action: 'skip' })}
               aria-label="Pular a música"
               title={skipText(music.state).label}
-              className="rounded p-1 text-muted hover:bg-hover hover:text-fg"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-white hover:bg-white/15"
             >
               <SkipForward size={15} />
             </button>
           </div>
         )}
 
-        {/* Como no Discord: Câmera e Tela lado a lado. */}
+        {/* Os botões da chamada ficam logo acima do seu nome: quatro redondos e, embaixo, Música, Sons e Sair. */}
         {voice.channelId && (
-          <div className="mt-2 grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              disabled={!voice.canStream}
-              onClick={actions.toggleCamera}
-              aria-pressed={voice.video}
-              title={voice.canStream ? undefined : 'Você não tem permissão para usar vídeo neste canal'}
-              className={`flex items-center justify-center gap-1.5 rounded-md py-1.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50 ${
-                voice.video ? 'bg-fg text-rail hover:bg-fg/85' : 'bg-elevated text-muted hover:bg-hover hover:text-fg'
-              }`}
-            >
-              {voice.video ? <Video size={16} /> : <VideoOff size={16} />}
-              Câmera
-            </button>
-            <button
-              type="button"
-              disabled={!voice.canStream || voice.streaming}
-              onClick={() => setChoosingScreen(true)}
-              title={voice.canStream ? undefined : 'Você não tem permissão para usar vídeo neste canal'}
-              className="flex items-center justify-center gap-1.5 rounded-md bg-elevated py-1.5 text-sm font-medium text-muted hover:bg-hover hover:text-fg disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <MonitorUp size={16} />
-              Tela
-            </button>
-            <button
-              type="button"
-              onClick={() => setMusicOpen(true)}
-              className="flex items-center justify-center gap-1.5 rounded-md bg-elevated py-1.5 text-sm font-medium text-muted hover:bg-hover hover:text-fg"
-            >
-              <Music2 size={16} />
-              Música
-            </button>
-            <button
-              type="button"
-              onClick={() => setSoundsOpen(true)}
-              className="flex items-center justify-center gap-1.5 rounded-md bg-elevated py-1.5 text-sm font-medium text-muted hover:bg-hover hover:text-fg"
-            >
-              <AudioLines size={16} />
-              Sons
-            </button>
+          <div className="mt-2 flex flex-col gap-2">
+            <div className="flex gap-2">
+              <RoundButton
+                label={voice.muted ? 'Ativar microfone' : 'Desativar microfone'}
+                active={voice.muted}
+                warning
+                disabled={!voice.canSpeak}
+                onClick={actions.toggleMute}
+              >
+                {voice.muted ? <MicOff size={20} /> : <Mic size={20} />}
+              </RoundButton>
+              <RoundButton
+                label={voice.deafened ? 'Ativar som' : 'Desativar som'}
+                active={voice.deafened}
+                warning
+                onClick={actions.toggleDeafen}
+              >
+                {voice.deafened ? <HeadphoneOff size={20} /> : <Headphones size={20} />}
+              </RoundButton>
+              <RoundButton
+                label="Câmera"
+                tooltip={voice.canStream ? (voice.video ? 'Desligar a câmera' : 'Ligar a câmera') : 'Você não tem permissão para usar vídeo neste canal'}
+                active={voice.video}
+                disabled={!voice.canStream}
+                onClick={actions.toggleCamera}
+              >
+                {voice.video ? <Video size={20} /> : <VideoOff size={20} />}
+              </RoundButton>
+              <RoundButton
+                label="Tela"
+                toggle={false}
+                tooltip={voice.canStream ? 'Compartilhar a tela' : 'Você não tem permissão para usar vídeo neste canal'}
+                disabled={!voice.canStream || voice.streaming}
+                onClick={() => setChoosingScreen(true)}
+              >
+                <MonitorUp size={20} />
+              </RoundButton>
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setMusicOpen(true)}
+                className="flex h-10 flex-1 items-center justify-center gap-1.5 rounded-full bg-accent text-sm font-semibold text-white hover:bg-accent-strong"
+              >
+                <Music2 size={16} aria-hidden />
+                Música
+              </button>
+              <button
+                type="button"
+                onClick={() => setSoundsOpen(true)}
+                aria-label="Quadro de som"
+                title="Quadro de som"
+                className="flex h-10 flex-1 items-center justify-center gap-1.5 rounded-full bg-deep text-sm font-semibold text-white hover:bg-deep/80"
+              >
+                <AudioLines size={16} aria-hidden />
+                Sons
+              </button>
+              <button
+                type="button"
+                onClick={actions.leaveVoice}
+                aria-label="Sair da chamada"
+                title="Sair da chamada"
+                className="flex h-10 flex-1 items-center justify-center gap-1.5 rounded-full border border-fg text-sm font-semibold text-fg hover:bg-fg/10"
+              >
+                <PhoneOff size={16} aria-hidden />
+                Sair
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -187,25 +193,32 @@ export function VoiceStatusBar() {
   );
 }
 
-interface VoiceButtonProps {
+interface RoundButtonProps {
   label: string;
+  /** O que aparece ao passar o mouse, se for diferente do nome do botão. */
+  tooltip?: string;
   onClick: () => void;
+  /** Ligado (câmera ligada) ou, com `warning`, desativado (microfone mudo, som desativado). */
   active?: boolean;
+  warning?: boolean;
+  /** É um botão de liga e desliga (anuncia o estado); a tela abre uma janela, então não. */
+  toggle?: boolean;
   disabled?: boolean;
   children: ReactNode;
 }
 
-function VoiceButton({ label, onClick, active = false, disabled = false, children }: VoiceButtonProps) {
+/** Botão redondo da chamada: microfone, som, câmera e tela. */
+function RoundButton({ label, tooltip, onClick, active = false, warning = false, toggle = true, disabled = false, children }: RoundButtonProps) {
   return (
     <button
       type="button"
-      title={label}
+      title={tooltip ?? label}
       aria-label={label}
-      aria-pressed={active}
+      aria-pressed={toggle ? active : undefined}
       disabled={disabled}
       onClick={onClick}
-      className={`rounded-md p-1.5 hover:bg-hover disabled:cursor-not-allowed disabled:opacity-40 ${
-        active ? 'text-dnd' : 'text-muted hover:text-fg'
+      className={`flex h-11 flex-1 items-center justify-center rounded-full disabled:cursor-not-allowed disabled:opacity-40 ${
+        active ? (warning ? 'bg-dnd text-white hover:bg-dnd/85' : 'bg-fg text-rail hover:bg-fg/85') : 'bg-elevated text-fg hover:bg-hover'
       }`}
     >
       {children}

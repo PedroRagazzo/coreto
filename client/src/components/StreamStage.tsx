@@ -21,6 +21,7 @@ import { useElementSize } from '../lib/useElementSize';
 import type { StreamStats } from '../lib/voice';
 import { useRealtime } from '../state/realtime';
 import { displayNameOf } from '../state/selectors';
+import { ParticipantTile } from './ParticipantTile';
 
 /** Selo vermelho "AO VIVO" de quem está transmitindo. */
 export function LiveBadge() {
@@ -36,6 +37,27 @@ function findParticipant(voice: Record<Id, VoiceParticipant[]>, userId: Id) {
     if (self) return { self, room };
   }
   return null;
+}
+
+/**
+ * Coluna com as pessoas da chamada, ao lado da transmissão. Só aparece quando a única tela aberta é a sua (a prévia):
+ * enquanto você assiste a transmissão de outra pessoa, a tela dela fica com o espaço todo.
+ */
+function PeopleColumn() {
+  const { state } = useRealtime();
+  const { channelId } = state.myVoice;
+  const room = channelId ? (state.voice[channelId] ?? []) : [];
+  const me = state.me?.id;
+  if (room.length === 0) return null;
+  return (
+    <aside className="w-56 shrink-0 overflow-y-auto border-l border-line bg-rail/40 p-3">
+      <ul aria-label="Pessoas na chamada" className="flex flex-col gap-3">
+        {room.map((p) => (
+          <ParticipantTile key={p.userId} participant={p} isMe={p.userId === me} compact />
+        ))}
+      </ul>
+    </aside>
+  );
 }
 
 /** Largura da coluna das transmissões pequenas, no modo com uma em destaque. */
@@ -71,6 +93,8 @@ export function StreamStage() {
   const many = count > 1;
   const layout = many ? state.stageLayout : 'focus';
   const focus = state.focusedStage && stages.includes(state.focusedStage) ? state.focusedStage : stages[count - 1];
+  // A coluna das pessoas só acompanha a sua própria prévia; ao assistir outra pessoa, ela some.
+  const showPeople = stages.every((id) => id === state.me?.id);
   // A posição entre as pequenas (a grande não conta).
   const smallOrder = new Map(stages.filter((id) => id !== focus).map((id, i) => [id, i]));
 
@@ -125,21 +149,24 @@ export function StreamStage() {
           </button>
         </header>
       )}
-      <div ref={areaRef} className="grid min-h-0 flex-1 gap-1 bg-black/60" style={grid} data-layout={layout} data-stacked={stacked}>
-        {stages.map((userId) => {
-          const isFocus = userId === focus;
-          const variant = !many ? 'main' : layout === 'grid' ? 'cell' : isFocus ? 'main' : 'small';
-          return (
-            <StreamTile
-              key={userId}
-              userId={userId}
-              variant={variant}
-              isFocus={isFocus}
-              many={many}
-              style={placement(layout, count, isFocus, smallOrder.get(userId) ?? 0, stacked)}
-            />
-          );
-        })}
+      <div className="flex min-h-0 flex-1">
+        <div ref={areaRef} className="grid min-h-0 min-w-0 flex-1 gap-1 bg-black/60" style={grid} data-layout={layout} data-stacked={stacked}>
+          {stages.map((userId) => {
+            const isFocus = userId === focus;
+            const variant = !many ? 'main' : layout === 'grid' ? 'cell' : isFocus ? 'main' : 'small';
+            return (
+              <StreamTile
+                key={userId}
+                userId={userId}
+                variant={variant}
+                isFocus={isFocus}
+                many={many}
+                style={placement(layout, count, isFocus, smallOrder.get(userId) ?? 0, stacked)}
+              />
+            );
+          })}
+        </div>
+        {showPeople && <PeopleColumn />}
       </div>
     </>
   );
@@ -300,7 +327,7 @@ function StreamTile({
               aria-pressed={showStats}
               title="Estatísticas da transmissão"
               aria-label="Estatísticas da transmissão"
-              className={`${isMe ? '' : 'ml-auto'} rounded p-1.5 hover:bg-hover ${showStats ? 'text-accent' : 'text-muted hover:text-fg'}`}
+              className={`${isMe ? '' : 'ml-auto'} rounded p-1.5 hover:bg-hover ${showStats ? 'text-accent-text' : 'text-muted hover:text-fg'}`}
             >
               <Activity size={18} />
             </button>

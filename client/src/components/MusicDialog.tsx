@@ -218,7 +218,7 @@ function NowPlaying({
   return (
     <div className="rounded-lg bg-rail p-4">
       <div className="flex items-start gap-3">
-        <Music2 size={28} className="mt-0.5 shrink-0 text-accent" aria-hidden />
+        <Music2 size={28} className="mt-0.5 shrink-0 text-accent-text" aria-hidden />
         <div className="min-w-0 flex-1">
           <p className="truncate font-semibold text-fg" title={current.title}>
             {current.title}
@@ -309,7 +309,7 @@ function NowPlaying({
           aria-label={`Repetição ${REPEAT_LABEL[music.repeat]}`}
           title={`Repetição ${REPEAT_LABEL[music.repeat]} (clique para trocar)`}
           aria-pressed={music.repeat !== 'off'}
-          className={`${iconButton} ${music.repeat !== 'off' ? 'text-accent ring-2 ring-accent' : ''}`}
+          className={`${iconButton} ${music.repeat !== 'off' ? 'text-accent-text ring-2 ring-accent' : ''}`}
         >
           {music.repeat === 'one' ? <Repeat1 size={18} /> : <Repeat size={18} />}
         </button>

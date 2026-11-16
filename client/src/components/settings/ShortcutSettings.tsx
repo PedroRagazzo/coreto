@@ -121,7 +121,7 @@ function KeybindRow({
         <span
           aria-live="polite"
           className={`flex w-48 shrink-0 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-semibold ${
-            recording ? 'bg-accent/20 text-accent ring-2 ring-accent' : keys ? 'bg-rail text-fg' : 'bg-rail text-faint'
+            recording ? 'bg-accent/20 text-accent-text ring-2 ring-accent' : keys ? 'bg-rail text-fg' : 'bg-rail text-faint'
           }`}
         >
           <Keyboard size={16} aria-hidden />

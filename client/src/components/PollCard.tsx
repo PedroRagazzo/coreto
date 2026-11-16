@@ -54,7 +54,7 @@ export function PollCard({ message }: { message: Message }) {
                 />
                 <span className="relative flex h-4 w-4 shrink-0 items-center justify-center">
                   {mine ? (
-                    <Check size={14} className="text-accent" aria-hidden />
+                    <Check size={14} className="text-accent-text" aria-hidden />
                   ) : (
                     <span aria-hidden className={`h-3.5 w-3.5 border border-faint ${poll.multiple ? 'rounded-[3px]' : 'rounded-full'}`} />
                   )}

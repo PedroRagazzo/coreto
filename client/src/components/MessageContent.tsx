@@ -148,7 +148,7 @@ function Mention({ userId }: { userId: string }) {
   const mine = userId === state.me?.id;
   return (
     <span
-      className={`rounded px-0.5 font-medium ${mine ? 'bg-mention/25 text-mention' : 'bg-accent/15 text-accent'}`}
+      className={`rounded px-0.5 font-medium ${mine ? 'bg-mention/25 text-mention' : 'bg-accent/15 text-accent-text'}`}
       title={known ? undefined : 'Usuário que não está neste espaço'}
     >
       @{known ? displayNameOf(state.snapshot, state.users, userId) : 'desconhecido'}

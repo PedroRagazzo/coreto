@@ -1,6 +1,6 @@
-// Layout principal em três colunas:
+// Layout principal em três painéis flutuantes (cantos redondos, com espaço entre eles sobre o fundo azulado):
 //   1. SpaceRail      — barra fina com os espaços e o atalho de mensagens diretas
-//   2. barra lateral  — canais por categoria, chamada de voz ativa e painel do usuário
+//   2. barra lateral  — canais por categoria, chamada de voz ativa (com os botões) e painel do usuário
 //   3. painel central — chat do canal, com a lista de membros à direita
 
 import { useState } from 'react';
@@ -24,7 +24,7 @@ export function AppShell() {
   const inDirectMessages = state.activeSpaceId === null;
 
   return (
-    <div className="flex h-dvh overflow-hidden bg-panel text-fg">
+    <div className="app-backdrop flex h-dvh gap-3 overflow-hidden p-3 text-fg">
       <CallSounds />
       <Shortcuts />
       <WhatsNew />
@@ -32,14 +32,14 @@ export function AppShell() {
       <SpaceRail />
 
       {/* Coluna 2: canais */}
-      <aside className="flex w-60 shrink-0 flex-col bg-sidebar">
+      <aside className="flex w-64 shrink-0 flex-col overflow-hidden rounded-3xl border border-line bg-sidebar/85">
         {inDirectMessages ? <DirectMessagesSidebar /> : <ChannelSidebar />}
         <VoiceStatusBar />
         <UserPanel />
       </aside>
 
       {/* Coluna 3: conversa + membros */}
-      <main className="flex min-w-0 flex-1 flex-col">
+      <main className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-3xl border border-line bg-panel/90">
         <UpdateBanner />
         <ConnectionBanner />
         {state.stages.length > 0 ? (

@@ -22,6 +22,24 @@ export interface ChangelogEntry {
 /** Da mais nova para a mais antiga. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-16',
+    title: 'Visual novo, em azul',
+    items: [
+      {
+        title: 'Cores e painéis',
+        text: 'O Coreto trocou o verde por uma paleta azul e agora os painéis (espaços, canais e conversa) flutuam com cantos arredondados sobre um fundo azulado.',
+      },
+      {
+        title: 'Botões da chamada acima do seu nome',
+        text: 'Microfone, som, câmera e tela ficam em quatro botões redondos logo acima do seu nome, com Música, Sons e Sair embaixo deles. A música que está tocando aparece num cartão azul logo acima.',
+      },
+      {
+        title: 'Pessoas ao lado da sua transmissão',
+        text: 'Enquanto você vê a prévia da sua própria tela, as pessoas da chamada aparecem numa coluna à direita. Ao assistir a transmissão de outra pessoa, a coluna some e a tela dela ocupa o espaço todo.',
+      },
+    ],
+  },
+  {
     id: '2026-11-15-6',
     title: 'Volume de cada som do quadro de som',
     items: [

@@ -31,7 +31,7 @@ export function UserPanel() {
   if (!me) return null;
 
   return (
-    <div ref={containerRef} className="relative flex h-14 shrink-0 items-center bg-rail/70 px-2">
+    <div ref={containerRef} className="relative flex h-14 shrink-0 items-center border-t border-line bg-rail/70 px-2">
       <button
         type="button"
         aria-haspopup="menu"

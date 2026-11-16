@@ -16,7 +16,7 @@ export function SpaceRail() {
   }
 
   return (
-    <nav aria-label="Espaços" className="flex w-[72px] shrink-0 flex-col items-center gap-2 overflow-y-auto bg-rail py-3">
+    <nav aria-label="Espaços" className="flex w-[72px] shrink-0 flex-col items-center gap-2 overflow-y-auto rounded-3xl border border-line bg-rail/70 py-3">
       <RailButton
         label={unreadDirects ? `Mensagens diretas (${unreadDirects} não lidas)` : 'Mensagens diretas'}
         active={state.activeSpaceId === null}
@@ -49,7 +49,7 @@ export function SpaceRail() {
       })}
 
       <RailButton label="Criar um espaço" active={false} onClick={() => setCreating(true)}>
-        <Plus size={22} className="text-accent group-hover:text-white" />
+        <Plus size={22} className="text-accent-text group-hover:text-white" />
       </RailButton>
       {creating && <CreateSpaceDialog onClose={() => setCreating(false)} />}
     </nav>

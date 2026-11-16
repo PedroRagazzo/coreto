@@ -139,7 +139,7 @@ export function Segmented({ name, options, onSelect }: SegmentedProps) {
           />
           {option.label}
           {option.badge && (
-            <span className={`ml-1.5 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${option.selected ? 'bg-white/20' : 'bg-accent/15 text-accent'}`}>
+            <span className={`ml-1.5 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${option.selected ? 'bg-white/20' : 'bg-accent/15 text-accent-text'}`}>
               {option.badge}
             </span>
           )}

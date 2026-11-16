@@ -1,27 +1,33 @@
 @import "tailwindcss";
 
-/* Paleta grafite: contraste alto no texto, fundos escalonados sem preto puro. */
+/*
+ * Paleta azul: #005885 (azul petróleo), #00167D (azul profundo), #363636 e #0B0B0B (grafite e preto), com tons de
+ * cinza entre os dois para os fundos escalonados e azul-claro para o que precisa ser lido sobre o escuro.
+ */
 @theme {
-  --color-rail: #121417;
-  --color-sidebar: #191c21;
-  --color-panel: #20242a;
-  --color-elevated: #2a2f37;
-  --color-hover: #313741;
-  --color-line: #2d323a;
+  --color-rail: #0b0b0b;
+  --color-sidebar: #121212;
+  --color-panel: #171717;
+  --color-elevated: #262626;
+  --color-hover: #333333;
+  --color-line: #2e2e2e;
 
-  --color-fg: #e6e8eb;
-  --color-muted: #a0a7b1;
-  --color-faint: #707883;
+  --color-fg: #f2f4f7;
+  --color-muted: #a9aeb5;
+  --color-faint: #8a9099;
 
-  --color-accent: #2bb39a;
-  --color-accent-strong: #22967f;
-  --color-link: #5aa9f5;
+  --color-accent: #005885;
+  --color-accent-strong: #006a9e;
+  /* O azul do acento não tem contraste suficiente como cor de texto sobre o escuro: o texto usa este. */
+  --color-accent-text: #8fd0f5;
+  --color-deep: #00167d;
+  --color-link: #8fd0f5;
   --color-mention: #e8b339;
 
-  --color-online: #3ecf6e;
+  --color-online: #8fd0f5;
   --color-idle: #e8b339;
   --color-dnd: #e5534b;
-  --color-offline: #6b7380;
+  --color-offline: #6b6f76;
 
   --font-sans: "Inter", "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue", Arial, sans-serif;
 }
@@ -35,6 +41,14 @@ html,
 body,
 #root {
   height: 100%;
+}
+
+/* Fundo da janela: o preto com dois brilhos azuis nos cantos, por trás dos painéis flutuantes. */
+.app-backdrop {
+  background:
+    radial-gradient(900px 600px at 0% 0%, rgb(0 22 125 / 0.7), transparent 70%),
+    radial-gradient(800px 560px at 100% 100%, rgb(0 88 133 / 0.55), transparent 70%),
+    var(--color-rail);
 }
 
 body {
