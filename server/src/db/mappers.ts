@@ -77,6 +77,8 @@ export const toMember = (row: Db.Member & { roles: { roleId: string }[] }): Memb
   spaceId: row.spaceId,
   userId: row.userId,
   nickname: row.nickname,
+  tag: row.tag,
+  tagColor: row.tagColor,
   roleIds: row.roles.map((r) => r.roleId),
   joinedAt: row.joinedAt.toISOString(),
 });

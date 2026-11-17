@@ -78,6 +78,16 @@ export function createNavigation({ dispatch, stateRef, socketRef }: ActionContex
       return null;
     },
 
+    async setMemberTag(userId, tag, color) {
+      const socket = socketRef.current;
+      const spaceId = stateRef.current.snapshot?.space.id;
+      if (!socket || !spaceId) return 'Sem conexão com o servidor.';
+      const res = await settle(socket.timeout(10_000).emitWithAck('member:tag', { spaceId, userId, tag, color }));
+      if (!res.ok) return res.error;
+      dispatch({ type: 'member:updated', member: res.data });
+      return null;
+    },
+
     async deleteSpace() {
       const socket = socketRef.current;
       const spaceId = stateRef.current.snapshot?.space.id;

@@ -247,6 +247,11 @@ export interface ClientToServerEvents {
   'space:create': (req: { name: string }, ack: (res: Ack<Space>) => void) => void;
   /** Renomeia o espaço; exige ADMINISTRATOR (o dono tem). */
   'space:update': (req: { spaceId: Id; name: string }, ack: (res: Ack<Space>) => void) => void;
+  /**
+   * Dá, troca ou tira a etiqueta de um membro (o texto ao lado do nome, como o "ROBÔ"); exige ADMINISTRATOR no espaço.
+   * `tag: null` tira. Vale para qualquer membro, inclusive robôs.
+   */
+  'member:tag': (req: { spaceId: Id; userId: Id; tag: string | null; color?: string | null }, ack: (res: Ack<Member>) => void) => void;
   /** Apaga o espaço com tudo dentro; só o dono. */
   'space:delete': (req: { spaceId: Id }, ack: (res: Ack<null>) => void) => void;
   'channel:create': (req: CreateChannelRequest, ack: (res: Ack<ChannelCreatedPayload>) => void) => void;
@@ -387,6 +392,8 @@ export interface ServerToClientEvents {
   'mentions:update': (payload: MentionCount) => void;
   'presence:update': (payload: { userId: Id; status: PresenceStatus }) => void;
   'member:joined': (payload: { member: Member; user: User }) => void;
+  /** A etiqueta de um membro mudou. */
+  'member:updated': (payload: { member: Member }) => void;
   /** Uma conta foi excluída por um administrador geral: some das listas, junto com as mensagens dela. */
   'account:deleted': (payload: { userId: Id }) => void;
   'voice:update': (payload: { channelId: Id; participants: VoiceParticipant[] }) => void;

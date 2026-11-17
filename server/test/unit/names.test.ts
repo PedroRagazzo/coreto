@@ -3,8 +3,12 @@ import {
   MAX_CHANNEL_NAME,
   MAX_CHANNEL_TOPIC,
   MAX_SPACE_NAME,
+  MAX_TAG,
+  TAG_COLORS,
+  isTagColor,
   normalizeChannelName,
   normalizeSpaceName,
+  normalizeTag,
   normalizeTopic,
 } from '../../../shared/src/names.js';
 
@@ -46,5 +50,23 @@ describe('normalizeTopic', () => {
   it('tira os espaços das pontas e corta no tamanho máximo', () => {
     expect(normalizeTopic('  Conversa livre  ')).toBe('Conversa livre');
     expect(normalizeTopic('t'.repeat(MAX_CHANNEL_TOPIC + 5))).toHaveLength(MAX_CHANNEL_TOPIC);
+  });
+});
+
+describe('normalizeTag', () => {
+  it('põe em maiúsculas, tira espaços sobrando e corta no tamanho máximo', () => {
+    expect(normalizeTag('  amigo   do   coreto ')).toBe('AMIGO DO CORETO');
+    expect(normalizeTag('robô')).toBe('ROBÔ');
+    expect(normalizeTag('x'.repeat(MAX_TAG + 5))).toHaveLength(MAX_TAG);
+  });
+
+  it('etiqueta vazia vira null (sem etiqueta)', () => {
+    expect(normalizeTag('   ')).toBeNull();
+  });
+
+  it('só aceita as cores da paleta', () => {
+    expect(isTagColor(TAG_COLORS[0])).toBe(true);
+    expect(isTagColor('#ff0000')).toBe(false);
+    expect(isTagColor(42)).toBe(false);
   });
 });

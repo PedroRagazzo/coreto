@@ -140,6 +140,7 @@ export function connectSocket({ token, ctx, actions, notificationPrefsRef, first
   });
   socket.on('presence:update', ({ userId, status }) => dispatch({ type: 'presence', userId, status }));
   socket.on('member:joined', ({ member, user }) => dispatch({ type: 'member:joined', member, user }));
+  socket.on('member:updated', ({ member }) => dispatch({ type: 'member:updated', member }));
   socket.on('voice:update', ({ channelId, participants }) => dispatch({ type: 'voice:update', channelId, participants }));
   socket.on('music:state', (musicState) => dispatch({ type: 'music:state', state: musicState }));
   socket.on('voice:ended', ({ reason }) => {

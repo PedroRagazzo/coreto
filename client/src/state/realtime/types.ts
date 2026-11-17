@@ -91,6 +91,7 @@ export type Action =
   | { type: 'typing'; channelId: Id; userId: Id; until: number }
   | { type: 'presence'; userId: Id; status: PresenceStatus }
   | { type: 'member:joined'; member: Member; user: User }
+  | { type: 'member:updated'; member: Member }
   | { type: 'voice:update'; channelId: Id; participants: VoiceParticipant[] }
   | { type: 'voice:self'; patch: Partial<MyVoiceState> }
   | { type: 'mentions:update'; mention: MentionCount }
@@ -117,6 +118,8 @@ export interface RealtimeActions {
   createSpace(name: string): Promise<string | null>;
   /** Renomeia o espaço aberto. Resolve com erro ou `null`. */
   renameSpace(name: string): Promise<string | null>;
+  /** Só administradores: dá, troca ou tira (`tag` nulo) a etiqueta de um membro do espaço aberto. */
+  setMemberTag(userId: Id, tag: string | null, color: string | null): Promise<string | null>;
   /** Exclui o espaço aberto com tudo dentro. Resolve com erro ou `null`. */
   deleteSpace(): Promise<string | null>;
   /** Só o administrador geral: exclui a conta de alguém, com tudo dela. */

@@ -142,6 +142,42 @@ describe.skipIf(!hasTestDatabase)('gestão de espaços e canais', () => {
     expect(await server.db.role.count({ where })).toBe(0);
   });
 
+  it('só administradores dão etiqueta, em qualquer membro (até robô), e todo mundo no espaço vê', async () => {
+    const { ana, bruno, space, snapshot } = await spaceWithMember('Com etiquetas');
+    const bot = snapshot.users.find((u) => u.isBot)!;
+    const color = '#2f9e6f';
+
+    // Membro comum não pode.
+    const denied = await bruno.socket.emitWithAck('member:tag', { spaceId: space.id, userId: ana.user.id, tag: 'DONO', color });
+    expect(denied.ok).toBe(false);
+
+    // A dona dá a etiqueta ao Bruno (normalizada) e o espaço inteiro é avisado.
+    const seen = nextEvent(bruno.socket, 'member:updated', (p) => p.member.userId === bruno.user.id);
+    const tagged = ok(await ana.socket.emitWithAck('member:tag', { spaceId: space.id, userId: bruno.user.id, tag: '  amigo ', color }));
+    expect(tagged).toMatchObject({ userId: bruno.user.id, tag: 'AMIGO', tagColor: color });
+    expect((await seen).member).toEqual(tagged);
+    expect(await server.db.member.findUnique({ where: { spaceId_userId: { spaceId: space.id, userId: bruno.user.id } } })).toMatchObject({
+      tag: 'AMIGO',
+      tagColor: color,
+    });
+
+    // A etiqueta vem no espaço aberto depois, e vale para robôs também.
+    ok(await ana.socket.emitWithAck('member:tag', { spaceId: space.id, userId: bot.id, tag: 'DJ', color: null }));
+    const reopened = ok(await bruno.socket.emitWithAck('space:join', space.id));
+    expect(reopened.members.find((m) => m.userId === bruno.user.id)).toMatchObject({ tag: 'AMIGO', tagColor: color });
+    expect(reopened.members.find((m) => m.userId === bot.id)).toMatchObject({ tag: 'DJ', tagColor: null });
+
+    // Cor fora da paleta e pessoa de fora do espaço são recusadas.
+    expect((await ana.socket.emitWithAck('member:tag', { spaceId: space.id, userId: bruno.user.id, tag: 'X', color: '#123456' })).ok).toBe(false);
+    expect((await ana.socket.emitWithAck('member:tag', { spaceId: space.id, userId: 'ninguem', tag: 'X', color })).ok).toBe(false);
+
+    // Etiqueta vazia ou nula tira.
+    const cleared = ok(await ana.socket.emitWithAck('member:tag', { spaceId: space.id, userId: bruno.user.id, tag: '   ' }));
+    expect(cleared).toMatchObject({ tag: null, tagColor: null });
+    ok(await ana.socket.emitWithAck('member:tag', { spaceId: space.id, userId: bot.id, tag: null }));
+    expect(await server.db.member.count({ where: { spaceId: space.id, NOT: { tag: null } } })).toBe(0);
+  });
+
   it('o administrador geral exclui espaços e canais de outras pessoas; os demais não', async () => {
     const { ana, bruno, space, snapshot } = await spaceWithMember('Dos outros');
     const admin = await server.connect('Admin');

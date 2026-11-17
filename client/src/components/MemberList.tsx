@@ -3,6 +3,7 @@ import { Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { useRealtime } from '../state/realtime';
 import { displayNameOf, roleColorOf } from '../state/selectors';
+import { MemberTag } from './MemberTag';
 import { Avatar } from './Avatar';
 import { DeleteAccountDialog } from './DeleteAccountDialog';
 
@@ -80,9 +81,7 @@ function MemberGroup({ title, entries, onMessage, dimmed = false }: MemberGroupP
                 >
                   {name}
                 </span>
-                {user.isBot && (
-                  <span className="shrink-0 rounded bg-accent px-1 text-[10px] font-semibold text-white">ROBÔ</span>
-                )}
+                <MemberTag user={user} className="shrink-0" />
               </button>
               {/* Só o administrador geral vê: exclui a conta (com confirmação). */}
               {state.superAdmin && canMessage && (

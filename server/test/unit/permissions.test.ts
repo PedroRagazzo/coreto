@@ -30,6 +30,8 @@ const member = (userId: string, roleIds: string[] = []): Member => ({
   spaceId: space.id,
   userId,
   nickname: null,
+  tag: null,
+  tagColor: null,
   roleIds,
   joinedAt: '2026-01-01T00:00:00.000Z',
 });

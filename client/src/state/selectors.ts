@@ -23,6 +23,14 @@ export function roleColorOf(snapshot: SpaceSnapshot | null, userId: Id): string 
   return colored[0]?.color ?? undefined;
 }
 
+/** A etiqueta ao lado do nome: a que um administrador deu ou, para um robô sem etiqueta, "ROBÔ". `color` nulo é a cor padrão. */
+export function tagOf(snapshot: SpaceSnapshot | null, user: User | undefined): { text: string; color: string | null } | null {
+  if (!user) return null;
+  const member = snapshot?.members.find((m) => m.userId === user.id);
+  if (member?.tag) return { text: member.tag, color: member.tagColor };
+  return user.isBot ? { text: 'ROBÔ', color: null } : null;
+}
+
 export interface ChannelGroup {
   category: Category | null;
   channels: Channel[];

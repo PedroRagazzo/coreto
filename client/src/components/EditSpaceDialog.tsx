@@ -2,6 +2,7 @@ import type { Space } from '@shared/models';
 import { MAX_SPACE_NAME, normalizeSpaceName } from '@shared/names';
 import { useState, type FormEvent } from 'react';
 import { useRealtime } from '../state/realtime';
+import { MemberTagsTab } from './MemberTagsTab';
 import { DialogActions, fieldClass, labelClass, Modal } from './Modal';
 
 interface EditSpaceDialogProps {
@@ -16,11 +17,7 @@ export function EditSpaceDialog({ space, canDelete, onClose }: EditSpaceDialogPr
   return confirmingDelete ? (
     <DeleteSpaceConfirmation space={space} onCancel={() => setConfirmingDelete(false)} onClose={onClose} />
   ) : (
-    <EditSpaceForm
-      space={space}
-      onDelete={canDelete ? () => setConfirmingDelete(true) : undefined}
-      onClose={onClose}
-    />
+    <EditSpaceForm space={space} onDelete={canDelete ? () => setConfirmingDelete(true) : undefined} onClose={onClose} />
   );
 }
 
@@ -30,8 +27,16 @@ interface EditSpaceFormProps {
   onClose: () => void;
 }
 
+type Tab = 'geral' | 'etiquetas';
+
+const TABS: { id: Tab; label: string }[] = [
+  { id: 'geral', label: 'Geral' },
+  { id: 'etiquetas', label: 'Etiquetas' },
+];
+
 function EditSpaceForm({ space, onDelete, onClose }: EditSpaceFormProps) {
   const { actions } = useRealtime();
+  const [tab, setTab] = useState<Tab>('geral');
   const [name, setName] = useState(space.name);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -50,36 +55,67 @@ function EditSpaceForm({ space, onDelete, onClose }: EditSpaceFormProps) {
 
   return (
     <Modal title="Configurações do espaço" description={space.name} onClose={onClose}>
-      <form onSubmit={submit}>
-        <label htmlFor="edit-space-name" className={labelClass}>
-          Nome do espaço
-        </label>
-        <input
-          id="edit-space-name"
-          data-autofocus
-          value={name}
-          maxLength={MAX_SPACE_NAME}
-          onChange={(e) => setName(e.target.value)}
-          className={fieldClass}
-        />
-        {error && (
-          <p role="alert" className="mt-3 text-sm text-dnd">
-            {error}
-          </p>
-        )}
-        <DialogActions
-          onCancel={onClose}
-          submitLabel={busy ? 'Salvando…' : 'Salvar'}
-          disabled={!normalized || !changed || busy}
-          leading={
-            onDelete && (
-              <button type="button" onClick={onDelete} className="rounded-md px-2 py-2 text-sm font-medium text-dnd hover:underline">
-                Excluir espaço
+      <div role="tablist" aria-label="Configurações" className="-mt-1 mb-5 flex gap-1 border-b border-white/10">
+        {TABS.map(({ id, label }) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            id={`space-tab-${id}`}
+            aria-selected={tab === id}
+            aria-controls="space-tab-panel"
+            onClick={() => setTab(id)}
+            className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium ${
+              tab === id ? 'border-accent text-fg' : 'border-transparent text-muted hover:text-fg'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <div role="tabpanel" id="space-tab-panel" aria-labelledby={`space-tab-${tab}`}>
+        {tab === 'etiquetas' ? (
+          <>
+            <MemberTagsTab />
+            <div className="mt-4 flex justify-end">
+              <button type="button" onClick={onClose} className="rounded-md px-4 py-2 text-sm font-medium text-muted hover:text-fg">
+                Fechar
               </button>
-            )
-          }
-        />
-      </form>
+            </div>
+          </>
+        ) : (
+          <form onSubmit={submit}>
+            <label htmlFor="edit-space-name" className={labelClass}>
+              Nome do espaço
+            </label>
+            <input
+              id="edit-space-name"
+              data-autofocus
+              value={name}
+              maxLength={MAX_SPACE_NAME}
+              onChange={(e) => setName(e.target.value)}
+              className={fieldClass}
+            />
+            {error && (
+              <p role="alert" className="mt-3 text-sm text-dnd">
+                {error}
+              </p>
+            )}
+            <DialogActions
+              onCancel={onClose}
+              submitLabel={busy ? 'Salvando…' : 'Salvar'}
+              disabled={!normalized || !changed || busy}
+              leading={
+                onDelete && (
+                  <button type="button" onClick={onDelete} className="rounded-md px-2 py-2 text-sm font-medium text-dnd hover:underline">
+                    Excluir espaço
+                  </button>
+                )
+              }
+            />
+          </form>
+        )}
+      </div>
     </Modal>
   );
 }
@@ -112,8 +148,8 @@ function DeleteSpaceConfirmation({ space, onCancel, onClose }: DeleteSpaceConfir
     <Modal title="Excluir espaço" onClose={onCancel}>
       <form onSubmit={submit}>
         <p className="text-muted">
-          Isso apaga <strong className="text-fg">{space.name}</strong> para todos os membros: canais, mensagens e cargos.
-          Quem estiver numa sala de voz do espaço será desconectado. Isso não pode ser desfeito.
+          Isso apaga <strong className="text-fg">{space.name}</strong> para todos os membros: canais, mensagens e cargos. Quem estiver numa
+          sala de voz do espaço será desconectado. Isso não pode ser desfeito.
         </p>
         <label htmlFor="confirm-space-name" className={`${labelClass} mt-5`}>
           Digite o nome do espaço para confirmar
@@ -132,12 +168,7 @@ function DeleteSpaceConfirmation({ space, onCancel, onClose }: DeleteSpaceConfir
             {error}
           </p>
         )}
-        <DialogActions
-          onCancel={onCancel}
-          submitLabel={busy ? 'Excluindo…' : 'Excluir espaço'}
-          disabled={!confirmed || busy}
-          danger
-        />
+        <DialogActions onCancel={onCancel} submitLabel={busy ? 'Excluindo…' : 'Excluir espaço'} disabled={!confirmed || busy} danger />
       </form>
     </Modal>
   );

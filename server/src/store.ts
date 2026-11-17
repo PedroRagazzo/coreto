@@ -255,6 +255,17 @@ export class Store {
     return member;
   }
 
+  /** Define (ou tira, com `tag` nulo) a etiqueta de um membro. Devolve o membro atualizado, ou `null` se ele não existe. */
+  async setMemberTag(spaceId: Id, userId: Id, tag: string | null, tagColor: string | null): Promise<Member | null> {
+    const current = this.member(spaceId, userId);
+    if (!current) return null;
+    const next = tag ? { tag, tagColor } : { tag: null, tagColor: null };
+    await this.db.member.update({ where: { spaceId_userId: { spaceId, userId } }, data: next });
+    const updated: Member = { ...current, ...next };
+    this.members.set(memberKey(spaceId, userId), updated);
+    return updated;
+  }
+
   member(spaceId: Id, userId: Id): Member | null {
     return this.members.get(memberKey(spaceId, userId)) ?? null;
   }
@@ -332,6 +343,8 @@ export class Store {
       spaceId: space.id,
       userId,
       nickname: null,
+      tag: null,
+      tagColor: null,
       roleIds: [],
       joinedAt: joinedAt.toISOString(),
     }));

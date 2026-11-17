@@ -10,6 +10,7 @@ import { useRealtime } from '../state/realtime';
 import { useSettings } from '../state/settings';
 import { can, displayNameOf, mentionCandidates, roleColorOf } from '../state/selectors';
 import { Avatar } from './Avatar';
+import { MemberTag } from './MemberTag';
 import { Markup, MessageContent } from './MessageContent';
 import { useMentionAutocomplete } from './MentionAutocomplete';
 import { ReactionChips, ReactionPicker } from './MessageReactions';
@@ -193,9 +194,7 @@ export function MessageList({ conversationId, welcome, messages }: MessageListPr
                           style={{ color: roleColorOf(state.snapshot, group.authorId) ?? undefined }}
                         >
                           {name}
-                          {author?.isBot && (
-                            <span className="ml-1 rounded bg-accent px-1 align-middle text-[10px] font-semibold text-white">ROBÔ</span>
-                          )}
+                          <MemberTag user={author} className="ml-1 align-middle" />
                         </span>
                       )
                     }
@@ -229,9 +228,7 @@ export function MessageList({ conversationId, welcome, messages }: MessageListPr
                           >
                             {name}
                           </span>
-                          {author?.isBot && (
-                            <span className="rounded bg-accent px-1 text-[10px] font-semibold text-white">ROBÔ</span>
-                          )}
+                          <MemberTag user={author} />
                           <time dateTime={message.createdAt} className="text-xs text-faint">
                             {formatMessageTime(message.createdAt)}
                           </time>

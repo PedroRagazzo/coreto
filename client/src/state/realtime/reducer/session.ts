@@ -243,6 +243,14 @@ export function memberJoined(state: RealtimeState, action: ActionOf<'member:join
   return { ...state, users, snapshot: { ...snapshot, members: [...snapshot.members, action.member] } };
 }
 
+/** A etiqueta de um membro mudou. */
+export function memberUpdated(state: RealtimeState, action: ActionOf<'member:updated'>): RealtimeState {
+  const { snapshot } = state;
+  const { member } = action;
+  if (!snapshot || snapshot.space.id !== member.spaceId) return state;
+  return { ...state, snapshot: { ...snapshot, members: snapshot.members.map((m) => (m.userId === member.userId ? member : m)) } };
+}
+
 export function mentionsUpdate(state: RealtimeState, action: ActionOf<'mentions:update'>): RealtimeState {
   const { mention } = action;
   return {

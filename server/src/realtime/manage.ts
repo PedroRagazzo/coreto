@@ -1,7 +1,7 @@
 // Criação, edição e exclusão de espaços e de canais.
 
 import type { Id } from '../../../shared/src/models.js';
-import { normalizeChannelName, normalizeSpaceName, normalizeTopic } from '../../../shared/src/names.js';
+import { isTagColor, normalizeChannelName, normalizeSpaceName, normalizeTag, normalizeTopic } from '../../../shared/src/names.js';
 import { hasPermission, Permission } from '../../../shared/src/permissions.js';
 import { TOO_FAST, type RateLimits } from '../rate-limit.js';
 import type { Store } from '../store.js';
@@ -44,6 +44,29 @@ export function registerManagement(io: IO, socket: AppSocket, store: Store, limi
       ack({ ok: true, data: space });
     } catch (err) {
       ack(storageError('space:update', err));
+    }
+  });
+
+  // A etiqueta ao lado do nome (como a do "ROBÔ"): qualquer administrador do espaço dá, troca ou tira, em quem quiser.
+  socket.on('member:tag', async (req, ack) => {
+    if (!isFunction(ack)) return;
+    if (!limits.manage.take(userId)) return ack(TOO_FAST);
+    const spaceId = typeof req?.spaceId === 'string' ? req.spaceId : '';
+    if (!hasPermission(store.spacePermissionsFor(userId, spaceId), Permission.ADMINISTRATOR)) {
+      return ack({ ok: false, error: 'Só administradores podem dar etiquetas.' });
+    }
+    const targetId = typeof req.userId === 'string' ? req.userId : '';
+    if (!store.member(spaceId, targetId)) return ack({ ok: false, error: 'Essa pessoa não está no espaço.' });
+    if (req.tag !== null && typeof req.tag !== 'string') return ack({ ok: false, error: 'Etiqueta inválida.' });
+    if (req.color != null && !isTagColor(req.color)) return ack({ ok: false, error: 'Cor inválida.' });
+    const tag = req.tag === null ? null : normalizeTag(req.tag);
+    try {
+      const member = await store.setMemberTag(spaceId, targetId, tag, tag ? (req.color ?? null) : null);
+      if (!member) return ack({ ok: false, error: 'Essa pessoa não está no espaço.' });
+      io.to(rooms.space(spaceId)).emit('member:updated', { member });
+      ack({ ok: true, data: member });
+    } catch (err) {
+      ack(storageError('member:tag', err));
     }
   });
 

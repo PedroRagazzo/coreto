@@ -88,6 +88,8 @@ model Member {
   spaceId  String
   userId   String
   nickname String?      @db.VarChar(32)
+  tag      String?      @db.VarChar(16)
+  tagColor String?      @db.VarChar(7)
   joinedAt DateTime     @default(now())
   space    Space        @relation(fields: [spaceId], references: [id], onDelete: Cascade)
   user     User         @relation(fields: [userId], references: [id], onDelete: Cascade)

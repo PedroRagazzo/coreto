@@ -70,6 +70,10 @@ export interface Member {
   spaceId: Id;
   userId: Id;
   nickname: string | null;
+  /** Etiqueta ao lado do nome (como a do "ROBÔ"), dada por um administrador do espaço. */
+  tag: string | null;
+  /** Cor da etiqueta, uma das de `TAG_COLORS`; `null` usa a cor padrão. */
+  tagColor: string | null;
   roleIds: Id[];
   joinedAt: string;
 }

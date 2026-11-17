@@ -67,6 +67,8 @@ function apply(state: RealtimeState, action: Action): RealtimeState {
       return session.presence(state, action);
     case 'member:joined':
       return session.memberJoined(state, action);
+    case 'member:updated':
+      return session.memberUpdated(state, action);
     case 'mentions:update':
       return session.mentionsUpdate(state, action);
 
