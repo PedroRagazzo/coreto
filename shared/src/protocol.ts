@@ -302,6 +302,11 @@ export interface ClientToServerEvents {
   'message:edit': (req: { messageId: Id; content: string }, ack: (res: Ack<Message>) => void) => void;
   /** O autor apaga; em canais, quem tem MANAGE_MESSAGES também. */
   'message:delete': (req: { messageId: Id }, ack: (res: Ack<null>) => void) => void;
+  /**
+   * Só o administrador geral (SUPER_ADMIN_NAMES): exclui a conta de uma pessoa, com as mensagens, reações e anexos dela. Os
+   * espaços que ela era dona passam para quem excluiu. Não vale para si mesmo, para robôs nem para outros administradores gerais.
+   */
+  'account:delete': (req: { userId: Id }, ack: (res: Ack<null>) => void) => void;
   'typing:start': (req: { channelId: Id }) => void;
   /** O usuário viu o canal: zera as menções dele ali. */
   'mentions:ack': (req: { channelId: Id }) => void;
@@ -348,6 +353,8 @@ export interface ServerToClientEvents {
     mentions: MentionCount[];
     /** Mensagens não lidas por canal e conversa (de todos os espaços); o que não está na lista tem zero. */
     unread: UnreadCount[];
+    /** É administrador geral (pode excluir contas). */
+    superAdmin: boolean;
   }) => void;
   /** Um espaço novo foi criado; todos os usuários já são membros dele. */
   'space:created': (space: Space) => void;
@@ -380,6 +387,8 @@ export interface ServerToClientEvents {
   'mentions:update': (payload: MentionCount) => void;
   'presence:update': (payload: { userId: Id; status: PresenceStatus }) => void;
   'member:joined': (payload: { member: Member; user: User }) => void;
+  /** Uma conta foi excluída por um administrador geral: some das listas, junto com as mensagens dela. */
+  'account:deleted': (payload: { userId: Id }) => void;
   'voice:update': (payload: { channelId: Id; participants: VoiceParticipant[] }) => void;
   'voice:peer-left': (payload: { userId: Id }) => void;
   'voice:signal': (payload: { from: Id; signal: SignalPayload }) => void;

@@ -87,6 +87,14 @@ export function createNavigation({ dispatch, stateRef, socketRef }: ActionContex
       return res.ok ? null : res.error;
     },
 
+    async deleteAccount(userId) {
+      const socket = socketRef.current;
+      if (!socket) return 'Sem conexão com o servidor.';
+      // O estado é atualizado pelo evento `account:deleted`, que chega para todos.
+      const res = await settle(socket.timeout(10_000).emitWithAck('account:delete', { userId }));
+      return res.ok ? null : res.error;
+    },
+
     async createChannel(req) {
       const socket = socketRef.current;
       const snapshot = stateRef.current.snapshot;

@@ -12,6 +12,7 @@ import { createEmbeds, type EmbedService } from './embeds/service.js';
 import { registerChat } from './realtime/chat.js';
 import { registerDiagnostics } from './realtime/diagnostics.js';
 import { registerDirect } from './realtime/direct.js';
+import { registerAdmin } from './realtime/admin.js';
 import { registerManagement } from './realtime/manage.js';
 import { joinPublicSpaces } from './realtime/membership.js';
 import { registerEmbeds } from './realtime/embeds.js';
@@ -188,6 +189,7 @@ export async function startServer(
     registerEmbeds(socket, store, embeds, limits);
     registerDirect(socket, store, limits);
     registerManagement(io, socket, store, limits);
+    registerAdmin(io, socket, store, uploads, limits);
     registerVoice(io, socket, store, ice, sfu, limits);
     registerDiagnostics(socket, ice, limits);
     registerMusic(socket, () => music, limits);

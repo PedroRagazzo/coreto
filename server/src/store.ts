@@ -378,6 +378,29 @@ export class Store {
     for (const [key, member] of this.members) if (member.spaceId === spaceId) this.members.delete(key);
   }
 
+  /**
+   * Exclui a conta com tudo dela: mensagens, reações, votos, anexos, sessões, participações e conversas diretas. Os espaços
+   * que ela era dona passam para `heirId`. Devolve os anexos que sumiram, para o chamador apagar os arquivos do disco.
+   */
+  async deleteAccount(userId: Id, heirId: Id): Promise<Id[]> {
+    const attachments = await this.db.attachment.findMany({
+      where: { OR: [{ uploaderId: userId }, { message: { authorId: userId } }] },
+      select: { id: true },
+    });
+    // O dono de espaço e o autor de mensagem não têm exclusão em cascata: saem na mão, na mesma transação.
+    await this.db.$transaction([
+      this.db.space.updateMany({ where: { ownerId: userId }, data: { ownerId: heirId } }),
+      this.db.message.deleteMany({ where: { authorId: userId } }),
+      this.db.user.delete({ where: { id: userId } }),
+    ]);
+    this.users.delete(userId);
+    this.voice.delete(userId);
+    for (const [id, space] of this.spaces) if (space.ownerId === userId) this.spaces.set(id, { ...space, ownerId: heirId });
+    for (const [key, member] of this.members) if (member.userId === userId) this.members.delete(key);
+    for (const [id, direct] of this.directs) if (direct.participantIds.includes(userId)) this.directs.delete(id);
+    return attachments.map((a) => a.id);
+  }
+
   categoryIn(spaceId: Id, categoryId: Id): Category | null {
     const category = this.categories.get(categoryId);
     return category?.spaceId === spaceId ? category : null;

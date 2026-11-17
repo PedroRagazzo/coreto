@@ -35,7 +35,11 @@ const tables = await db.$queryRaw<{ tablename: string }[]>`
 if (tables.length > 0) await db.$executeRawUnsafe(`TRUNCATE TABLE ${tables.map((t) => `"${t.tablename}"`).join(', ')} CASCADE`);
 await seedIfEmpty(db);
 
-const server = await startServer(await Store.load(db), {
+const store = await Store.load(db);
+// A conta de nome fixo dos testes de administração (o resto usa nomes com sufixo, que nunca batem).
+store.setSuperAdmins(['Admin E2E']);
+
+const server = await startServer(store, {
   port,
   clientOrigins: [],
   uploadDir: await mkdtemp(join(tmpdir(), 'coreto-e2e-uploads-')),

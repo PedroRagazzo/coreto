@@ -1,8 +1,10 @@
 import type { Id, Member, User } from '@shared/models';
+import { Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { useRealtime } from '../state/realtime';
 import { displayNameOf, roleColorOf } from '../state/selectors';
 import { Avatar } from './Avatar';
+import { DeleteAccountDialog } from './DeleteAccountDialog';
 
 interface Entry {
   member: Member;
@@ -48,6 +50,7 @@ interface MemberGroupProps {
 
 function MemberGroup({ title, entries, onMessage, dimmed = false }: MemberGroupProps) {
   const { state } = useRealtime();
+  const [deleting, setDeleting] = useState<{ userId: Id; name: string } | null>(null);
   if (entries.length === 0) return null;
 
   return (
@@ -60,7 +63,7 @@ function MemberGroup({ title, entries, onMessage, dimmed = false }: MemberGroupP
           // Clicar em alguém abre a conversa direta; não vale para você mesmo nem para robôs.
           const canMessage = user.id !== state.me?.id && !user.isBot;
           return (
-            <li key={user.id}>
+            <li key={user.id} className="group relative">
               <button
                 type="button"
                 disabled={!canMessage}
@@ -81,10 +84,23 @@ function MemberGroup({ title, entries, onMessage, dimmed = false }: MemberGroupP
                   <span className="shrink-0 rounded bg-accent px-1 text-[10px] font-semibold text-white">ROBÔ</span>
                 )}
               </button>
+              {/* Só o administrador geral vê: exclui a conta (com confirmação). */}
+              {state.superAdmin && canMessage && (
+                <button
+                  type="button"
+                  onClick={() => setDeleting({ userId: user.id, name })}
+                  aria-label={`Excluir a conta de ${name}`}
+                  title="Excluir a conta"
+                  className="absolute top-1/2 right-1 -translate-y-1/2 rounded p-1.5 text-faint opacity-0 hover:bg-dnd/15 hover:text-dnd focus:opacity-100 group-hover:opacity-100"
+                >
+                  <Trash2 size={14} aria-hidden />
+                </button>
+              )}
             </li>
           );
         })}
       </ul>
+      {deleting && <DeleteAccountDialog userId={deleting.userId} name={deleting.name} onClose={() => setDeleting(null)} />}
     </section>
   );
 }

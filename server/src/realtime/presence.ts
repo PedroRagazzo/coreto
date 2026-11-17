@@ -21,7 +21,15 @@ export function registerPresence(io: IO, socket: AppSocket, store: Store, limits
   const directs = store.directsFor(userId);
   const directUsers = directs.flatMap((c) => store.users.get(otherParticipant(c, userId)) ?? []);
   const ready = (mentions: MentionCount[], unread: UnreadCount[]) =>
-    socket.emit('session:ready', { user, spaces: store.spacesForUser(userId), directs, directUsers, mentions, unread });
+    socket.emit('session:ready', {
+      user,
+      spaces: store.spacesForUser(userId),
+      directs,
+      directUsers,
+      mentions,
+      unread,
+      superAdmin: store.isSuperAdmin(userId),
+    });
   // Cada contador falha sozinho: sem ele a sessão funciona do mesmo jeito, só sem o número.
   const counted = <T>(what: string, promise: Promise<T[]>): Promise<T[]> =>
     promise.catch((err: unknown) => {

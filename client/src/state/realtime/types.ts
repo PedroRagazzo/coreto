@@ -48,7 +48,9 @@ export type Action =
       directUsers: User[];
       mentions: MentionCount[];
       unread: UnreadCount[];
+      superAdmin: boolean;
     }
+  | { type: 'account:deleted'; userId: Id }
   | { type: 'unread:bump'; channelId: Id; spaceId: Id | null }
   | { type: 'unread:clear'; channelId: Id }
   | { type: 'space:created'; space: Space }
@@ -117,6 +119,8 @@ export interface RealtimeActions {
   renameSpace(name: string): Promise<string | null>;
   /** Exclui o espaço aberto com tudo dentro. Resolve com erro ou `null`. */
   deleteSpace(): Promise<string | null>;
+  /** Só o administrador geral: exclui a conta de alguém, com tudo dela. */
+  deleteAccount(userId: Id): Promise<string | null>;
   /** Cria um canal no espaço aberto e abre ele, se for de texto. Resolve com erro ou `null`. */
   createChannel(req: Omit<CreateChannelRequest, 'spaceId'>): Promise<string | null>;
   /** Altera nome, tópico ou categoria. Resolve com erro ou `null`. */

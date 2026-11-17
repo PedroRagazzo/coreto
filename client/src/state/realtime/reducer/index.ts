@@ -41,6 +41,8 @@ function apply(state: RealtimeState, action: Action): RealtimeState {
       return session.spaceUpdated(state, action);
     case 'space:deleted':
       return session.spaceDeleted(state, action);
+    case 'account:deleted':
+      return session.accountDeleted(state, action);
     case 'channel:created':
       return session.channelCreated(state, action);
     case 'channel:updated':

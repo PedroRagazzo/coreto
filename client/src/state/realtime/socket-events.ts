@@ -82,13 +82,14 @@ export function connectSocket({ token, ctx, actions, notificationPrefsRef, first
   firstSessionRef.current = true;
 
   socket.on('unread:bump', ({ channelId, spaceId }) => dispatch({ type: 'unread:bump', channelId, spaceId }));
-  socket.on('session:ready', ({ user, spaces, directs, directUsers, mentions, unread }) => {
-    dispatch({ type: 'session', user, spaces, directs, directUsers, mentions, unread });
+  socket.on('session:ready', ({ user, spaces, directs, directUsers, mentions, unread, superAdmin }) => {
+    dispatch({ type: 'session', user, spaces, directs, directUsers, mentions, unread, superAdmin });
     // Na primeira conexão abre o primeiro espaço; nas reconexões, reabre o atual.
     const target = firstSessionRef.current ? (spaces[0]?.id ?? null) : stateRef.current.activeSpaceId;
     firstSessionRef.current = false;
     actions.selectSpace(target);
   });
+  socket.on('account:deleted', ({ userId }) => dispatch({ type: 'account:deleted', userId }));
   socket.on('space:created', (space) => dispatch({ type: 'space:created', space }));
   socket.on('space:updated', (space) => dispatch({ type: 'space:updated', space }));
   socket.on('space:deleted', ({ spaceId }) => {

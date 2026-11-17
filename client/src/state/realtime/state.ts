@@ -37,6 +37,8 @@ export interface RealtimeState {
   connection: 'connecting' | 'ready' | 'disconnected';
   connectionError: string | null;
   me: User | null;
+  /** É administrador geral: pode excluir contas. */
+  superAdmin: boolean;
   spaces: Space[];
   /** `null` = área de mensagens diretas. */
   activeSpaceId: Id | null;
@@ -115,6 +117,7 @@ export const initialState: RealtimeState = {
   connection: 'connecting',
   connectionError: null,
   me: null,
+  superAdmin: false,
   spaces: [],
   activeSpaceId: null,
   activeChannelBySpace: {},

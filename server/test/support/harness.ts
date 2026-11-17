@@ -51,6 +51,7 @@ export interface TestClient {
   directUsers: User[];
   mentions: MentionCount[];
   unread: UnreadCount[];
+  superAdmin: boolean;
 }
 
 type EventName = keyof ServerToClientEvents;

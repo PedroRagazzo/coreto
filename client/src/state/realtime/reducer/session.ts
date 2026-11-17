@@ -1,9 +1,10 @@
 // Conexão, sessão, espaços, canais, conversas diretas, navegação, presença, menções e não lidas.
 
-import type { Id, MentionCount, UnreadCount, VoiceParticipant } from '@shared/models';
+import type { Id, MentionCount, Message, UnreadCount, VoiceParticipant } from '@shared/models';
+import { deletedReply } from '@shared/reply';
 import type { RealtimeState } from '../state';
 import type { ActionOf } from '../types';
-import { withoutKey } from './helpers';
+import { closeStage, withoutKey } from './helpers';
 
 export function connection(state: RealtimeState, action: ActionOf<'connection'>): RealtimeState {
   return { ...state, connection: action.connection, connectionError: action.error ?? null };
@@ -25,10 +26,57 @@ export function session(state: RealtimeState, action: ActionOf<'session'>): Real
     connection: 'ready',
     connectionError: null,
     me: action.user,
+    superAdmin: action.superAdmin,
     spaces: action.spaces,
     users,
     directs,
     mentions,
+  };
+}
+
+/** Uma conta foi excluída: some das listas, junto com as mensagens dela e as conversas diretas com ela. */
+export function accountDeleted(state: RealtimeState, action: ActionOf<'account:deleted'>): RealtimeState {
+  const { userId } = action;
+  const removed = new Set<Id>();
+  const messages: Record<Id, Message[]> = {};
+  for (const [channelId, list] of Object.entries(state.messages)) {
+    messages[channelId] = list.filter((m) => {
+      if (m.authorId !== userId) return true;
+      removed.add(m.id);
+      return false;
+    });
+  }
+  // As respostas às mensagens que sumiram continuam, mostrando que a original sumiu.
+  for (const [channelId, list] of Object.entries(messages)) {
+    messages[channelId] = list.map((m) => (m.replyTo && removed.has(m.replyTo.id) ? { ...m, replyTo: deletedReply(m.replyTo.id) } : m));
+  }
+  const goneDirects = Object.values(state.directs).filter((c) => c.participantIds.includes(userId)).map((c) => c.id);
+  const directs = { ...state.directs };
+  const unread = { ...state.unread };
+  for (const id of goneDirects) {
+    delete directs[id];
+    delete messages[id];
+    delete unread[id];
+  }
+  const snapshot = state.snapshot
+    ? {
+        ...state.snapshot,
+        members: state.snapshot.members.filter((m) => m.userId !== userId),
+        users: state.snapshot.users.filter((u) => u.id !== userId),
+        voice: state.snapshot.voice.filter((p) => p.userId !== userId),
+      }
+    : null;
+  return {
+    ...state,
+    ...closeStage(state, userId),
+    users: withoutKey(state.users, userId),
+    snapshot,
+    directs,
+    unread,
+    messages,
+    activeDirectId: state.activeDirectId && goneDirects.includes(state.activeDirectId) ? null : state.activeDirectId,
+    replyingTo: state.replyingTo && (removed.has(state.replyingTo.id) || state.replyingTo.authorId === userId) ? null : state.replyingTo,
+    voice: Object.fromEntries(Object.entries(state.voice).map(([channelId, list]) => [channelId, list.filter((p) => p.userId !== userId)])),
   };
 }
 
