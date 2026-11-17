@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { audioBytesReceived, joinCall, openPerson } from '../support/app';
+import { audioBytesReceived, joinCall, openPerson, startScreen } from '../support/app';
 
 test.describe('chamada de voz', () => {
   test('duas pessoas entram na sala, se veem na lista e a voz de uma chega na outra', async ({ browser }) => {
@@ -121,5 +121,30 @@ test.describe('chamada de voz', () => {
     await expect(ana.page.getByRole('button', { name: 'Ativar microfone' })).toBeVisible();
     await expect(room).toContainText(ana.name);
     await Promise.all([ana, bruno].map((p) => p.context.close()));
+  });
+
+  test('quem transmitia vê o botão para retomar a transmissão depois da queda, e um clique volta ao ar', async ({ browser }) => {
+    const ana = await openPerson(browser, 'Ana', { screen: { color: '#7a2d9e', width: 1280, height: 720 } });
+    const sockets: { close(): void }[] = [];
+    await ana.page.routeWebSocket(/socket\.io/, (ws) => {
+      ws.connectToServer();
+      sockets.push(ws);
+    });
+    await ana.page.reload();
+    await joinCall(ana.page);
+    await startScreen(ana.page);
+
+    sockets.at(-1)?.close();
+
+    // A chamada volta sozinha, a transmissão não: aparece o aviso com o botão.
+    await expect(ana.page.getByText('Sua transmissão caiu junto com a conexão.')).toBeVisible({ timeout: 20_000 });
+    await expect(ana.page.getByText('Voz conectada')).toBeVisible();
+    await expect(ana.page.getByRole('region', { name: 'Sua tela' })).toHaveCount(0);
+
+    // Um clique retoma (com as escolhas de qualidade de antes) e o aviso some.
+    await ana.page.getByRole('button', { name: 'Retomar transmissão' }).click();
+    await expect(ana.page.getByRole('region', { name: 'Sua tela' })).toBeVisible();
+    await expect(ana.page.getByText('Sua transmissão caiu junto com a conexão.')).toHaveCount(0);
+    await ana.context.close();
   });
 });

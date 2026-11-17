@@ -166,7 +166,7 @@ export function connectSocket({ token, ctx, actions, notificationPrefsRef, first
     const dropped = reason !== 'io client disconnect' && reason !== 'io server disconnect';
     resumable =
       dropped && myVoice.channelId && myVoice.spaceId
-        ? { channelId: myVoice.channelId, spaceId: myVoice.spaceId, muted: myVoice.muted, deafened: myVoice.deafened, droppedAt: Date.now() }
+        ? { channelId: myVoice.channelId, spaceId: myVoice.spaceId, muted: myVoice.muted, deafened: myVoice.deafened, streaming: myVoice.streaming, droppedAt: Date.now() }
         : null;
     // O servidor encerra a sessão de voz quando o socket cai.
     voice.teardown();

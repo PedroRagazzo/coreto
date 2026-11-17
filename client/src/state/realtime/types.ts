@@ -218,6 +218,8 @@ export interface RealtimeActions {
   toggleMute(): void;
   toggleDeafen(): void;
   dismissVoiceError(): void;
+  /** Some o botão de retomar a transmissão que caiu com a conexão. */
+  dismissResumeScreen(): void;
   setPresence(status: SelectableStatus): void;
   /**
    * Diagnóstico: faz alguns pedidos seguidos ao servidor e mede a ida e volta de cada (ms). `lost` são os que não voltaram

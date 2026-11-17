@@ -32,6 +32,8 @@ export interface MyVoiceState {
   streaming: boolean;
   /** Sua câmera está ligada. */
   video: boolean;
+  /** Você estava transmitindo quando a conexão caiu: a chamada voltou, e a transmissão espera um clique para ser retomada. */
+  resumeScreen: boolean;
   error: string | null;
 }
 
@@ -41,6 +43,8 @@ export interface ResumableCall {
   spaceId: Id;
   muted: boolean;
   deafened: boolean;
+  /** Estava compartilhando a tela. */
+  streaming: boolean;
 }
 
 export interface RealtimeState {
@@ -121,6 +125,7 @@ export const IDLE_VOICE: MyVoiceState = {
   canStream: false,
   streaming: false,
   video: false,
+  resumeScreen: false,
   error: null,
 };
 

@@ -5,7 +5,7 @@ import type { Id, SpaceSnapshot } from '@shared/models';
 import { checkSoundFile, fetchSound, uploadSound } from '../../../lib/soundboard';
 import { describeCameraError, describeMediaError, describeScreenError } from '../../../lib/voice';
 import { ask, type ActionContext } from '../context';
-import { IDLE_VOICE, type ResumableCall } from '../state';
+import { IDLE_VOICE } from '../state';
 import type { RealtimeActions } from '../types';
 
 export function createVoiceActions(ctx: ActionContext) {
@@ -84,24 +84,32 @@ export function createVoiceActions(ctx: ActionContext) {
     return null;
   };
 
+  /** Entra na chamada de um espaço que pode não ser o aberto, como estava (mudo/ensurdecido). */
+  const enterCall = async (channelId: Id, spaceId: Id, muted: boolean, deafened: boolean): Promise<boolean> => {
+    const socket = socketRef.current;
+    if (!socket) return false;
+    const viewing = stateRef.current.snapshot;
+    if (viewing?.space.id === spaceId) return joinVoice(channelId, { from: viewing, muted, deafened });
+
+    // A chamada é de outro espaço que o aberto: pega o retrato dele só para entrar e depois devolve o espaço que estava aberto
+    // (abrir um espaço no servidor troca as salas que o socket escuta).
+    const res = await socket.emitWithAck('space:join', spaceId);
+    if (!res.ok) return false;
+    const joined = await joinVoice(channelId, { from: res.data, muted, deafened });
+    const active = stateRef.current.activeSpaceId;
+    if (active) await socket.emitWithAck('space:join', active);
+    return joined;
+  };
+
   return {
     joinVoice(channelId) {
       void joinVoice(channelId);
     },
 
-    async rejoinVoice({ channelId, spaceId, muted, deafened }: ResumableCall) {
-      const socket = socketRef.current;
-      if (!socket) return false;
-      const viewing = stateRef.current.snapshot;
-      if (viewing?.space.id === spaceId) return joinVoice(channelId, { from: viewing, muted, deafened });
-
-      // A chamada é de outro espaço que o aberto: pega o retrato dele só para entrar e depois devolve o espaço que estava aberto
-      // (abrir um espaço no servidor troca as salas que o socket escuta).
-      const res = await socket.emitWithAck('space:join', spaceId);
-      if (!res.ok) return false;
-      const joined = await joinVoice(channelId, { from: res.data, muted, deafened });
-      const active = stateRef.current.activeSpaceId;
-      if (active) await socket.emitWithAck('space:join', active);
+    async rejoinVoice({ channelId, spaceId, muted, deafened, streaming }) {
+      const joined = await enterCall(channelId, spaceId, muted, deafened);
+      // A tela não volta sozinha (o navegador exige um clique para escolher o que compartilhar): fica um botão para retomar.
+      if (joined && streaming) dispatch({ type: 'voice:self', patch: { resumeScreen: true } });
       return joined;
     },
 
@@ -139,6 +147,7 @@ export function createVoiceActions(ctx: ActionContext) {
         return res.error;
       }
       dispatch({ type: 'screen:mine', stream });
+      dispatch({ type: 'voice:self', patch: { resumeScreen: false } });
       if (audioFailed) {
         dispatch({ type: 'voice:self', patch: { error: 'O sistema não liberou o som: a tela está indo sem áudio.' } });
       }
@@ -262,6 +271,10 @@ export function createVoiceActions(ctx: ActionContext) {
       voiceRef.current?.setMuted(muted);
       dispatch({ type: 'voice:self', patch: { muted, deafened } });
       emitVoiceState(muted, deafened);
+    },
+
+    dismissResumeScreen() {
+      dispatch({ type: 'voice:self', patch: { resumeScreen: false } });
     },
 
     dismissVoiceError() {

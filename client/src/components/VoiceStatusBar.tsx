@@ -3,6 +3,7 @@ import { useState, type ReactNode } from 'react';
 import { useRealtime } from '../state/realtime';
 import { MusicDialog, skipText, useMusic } from './MusicDialog';
 import { SoundboardDialog } from './SoundboardDialog';
+import { loadScreenOptions } from './ScreenQualityFields';
 import { ScreenShareDialog } from './ScreenShareDialog';
 import { LiveBadge } from './StreamStage';
 
@@ -12,6 +13,7 @@ export function VoiceStatusBar() {
   const [choosingScreen, setChoosingScreen] = useState(false);
   const [musicOpen, setMusicOpen] = useState(false);
   const [soundsOpen, setSoundsOpen] = useState(false);
+  const [resumeError, setResumeError] = useState<string | null>(null);
   const music = useMusic();
   const voice = state.myVoice;
   const me = state.me?.id;
@@ -43,6 +45,30 @@ export function VoiceStatusBar() {
             </p>
           )}
         </div>
+
+        {/* A conexão caiu com você transmitindo: a chamada voltou sozinha, mas escolher a tela de novo precisa de um clique. */}
+        {voice.channelId && voice.resumeScreen && voice.canStream && !voice.streaming && (
+          <div className="mt-2 rounded-lg bg-rail/60 p-2">
+            <p className="text-xs text-muted">Sua transmissão caiu junto com a conexão.</p>
+            {resumeError && (
+              <p role="alert" className="mt-1 text-xs text-dnd">
+                {resumeError}
+              </p>
+            )}
+            <div className="mt-2 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={async () => setResumeError((await actions.startScreenShare(loadScreenOptions())) || null)}
+                className="flex-1 rounded-md bg-accent px-2 py-1.5 text-xs font-semibold text-white hover:bg-accent-strong"
+              >
+                Retomar transmissão
+              </button>
+              <button type="button" onClick={actions.dismissResumeScreen} className="rounded-md px-2 py-1.5 text-xs text-muted hover:text-fg">
+                Agora não
+              </button>
+            </div>
+          </div>
+        )}
 
         {voice.channelId &&
           (voice.streaming ? (

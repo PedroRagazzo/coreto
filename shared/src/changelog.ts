@@ -22,6 +22,16 @@ export interface ChangelogEntry {
 /** Da mais nova para a mais antiga. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-17-2',
+    title: 'Retomar a transmissão',
+    items: [
+      {
+        title: 'Um clique para voltar ao ar',
+        text: 'Se a conexão cair enquanto você transmite a tela, a chamada volta sozinha e aparece o botão Retomar transmissão, que usa as mesmas escolhas de qualidade de antes.',
+      },
+    ],
+  },
+  {
     id: '2026-11-17',
     title: 'A chamada volta sozinha',
     items: [
