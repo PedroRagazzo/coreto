@@ -22,6 +22,16 @@ export interface ChangelogEntry {
 /** Da mais nova para a mais antiga. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-17',
+    title: 'A chamada volta sozinha',
+    items: [
+      {
+        title: 'Atualizações não derrubam mais a chamada',
+        text: 'Se a conexão cair no meio de uma chamada (numa atualização do Coreto, por exemplo), você volta sozinho para a sala assim que ela voltar, com o microfone e o som como estavam. Só a transmissão de tela precisa ser retomada à mão.',
+      },
+    ],
+  },
+  {
     id: '2026-11-16-3',
     title: 'Novo endereço do Coreto',
     items: [

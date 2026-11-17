@@ -1,11 +1,11 @@
 // Chamada de voz: entrar e sair, mutar, transmissões de tela, câmera, música e quadro de som.
 
 import { hasPermission, Permission } from '@shared/permissions';
-import type { Id } from '@shared/models';
+import type { Id, SpaceSnapshot } from '@shared/models';
 import { checkSoundFile, fetchSound, uploadSound } from '../../../lib/soundboard';
 import { describeCameraError, describeMediaError, describeScreenError } from '../../../lib/voice';
 import { ask, type ActionContext } from '../context';
-import { IDLE_VOICE } from '../state';
+import { IDLE_VOICE, type ResumableCall } from '../state';
 import type { RealtimeActions } from '../types';
 
 export function createVoiceActions(ctx: ActionContext) {
@@ -14,8 +14,12 @@ export function createVoiceActions(ctx: ActionContext) {
   const emitVoiceState = (muted: boolean, deafened: boolean) => socketRef.current?.emit('voice:state', { muted, deafened });
 
   /** Entra num canal de voz do espaço aberto; resolve `true` se ficou conectado a ele. */
-  const joinVoice = async (channelId: Id): Promise<boolean> => {
-    const { myVoice, snapshot, me } = stateRef.current;
+  const joinVoice = async (
+    channelId: Id,
+    { from, muted = false, deafened = false }: { from?: SpaceSnapshot; muted?: boolean; deafened?: boolean } = {},
+  ): Promise<boolean> => {
+    const { myVoice, me } = stateRef.current;
+    const snapshot = from ?? stateRef.current.snapshot;
     const voice = voiceRef.current;
     if (myVoice.channelId === channelId) return true;
     if (!voice || !snapshot || !me || myVoice.connecting) return false;
@@ -23,27 +27,30 @@ export function createVoiceActions(ctx: ActionContext) {
     const permissions = snapshot.permissions[channelId] ?? 0;
     if (channel?.kind !== 'voice' || !hasPermission(permissions, Permission.CONNECT)) return false;
     const canSpeak = hasPermission(permissions, Permission.SPEAK);
+    // Ao retomar uma chamada, o microfone já abre fechado se a pessoa estava mutada (ou ensurdecida).
+    const startMuted = !canSpeak || muted || deafened;
 
     // Trocar de sala encerra a anterior (e a transmissão dela).
     if (myVoice.channelId) dispatch({ type: 'voice:self', patch: IDLE_VOICE });
     dispatch({ type: 'voice:self', patch: { connecting: true, error: null } });
     try {
-      await voice.join(channelId, !canSpeak, me.id);
+      await voice.join(channelId, startMuted, me.id);
       dispatch({
         type: 'voice:self',
         patch: {
           channelId,
+          spaceId: snapshot.space.id,
           channelName: channel.name,
           spaceName: snapshot.space.name,
           connecting: false,
-          muted: !canSpeak,
-          deafened: false,
+          muted: startMuted,
+          deafened,
           canSpeak,
           canStream: hasPermission(permissions, Permission.STREAM),
         },
       });
-      voice.setDeafened(false);
-      if (!canSpeak) emitVoiceState(true, false);
+      voice.setDeafened(deafened);
+      if (startMuted) emitVoiceState(true, deafened);
       return true;
     } catch (err) {
       dispatch({ type: 'voice:self', patch: { ...IDLE_VOICE, error: describeMediaError(err) } });
@@ -80,6 +87,22 @@ export function createVoiceActions(ctx: ActionContext) {
   return {
     joinVoice(channelId) {
       void joinVoice(channelId);
+    },
+
+    async rejoinVoice({ channelId, spaceId, muted, deafened }: ResumableCall) {
+      const socket = socketRef.current;
+      if (!socket) return false;
+      const viewing = stateRef.current.snapshot;
+      if (viewing?.space.id === spaceId) return joinVoice(channelId, { from: viewing, muted, deafened });
+
+      // A chamada é de outro espaço que o aberto: pega o retrato dele só para entrar e depois devolve o espaço que estava aberto
+      // (abrir um espaço no servidor troca as salas que o socket escuta).
+      const res = await socket.emitWithAck('space:join', spaceId);
+      if (!res.ok) return false;
+      const joined = await joinVoice(channelId, { from: res.data, muted, deafened });
+      const active = stateRef.current.activeSpaceId;
+      if (active) await socket.emitWithAck('space:join', active);
+      return joined;
     },
 
     leaveVoice() {

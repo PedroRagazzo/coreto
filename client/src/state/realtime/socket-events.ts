@@ -13,10 +13,12 @@ import type { NotificationPrefs } from '../../lib/settings';
 import { VoiceManager } from '../../lib/voice';
 import { displayNameOf } from '../selectors';
 import type { ActionContext } from './context';
-import { IDLE_VOICE } from './state';
+import { IDLE_VOICE, type ResumableCall } from './state';
 import type { RealtimeActions } from './types';
 
 const TYPING_TTL_MS = 6_000;
+/** Depois de quanto tempo sem conexão a chamada não volta mais sozinha. */
+const RESUME_CALL_MS = 120_000;
 
 export interface SocketOptions {
   token: string;
@@ -80,6 +82,8 @@ export function connectSocket({ token, ctx, actions, notificationPrefsRef, first
   socketRef.current = socket;
   voiceRef.current = voice;
   firstSessionRef.current = true;
+  /** A chamada que caiu junto com a conexão, para voltar a ela quando a conexão voltar. */
+  let resumable: (ResumableCall & { droppedAt: number }) | null = null;
 
   socket.on('unread:bump', ({ channelId, spaceId }) => dispatch({ type: 'unread:bump', channelId, spaceId }));
   socket.on('session:ready', ({ user, spaces, directs, directUsers, mentions, unread, superAdmin }) => {
@@ -88,6 +92,14 @@ export function connectSocket({ token, ctx, actions, notificationPrefsRef, first
     const target = firstSessionRef.current ? (spaces[0]?.id ?? null) : stateRef.current.activeSpaceId;
     firstSessionRef.current = false;
     actions.selectSpace(target);
+
+    // Reconectou depois de cair no meio de uma chamada (por exemplo, o servidor reiniciou numa atualização): volta para ela.
+    const call = resumable;
+    resumable = null;
+    const { myVoice } = stateRef.current;
+    if (call && Date.now() - call.droppedAt <= RESUME_CALL_MS && !myVoice.channelId && !myVoice.connecting) {
+      void actions.rejoinVoice(call);
+    }
   });
   socket.on('account:deleted', ({ userId }) => dispatch({ type: 'account:deleted', userId }));
   socket.on('space:created', (space) => dispatch({ type: 'space:created', space }));
@@ -147,7 +159,15 @@ export function connectSocket({ token, ctx, actions, notificationPrefsRef, first
     voice.teardown();
     dispatch({ type: 'voice:self', patch: { ...IDLE_VOICE, error: reason } });
   });
-  socket.on('disconnect', () => {
+  socket.on('disconnect', (reason) => {
+    // Queda de conexão (servidor reiniciando, rede): guarda a chamada para voltar a ela. Sair do app ou ser desconectado pelo
+    // servidor de propósito (conta excluída, sessão inválida) não retoma nada.
+    const { myVoice } = stateRef.current;
+    const dropped = reason !== 'io client disconnect' && reason !== 'io server disconnect';
+    resumable =
+      dropped && myVoice.channelId && myVoice.spaceId
+        ? { channelId: myVoice.channelId, spaceId: myVoice.spaceId, muted: myVoice.muted, deafened: myVoice.deafened, droppedAt: Date.now() }
+        : null;
     // O servidor encerra a sessão de voz quando o socket cai.
     voice.teardown();
     dispatch({ type: 'voice:self', patch: IDLE_VOICE });

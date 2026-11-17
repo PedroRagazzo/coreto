@@ -18,6 +18,8 @@ import type { MusicState } from '@shared/protocol';
 
 export interface MyVoiceState {
   channelId: Id | null;
+  /** O espaço do canal (pode não ser o que está aberto). */
+  spaceId: Id | null;
   channelName: string | null;
   spaceName: string | null;
   connecting: boolean;
@@ -31,6 +33,14 @@ export interface MyVoiceState {
   /** Sua câmera está ligada. */
   video: boolean;
   error: string | null;
+}
+
+/** Uma chamada que caiu junto com a conexão (o servidor reiniciou, a rede oscilou) e que dá para retomar quando ela voltar. */
+export interface ResumableCall {
+  channelId: Id;
+  spaceId: Id;
+  muted: boolean;
+  deafened: boolean;
 }
 
 export interface RealtimeState {
@@ -101,6 +111,7 @@ export interface RealtimeState {
 
 export const IDLE_VOICE: MyVoiceState = {
   channelId: null,
+  spaceId: null,
   channelName: null,
   spaceName: null,
   connecting: false,

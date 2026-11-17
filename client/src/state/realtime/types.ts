@@ -35,7 +35,7 @@ import type {
 } from '@shared/protocol';
 import type { UploadHandle } from '../../lib/uploads';
 import type { ScreenShareOptions, StreamStats } from '../../lib/voice';
-import type { MyVoiceState, RealtimeState } from './state';
+import type { MyVoiceState, RealtimeState, ResumableCall } from './state';
 
 /** O que o reducer entende. Cada tipo é tratado por uma função em `reducer/`. */
 export type Action =
@@ -175,6 +175,8 @@ export interface RealtimeActions {
   deleteMessage(messageId: Id): Promise<string | null>;
   notifyTyping(targetId: Id): void;
   joinVoice(channelId: Id): void;
+  /** Volta para a chamada que caiu com a conexão, como estava (mudo/ensurdecido). Resolve `true` se voltou. */
+  rejoinVoice(call: ResumableCall): Promise<boolean>;
   /** Abre o seletor de tela e começa a transmitir. Resolve com erro ou `null` (também se a pessoa cancelar). */
   startScreenShare(options: ScreenShareOptions): Promise<string | null>;
   stopScreenShare(): void;

@@ -96,4 +96,30 @@ test.describe('chamada de voz', () => {
     await expect.poll(columns).toBe(2);
     await Promise.all([ana, bruno].map((p) => p.context.close()));
   });
+
+  test('quando a conexão cai no meio da chamada (como numa atualização), a pessoa volta sozinha para a sala, ainda mutada', async ({ browser }) => {
+    const ana = await openPerson(browser, 'Ana');
+    const bruno = await openPerson(browser, 'Bruno');
+    // Guarda as conexões em tempo real da Ana para derrubar a atual, como faz um reinício do servidor.
+    const sockets: { close(): void }[] = [];
+    await ana.page.routeWebSocket(/socket\.io/, (ws) => {
+      ws.connectToServer();
+      sockets.push(ws);
+    });
+    await ana.page.reload();
+    await joinCall(ana.page);
+    await joinCall(bruno.page);
+    await ana.page.getByRole('button', { name: 'Desativar microfone' }).click();
+    await expect(ana.page.getByRole('button', { name: 'Ativar microfone' })).toBeVisible();
+
+    sockets.at(-1)?.close();
+
+    // Os outros veem a Ana sair e, em seguida, voltar; ela fica de novo na chamada, ainda com o microfone fechado.
+    const room = bruno.page.getByRole('list', { name: 'Na sala Sala de estar' });
+    await expect(room).toContainText(ana.name);
+    await expect(ana.page.getByText('Voz conectada')).toBeVisible({ timeout: 20_000 });
+    await expect(ana.page.getByRole('button', { name: 'Ativar microfone' })).toBeVisible();
+    await expect(room).toContainText(ana.name);
+    await Promise.all([ana, bruno].map((p) => p.context.close()));
+  });
 });
