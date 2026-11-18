@@ -17,6 +17,7 @@ import {
   X,
 } from 'lucide-react';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { MAX_STREAM_VOLUME, useBoostedAudio } from '../lib/useBoostedAudio';
 import { useElementSize } from '../lib/useElementSize';
 import type { StreamStats } from '../lib/voice';
 import { useRealtime } from '../state/realtime';
@@ -221,10 +222,6 @@ function StreamTile({
   }, [stream, live]);
 
   useEffect(() => {
-    if (videoRef.current) videoRef.current.volume = volume;
-  }, [volume]);
-
-  useEffect(() => {
     const onChange = () => setFullscreen(document.fullscreenElement === boxRef.current);
     document.addEventListener('fullscreenchange', onChange);
     return () => document.removeEventListener('fullscreenchange', onChange);
@@ -244,6 +241,8 @@ function StreamTile({
   const viewerNames = viewers.map((v) => displayNameOf(state.snapshot, state.users, v.userId)).join(', ');
   // A prévia nunca toca som (eco); quem está com o som desativado não ouve a tela.
   const silent = isMe || state.myVoice.deafened || muted;
+  // O vídeo fica sempre mudo; o som vai pelo Web Audio para poder passar de 100%.
+  useBoostedAudio(stream, !isMe && live, volume, silent, hasAudio);
   const soundButton = !isMe && hasAudio && (
     <button
       type="button"
@@ -322,7 +321,7 @@ function StreamTile({
           ref={videoRef}
           autoPlay
           playsInline
-          muted={silent}
+          muted
           aria-label={name}
           onResize={(e) => setSize({ width: e.currentTarget.videoWidth, height: e.currentTarget.videoHeight })}
           className={`h-full w-full object-contain ${live && stream ? '' : 'hidden'}`}
@@ -403,12 +402,16 @@ function StreamTile({
                   <input
                     type="range"
                     min={0}
-                    max={1}
+                    max={MAX_STREAM_VOLUME}
                     step={0.05}
                     value={volume}
                     onChange={(e) => setVolume(Number(e.target.value))}
+                    aria-valuetext={`${Math.round(volume * 100)}%`}
                     className="w-28 accent-accent"
                   />
+                  <span className="w-10 text-xs tabular-nums" aria-hidden>
+                    {Math.round(volume * 100)}%
+                  </span>
                 </label>
               )}
               {variant === 'cell' && (
