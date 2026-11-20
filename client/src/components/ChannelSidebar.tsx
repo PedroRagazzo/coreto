@@ -5,6 +5,7 @@ import { useState, type ReactNode } from 'react';
 import { useRealtime } from '../state/realtime';
 import { can, displayNameOf, groupChannels } from '../state/selectors';
 import { Avatar } from './Avatar';
+import { useMobileNav } from './layout/mobile-nav';
 import { LiveBadge } from './StreamStage';
 import { CreateChannelDialog } from './CreateChannelDialog';
 import { ConnectionIndicator } from './ConnectionIndicator';
@@ -156,6 +157,7 @@ interface ChannelItemProps {
 
 function TextChannelItem({ channel, active, onEdit }: ChannelItemProps & { active: boolean }) {
   const { state, actions } = useRealtime();
+  const { showContent } = useMobileNav();
   const mentions = state.mentions[channel.id]?.count ?? 0;
   const unread = state.unread[channel.id]?.count ?? 0;
   const label = [
@@ -171,7 +173,10 @@ function TextChannelItem({ channel, active, onEdit }: ChannelItemProps & { activ
           type="button"
           aria-current={active ? 'page' : undefined}
           aria-label={label ? `${channel.name} (${label})` : undefined}
-          onClick={() => actions.selectChannel(channel.id)}
+          onClick={() => {
+            actions.selectChannel(channel.id);
+            showContent();
+          }}
           className={`flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-[15px] ${onEdit ? 'pr-7' : ''} ${
             active
               ? 'bg-hover text-fg'
@@ -195,6 +200,7 @@ function VoiceChannelItem({ channel, onEdit }: ChannelItemProps) {
   const canConnect = can(state.snapshot, channel.id, Permission.CONNECT);
   const isMine = state.myVoice.channelId === channel.id;
   const volumeMenu = useUserVolumeMenu();
+  const { showContent } = useMobileNav();
 
   return (
     <li>
@@ -202,7 +208,10 @@ function VoiceChannelItem({ channel, onEdit }: ChannelItemProps) {
         <button
           type="button"
           disabled={!canConnect}
-          onClick={() => actions.openCall(channel.id)}
+          onClick={() => {
+            actions.openCall(channel.id);
+            showContent();
+          }}
           title={
             !canConnect
               ? 'Você não pode entrar neste canal'
@@ -306,13 +315,17 @@ function LiveRow({
   children: ReactNode;
 }) {
   const { actions } = useRealtime();
+  const { showContent } = useMobileNav();
   const [anchor, setAnchor] = useState<DOMRect | null>(null);
   const show = (element: HTMLElement) => setAnchor(element.getBoundingClientRect());
   return (
     <>
       <button
         type="button"
-        onClick={() => actions.watchStream(userId)}
+        onClick={() => {
+          actions.watchStream(userId);
+          showContent();
+        }}
         onMouseEnter={(e) => show(e.currentTarget)}
         onMouseLeave={() => setAnchor(null)}
         onFocus={(e) => show(e.currentTarget)}

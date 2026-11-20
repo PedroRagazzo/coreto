@@ -5,6 +5,7 @@ import { useRef } from 'react';
 import { useElementSize } from '../lib/useElementSize';
 import { useRealtime } from '../state/realtime';
 import { displayNameOf } from '../state/selectors';
+import { BackToNav } from './layout/mobile-nav';
 import { ParticipantTile } from './ParticipantTile';
 import { LiveBadge } from './StreamStage';
 
@@ -34,6 +35,7 @@ export function CallView() {
   return (
     <>
       <header className="flex h-12 shrink-0 items-center gap-2 border-b border-line px-4 shadow-sm">
+        <BackToNav />
         <Volume2 size={20} className="shrink-0 text-faint" />
         <h2 className="truncate font-semibold">{voice.channelName ?? 'Chamada'}</h2>
         <span className="text-sm text-muted">{room.length === 1 ? '1 pessoa' : `${room.length} pessoas`}</span>

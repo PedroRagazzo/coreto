@@ -3,6 +3,7 @@ import { AtSign, MessageCircle, Pin } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useRealtime, type RealtimeState } from '../state/realtime';
 import { Avatar, STATUS_LABEL } from './Avatar';
+import { BackToNav, useMobileNav } from './layout/mobile-nav';
 import { MessageInput } from './MessageInput';
 import { MessageList } from './MessageList';
 import { PinsPanel } from './PinsPanel';
@@ -32,6 +33,7 @@ function UnreadBadge({ count }: { count: number }) {
 
 export function DirectMessagesSidebar() {
   const { state, actions } = useRealtime();
+  const { showContent } = useMobileNav();
   const conversations = sortedDirects(state);
 
   return (
@@ -56,7 +58,10 @@ export function DirectMessagesSidebar() {
                   <button
                     type="button"
                     aria-current={active ? 'page' : undefined}
-                    onClick={() => actions.selectDirect(conversation.id)}
+                    onClick={() => {
+                      actions.selectDirect(conversation.id);
+                      showContent();
+                    }}
                     className={`flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left ${
                       active ? 'bg-hover text-fg' : 'text-muted hover:bg-hover/60 hover:text-fg'
                     }`}
@@ -90,19 +95,25 @@ export function DirectMessagesPanel() {
 
   if (!conversation || !partner) {
     return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
-        <MessageCircle size={48} className="text-faint" />
-        <h2 className="text-lg font-semibold">Mensagens diretas</h2>
-        <p className="max-w-sm text-muted">
-          Escolha uma conversa à esquerda ou clique em alguém na lista de membros de um espaço para começar.
-        </p>
-      </div>
+      <>
+        <header className="flex h-12 shrink-0 items-center border-b border-line px-4 md:hidden">
+          <BackToNav />
+        </header>
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
+          <MessageCircle size={48} className="text-faint" />
+          <h2 className="text-lg font-semibold">Mensagens diretas</h2>
+          <p className="max-w-sm text-muted">
+            Escolha uma conversa à esquerda ou clique em alguém na lista de membros de um espaço para começar.
+          </p>
+        </div>
+      </>
     );
   }
 
   return (
     <>
       <header className="flex h-12 shrink-0 items-center gap-2 border-b border-line px-4 shadow-sm">
+        <BackToNav />
         <AtSign size={20} className="shrink-0 text-faint" />
         <h2 className="truncate font-semibold">{partner.displayName}</h2>
         <span className="shrink-0 text-sm text-muted">· {STATUS_LABEL[partner.status]}</span>

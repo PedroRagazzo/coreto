@@ -19,6 +19,7 @@ import {
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { MAX_STREAM_VOLUME, useBoostedAudio } from '../lib/useBoostedAudio';
 import { useElementSize } from '../lib/useElementSize';
+import { BackToNav } from './layout/mobile-nav';
 import type { StreamStats } from '../lib/voice';
 import { useRealtime } from '../state/realtime';
 import { displayNameOf } from '../state/selectors';
@@ -101,6 +102,7 @@ export function StreamStage() {
     <>
       {many && (
         <header className="flex h-12 shrink-0 items-center gap-2 border-b border-line px-4 shadow-sm">
+          <BackToNav />
           <Monitor size={20} className="shrink-0 text-faint" />
           <h2 className="truncate font-semibold">Transmissões abertas ({count})</h2>
           <div className="ml-auto flex rounded-md bg-rail p-0.5" role="group" aria-label="Disposição das transmissões">
@@ -263,6 +265,7 @@ function StreamTile({
     >
       {!small && (
         <header className={`flex shrink-0 items-center gap-2 border-b border-line px-4 shadow-sm ${variant === 'main' && !many ? 'h-12' : 'h-10'}`}>
+          {variant === 'main' && !many && <BackToNav />}
           <Monitor size={variant === 'main' ? 20 : 18} className="shrink-0 text-faint" />
           <h2 className="truncate font-semibold">{name}</h2>
           {live && <LiveBadge />}
