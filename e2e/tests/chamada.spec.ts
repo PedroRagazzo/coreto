@@ -171,6 +171,27 @@ test.describe('chamada de voz', () => {
     await ana.context.close();
   });
 
+  test('o app de desktop pode retomar a transmissão sozinho: o evento de retomada volta ao ar sem clicar no botão', async ({ browser }) => {
+    const ana = await openPerson(browser, 'Ana', { screen: { color: '#7a2d9e', width: 1280, height: 720 } });
+    const sockets: { close(): void }[] = [];
+    await ana.page.routeWebSocket(/socket\.io/, (ws) => {
+      ws.connectToServer();
+      sockets.push(ws);
+    });
+    await ana.page.reload();
+    await joinCall(ana.page);
+    await startScreen(ana.page);
+
+    sockets.at(-1)?.close();
+    await expect(ana.page.getByText('Sua transmissão caiu junto com a conexão.')).toBeVisible({ timeout: 20_000 });
+
+    // É o que o app de desktop dispara depois de reaproveitar a tela ou janela de antes.
+    await ana.page.evaluate(() => window.dispatchEvent(new Event('coreto:resume-screen')));
+    await expect(ana.page.getByRole('region', { name: 'Sua tela' })).toBeVisible();
+    await expect(ana.page.getByText('Sua transmissão caiu junto com a conexão.')).toHaveCount(0);
+    await ana.context.close();
+  });
+
   test('quem transmitia vê o botão para retomar a transmissão depois da queda, e um clique volta ao ar', async ({ browser }) => {
     const ana = await openPerson(browser, 'Ana', { screen: { color: '#7a2d9e', width: 1280, height: 720 } });
     const sockets: { close(): void }[] = [];

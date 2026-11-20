@@ -1,5 +1,5 @@
 import { AudioLines, Eye, Headphones, HeadphoneOff, Mic, MicOff, MonitorUp, MonitorX, Music2, Pause, PhoneOff, Play, Replace, SkipForward, Video, VideoOff, X } from 'lucide-react';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useRealtime } from '../state/realtime';
 import { MusicDialog, skipText, useMusic } from './MusicDialog';
 import { SoundboardDialog } from './SoundboardDialog';
@@ -17,6 +17,20 @@ export function VoiceStatusBar() {
   const music = useMusic();
   const voice = state.myVoice;
   const me = state.me?.id;
+  // No app de desktop, depois de uma queda o app pede (com o "gesto" que o navegador exige) para a transmissão voltar sozinha, com
+  // a mesma tela ou janela e as mesmas escolhas de qualidade. Se não der, o aviso com o botão "Retomar transmissão" fica.
+  const resumable = useRef({ ready: false, start: () => Promise.resolve<string | null>(null) });
+  resumable.current = {
+    ready: Boolean(voice.channelId && voice.resumeScreen && voice.canStream && !voice.streaming),
+    start: () => actions.startScreenShare(loadScreenOptions()),
+  };
+  useEffect(() => {
+    const onResume = () => {
+      if (resumable.current.ready) void resumable.current.start().then((error) => setResumeError(error || null));
+    };
+    window.addEventListener('coreto:resume-screen', onResume);
+    return () => window.removeEventListener('coreto:resume-screen', onResume);
+  }, []);
   const viewers = voice.channelId ? (state.voice[voice.channelId] ?? []).filter((p) => me !== undefined && p.watching.includes(me)).length : 0;
 
   // Um aviso (microfone negado, falha ao compartilhar...) aparece acima da chamada, sem escondê-la.

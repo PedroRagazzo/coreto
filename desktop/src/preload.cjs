@@ -37,6 +37,8 @@ contextBridge.exposeInMainWorld('coretoDesktop', {
   // Há o leitor de teclado nativo (atalhos que valem com um jogo em primeiro plano).
   keyWatcher: Boolean(info.keyWatcher),
   getCaptureName: () => ipcRenderer.invoke('desktop:capture-name'),
+  // Pede ao app para retomar a transmissão com a tela ou janela de antes (sem abrir o seletor).
+  resumeCapture: () => ipcRenderer.invoke('desktop:resume-capture'),
   getUpdateState: () => ipcRenderer.invoke('desktop:update-state'),
   checkForUpdates: () => ipcRenderer.invoke('desktop:check-updates'),
   installUpdate: () => ipcRenderer.send('desktop:install-update'),

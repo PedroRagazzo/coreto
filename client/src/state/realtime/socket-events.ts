@@ -8,6 +8,7 @@ import { INVALID_SESSION } from '@shared/protocol';
 import type { MutableRefObject } from 'react';
 import { alreadyReloadedFor, hasUnsentText, liveBundle, markReloadedFor, runningBundle } from '../../lib/appVersion';
 import { forgetCall, recallCall, rememberCall } from '../../lib/callMemory';
+import { desktop } from '../../lib/desktop';
 import { isWindowActive } from '../../lib/focus';
 import { showToast } from '../../lib/notifications';
 import { createSocket } from '../../lib/socket';
@@ -156,7 +157,13 @@ export function connectSocket({ token, ctx, actions, notificationPrefsRef, first
     void checkForUpdate();
     const { myVoice } = stateRef.current;
     if (call && Date.now() - call.droppedAt <= RESUME_CALL_MS && !myVoice.channelId && !myVoice.connecting) {
-      void actions.rejoinVoice(call);
+      void actions.rejoinVoice(call).then(async (joined) => {
+        // Quem transmitia no app de desktop volta ao ar sozinho, com a mesma tela ou janela de antes. (Um pouco de espera para o
+        // estado da chamada chegar à tela; no navegador isso não existe e fica o botão "Retomar transmissão".)
+        if (!joined || !call.streaming || !desktop?.resumeCapture) return;
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        await desktop.resumeCapture().catch(() => false);
+      });
     }
   });
   socket.on('account:deleted', ({ userId }) => dispatch({ type: 'account:deleted', userId }));

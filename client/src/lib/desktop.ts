@@ -47,6 +47,11 @@ export interface DesktopBridge {
   appAudio?: AppAudioBridge;
   /** Nome da tela ou janela escolhida no seletor, para mostrar o que está sendo compartilhado. Ausente antes da 0.5.1. */
   getCaptureName?(): Promise<string | null>;
+  /**
+   * Depois de uma queda, retoma a transmissão com a mesma tela ou janela, sem o seletor: o app reaproveita a última escolha e
+   * dispara o evento `coreto:resume-screen` no site. Resolve com `false` se não havia escolha a reaproveitar. Ausente antes da 0.7.6.
+   */
+  resumeCapture?(): Promise<boolean>;
   getUpdateState(): Promise<UpdateState>;
   checkForUpdates(): Promise<UpdateState>;
   /** Fecha o app, instala a versão baixada e abre de novo. */

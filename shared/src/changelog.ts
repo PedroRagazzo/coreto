@@ -22,6 +22,16 @@ export interface ChangelogEntry {
 /** Da mais nova para a mais antiga. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-20-3',
+    title: 'A transmissão volta sozinha',
+    items: [
+      {
+        title: 'No app de desktop',
+        text: 'Depois de uma atualização ou queda, quem transmite pelo app volta ao ar sozinho, com a mesma tela ou janela e a mesma qualidade. No navegador continua o botão Retomar transmissão.',
+      },
+    ],
+  },
+  {
     id: '2026-11-20-2',
     title: 'Som das transmissões bem mais alto',
     items: [

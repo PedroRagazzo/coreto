@@ -335,6 +335,20 @@ function registerBridge() {
   ipcMain.on('desktop:app-audio-stop', (event, id) => {
     if (fromCoreto(event) && typeof id === 'number') stopAppAudio(id);
   });
+  // Retomar a transmissão depois de uma queda (o servidor reiniciou, a página recarregou): reaproveita a tela ou janela de antes
+  // e pede ao site que comece a transmitir de novo. O pedido do site precisa de um "gesto do usuário" para o navegador
+  // liberar a captura, e aqui quem pede é o próprio app, então ele conta como gesto (`executeJavaScript(..., true)`).
+  ipcMain.handle('desktop:resume-capture', async (event) => {
+    if (!fromCoreto(event) || !lastChoice) return false;
+    resumeCaptureUntil = Date.now() + RESUME_CAPTURE_MS;
+    try {
+      await event.sender.executeJavaScript("window.dispatchEvent(new Event('coreto:resume-screen'))", true);
+      return true;
+    } catch {
+      resumeCaptureUntil = 0;
+      return false;
+    }
+  });
   ipcMain.handle('desktop:capture-name', (event) => (fromCoreto(event) && captureName ? captureName : null));
   ipcMain.on('desktop:focus-window', (event) => {
     if (fromCoreto(event)) showWindow();
@@ -441,6 +455,13 @@ function saveWindowState(win) {
 }
 
 // ── Seletor de tela (getDisplayMedia não tem seletor próprio no Electron) ─────
+
+/** Última escolha: se a captura com som falhar, o site pede de novo sem som e não precisa escolher outra vez. */
+/** @type {{ id: string; at: number; audio: boolean } | null} */
+let lastChoice = null;
+/** Até quando o próximo pedido de tela reaproveita a última escolha sem abrir o seletor (retomar a transmissão depois de uma queda). */
+let resumeCaptureUntil = 0;
+const RESUME_CAPTURE_MS = 15_000;
 
 /**
  * Mostra as telas e janelas para escolher, como o seletor do Discord.
@@ -674,9 +695,6 @@ function configureSession() {
   });
   ses.setPermissionCheckHandler((_webContents, permission, origin) => isOurs(origin) && ALLOWED_PERMISSIONS.has(permission));
 
-  /** Última escolha: se a captura com som falhar, o site pede de novo sem som e não precisa escolher outra vez. */
-  /** @type {{ id: string; at: number; audio: boolean } | null} */
-  let lastChoice = null;
   const REUSE_CHOICE_MS = 10_000;
 
   ses.setDisplayMediaRequestHandler(async (request, callback) => {
@@ -691,7 +709,10 @@ function configureSession() {
     if (!mainWindow || !isOurs(request.securityOrigin)) return deny();
     // Só depois de um pedido com som: trocar de janela no meio da transmissão (também sem som) tem de abrir o seletor.
     const reuse = lastChoice && lastChoice.audio && !request.audioRequested && Date.now() - lastChoice.at < REUSE_CHOICE_MS;
-    const id = reuse && lastChoice ? lastChoice.id : await pickSource(mainWindow);
+    // Retomar a transmissão depois de uma queda: a mesma tela ou janela de antes, sem o seletor (vale para um pedido só).
+    const resume = lastChoice !== null && Date.now() < resumeCaptureUntil;
+    resumeCaptureUntil = 0;
+    const id = resume && lastChoice ? lastChoice.id : reuse && lastChoice ? lastChoice.id : await pickSource(mainWindow);
     lastChoice = id ? { id, at: Date.now(), audio: Boolean(request.audioRequested) } : null;
     if (!id) return deny();
     const [source] = (await desktopCapturer.getSources({ types: ['screen', 'window'] })).filter((s) => s.id === id);
