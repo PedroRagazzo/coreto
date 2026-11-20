@@ -4,6 +4,7 @@
 //   3. painel central — chat do canal, com a lista de membros à direita
 
 import { useState } from 'react';
+import { MobileNavProvider, useMobileNav } from './mobile-nav';
 import { useRealtime } from '../../state/realtime';
 import { ChannelSidebar } from '../ChannelSidebar';
 import { ChatPanel } from '../ChatPanel';
@@ -19,27 +20,39 @@ import { VoiceStatusBar } from '../VoiceStatusBar';
 import { CallSounds, Shortcuts } from '../VoiceEffects';
 
 export function AppShell() {
+  return (
+    <MobileNavProvider>
+      <Shell />
+    </MobileNavProvider>
+  );
+}
+
+function Shell() {
   const { state } = useRealtime();
+  const { pane } = useMobileNav();
   const [showMembers, setShowMembers] = useState(true);
   const inDirectMessages = state.activeSpaceId === null;
 
   return (
-    <div className="app-backdrop flex h-dvh gap-3 overflow-hidden p-3 text-fg">
+    <div className="app-backdrop flex h-dvh overflow-hidden text-fg md:gap-3 md:p-3">
       <CallSounds />
       <Shortcuts />
       <WhatsNew />
-      {/* Coluna 1: espaços */}
-      <SpaceRail />
+      {/* No celular, ou a lista (espaços e canais) ou a conversa: `contents` deixa os filhos como colunas do `flex` de fora. */}
+      <div className={pane === 'nav' ? 'contents' : 'hidden md:contents'}>
+        {/* Coluna 1: espaços */}
+        <SpaceRail />
 
-      {/* Coluna 2: canais */}
-      <aside className="flex w-64 shrink-0 flex-col overflow-hidden rounded-3xl border border-line bg-sidebar/85">
-        {inDirectMessages ? <DirectMessagesSidebar /> : <ChannelSidebar />}
-        <VoiceStatusBar />
-        <UserPanel />
-      </aside>
+        {/* Coluna 2: canais */}
+        <aside className="flex min-w-0 flex-1 flex-col overflow-hidden border-line bg-sidebar/85 md:w-64 md:flex-none md:rounded-3xl md:border">
+          {inDirectMessages ? <DirectMessagesSidebar /> : <ChannelSidebar />}
+          <VoiceStatusBar />
+          <UserPanel />
+        </aside>
+      </div>
 
       {/* Coluna 3: conversa + membros */}
-      <main className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-3xl border border-line bg-panel/90">
+      <main className={`${pane === 'content' ? 'flex' : 'hidden md:flex'} min-w-0 flex-1 flex-col overflow-hidden border-line bg-panel/90 md:rounded-3xl md:border`}>
         <UpdateBanner />
         <ConnectionBanner />
         {state.stages.length > 0 ? (

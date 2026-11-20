@@ -3,6 +3,7 @@ import { Hash, Pin, Users } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useRealtime } from '../state/realtime';
 import { can } from '../state/selectors';
+import { BackToNav } from './layout/mobile-nav';
 import { MemberList } from './MemberList';
 import { MessageInput } from './MessageInput';
 import { MessageList } from './MessageList';
@@ -32,14 +33,15 @@ export function ChatPanel({ showMembers, onToggleMembers }: ChatPanelProps) {
   return (
     <>
       <header className="flex h-12 shrink-0 items-center gap-2 border-b border-line px-4 shadow-sm">
+        <BackToNav />
         {channel ? (
           <>
             <Hash size={22} className="shrink-0 text-faint" />
             <h2 className="shrink-0 font-semibold">{channel.name}</h2>
             {channel.topic && (
               <>
-                <span aria-hidden className="mx-2 h-6 w-px shrink-0 bg-line" />
-                <p className="truncate text-sm text-muted">{channel.topic}</p>
+                <span aria-hidden className="mx-2 hidden h-6 w-px shrink-0 bg-line md:block" />
+                <p className="hidden truncate text-sm text-muted md:block">{channel.topic}</p>
               </>
             )}
           </>

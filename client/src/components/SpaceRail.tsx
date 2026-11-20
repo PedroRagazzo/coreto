@@ -16,7 +16,7 @@ export function SpaceRail() {
   }
 
   return (
-    <nav aria-label="Espaços" className="flex w-[72px] shrink-0 flex-col items-center gap-2 overflow-y-auto rounded-3xl border border-line bg-rail/70 py-3">
+    <nav aria-label="Espaços" className="flex w-[72px] shrink-0 flex-col items-center gap-2 overflow-y-auto border-line bg-rail/70 py-3 md:rounded-3xl md:border">
       <RailButton
         label={unreadDirects ? `Mensagens diretas (${unreadDirects} não lidas)` : 'Mensagens diretas'}
         active={state.activeSpaceId === null}
