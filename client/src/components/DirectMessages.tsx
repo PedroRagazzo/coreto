@@ -7,7 +7,7 @@ import { BackToNav, useMobileNav } from './layout/mobile-nav';
 import { MessageInput } from './MessageInput';
 import { MessageList } from './MessageList';
 import { PinsPanel } from './PinsPanel';
-import { SearchBox, SearchPanel } from './Search';
+import { SearchBox, SearchButton, SearchPanel } from './Search';
 import { TypingIndicator } from './TypingIndicator';
 
 function partnerOf(state: RealtimeState, conversation: DirectConversation): User | undefined {
@@ -117,6 +117,7 @@ export function DirectMessagesPanel() {
         <AtSign size={20} className="shrink-0 text-faint" />
         <h2 className="truncate font-semibold">{partner.displayName}</h2>
         <span className="shrink-0 text-sm text-muted">· {STATUS_LABEL[partner.status]}</span>
+        <SearchButton onClick={() => { setShowPins(false); setSearchQuery(''); }} />
         <SearchBox
           key={conversation.id}
           placeholder={`Buscar com ${partner.displayName}`}
@@ -140,7 +141,7 @@ export function DirectMessagesPanel() {
         </button>
       </header>
       <div className="flex min-h-0 flex-1">
-        <section aria-label={`Conversa com ${partner.displayName}`} className="flex min-w-0 flex-1 flex-col">
+        <section aria-label={`Conversa com ${partner.displayName}`} className={`${searchQuery !== null || showPins ? 'hidden lg:flex' : 'flex'} min-w-0 flex-1 flex-col`}>
           <MessageList
             conversationId={conversation.id}
             messages={state.messages[conversation.id] ?? []}

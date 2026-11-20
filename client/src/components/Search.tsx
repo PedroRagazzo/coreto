@@ -35,6 +35,15 @@ export function SearchBox({ placeholder, onSearch }: { placeholder: string; onSe
   );
 }
 
+/** No celular a caixa do cabeçalho não cabe: um ícone abre a busca com o campo vazio. */
+export function SearchButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} aria-label="Buscar mensagens" title="Buscar mensagens" className="ml-auto rounded p-1.5 text-faint hover:text-fg md:hidden">
+      <SearchIcon size={20} />
+    </button>
+  );
+}
+
 interface SearchPanelProps {
   scope: SearchScope;
   /** Texto vindo da caixa do cabeçalho; mudar refaz a busca. */
@@ -121,7 +130,7 @@ export function SearchPanel({ scope, query, onClose }: SearchPanelProps) {
   const channelName = (id: Id) => state.snapshot?.channels.find((c) => c.id === id)?.name;
 
   return (
-    <aside aria-label="Busca" className="hidden w-[380px] shrink-0 flex-col border-l border-line bg-sidebar lg:flex">
+    <aside aria-label="Busca" className="flex min-w-0 flex-1 flex-col border-line bg-sidebar lg:w-[380px] lg:flex-none lg:shrink-0 lg:border-l">
       <div className="space-y-2 border-b border-line p-3">
         <div className="flex items-center gap-2">
           <form onSubmit={submit} className="relative flex-1" role="search">

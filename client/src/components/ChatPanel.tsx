@@ -8,7 +8,7 @@ import { MemberList } from './MemberList';
 import { MessageInput } from './MessageInput';
 import { MessageList } from './MessageList';
 import { PinsPanel } from './PinsPanel';
-import { SearchBox, SearchPanel } from './Search';
+import { SearchBox, SearchButton, SearchPanel } from './Search';
 import { TypingIndicator } from './TypingIndicator';
 
 interface ChatPanelProps {
@@ -25,6 +25,8 @@ export function ChatPanel({ showMembers, onToggleMembers }: ChatPanelProps) {
   const [searchQuery, setSearchQuery] = useState<string | null>(null);
   const [showPins, setShowPins] = useState(false);
   const spaceId = snapshot?.space.id;
+  // Aberto um painel ao lado (busca, fixadas ou membros), no celular ele ocupa a tela e a conversa some.
+  const panelOpen = searchQuery !== null || (showPins && !!channel) || (showMembers && !!snapshot);
   useEffect(() => {
     setSearchQuery(null);
     setShowPins(false);
@@ -48,6 +50,7 @@ export function ChatPanel({ showMembers, onToggleMembers }: ChatPanelProps) {
         ) : (
           <h2 className="font-semibold text-muted">Nenhum canal selecionado</h2>
         )}
+        {snapshot && <SearchButton onClick={() => { setShowPins(false); setSearchQuery(''); }} />}
         {snapshot && (
           <SearchBox
             key={snapshot.space.id}
@@ -82,14 +85,14 @@ export function ChatPanel({ showMembers, onToggleMembers }: ChatPanelProps) {
           }}
           aria-pressed={showMembers && searchQuery === null && !showPins}
           title={showMembers ? 'Ocultar membros' : 'Mostrar membros'}
-          className={`hidden rounded p-1.5 lg:block ${showMembers && searchQuery === null && !showPins ? 'text-fg' : 'text-faint hover:text-fg'}`}
+          className={`rounded p-1.5 ${showMembers && searchQuery === null && !showPins ? 'text-fg' : 'text-faint hover:text-fg'}`}
         >
           <Users size={20} />
         </button>
       </header>
 
       <div className="flex min-h-0 flex-1">
-        <section aria-label="Conversa" className="flex min-w-0 flex-1 flex-col">
+        <section aria-label="Conversa" className={`${panelOpen ? 'hidden lg:flex' : 'flex'} min-w-0 flex-1 flex-col`}>
           {channel ? (
             <>
               <MessageList
@@ -124,7 +127,7 @@ export function ChatPanel({ showMembers, onToggleMembers }: ChatPanelProps) {
         ) : showPins && channel ? (
           <PinsPanel channelId={channel.id} canPin={can(snapshot, channel.id, Permission.SEND_MESSAGES)} onClose={() => setShowPins(false)} />
         ) : (
-          showMembers && snapshot && <MemberList />
+          showMembers && snapshot && <MemberList onClose={onToggleMembers} />
         )}
       </div>
     </>

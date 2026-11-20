@@ -39,7 +39,7 @@ export function PinsPanel({ channelId, canPin, onClose }: PinsPanelProps) {
   }, [actions, channelId, version]);
 
   return (
-    <aside aria-label="Mensagens fixadas" className="hidden w-[340px] shrink-0 flex-col border-l border-line bg-sidebar lg:flex">
+    <aside aria-label="Mensagens fixadas" className="flex min-w-0 flex-1 flex-col border-line bg-sidebar lg:w-[340px] lg:flex-none lg:shrink-0 lg:border-l">
       <div className="flex items-center gap-2 border-b border-line p-3">
         <Pin size={16} className="shrink-0 text-muted" aria-hidden />
         <h3 className="flex-1 text-sm font-semibold">Mensagens fixadas</h3>

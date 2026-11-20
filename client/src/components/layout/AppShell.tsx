@@ -31,7 +31,8 @@ export function AppShell() {
 function Shell() {
   const { state } = useRealtime();
   const { pane, showContent } = useMobileNav();
-  const [showMembers, setShowMembers] = useState(true);
+  // A lista de membros fica ao lado da conversa só em tela larga; no celular começa fechada (abre em tela cheia).
+  const [showMembers, setShowMembers] = useState(() => typeof window.matchMedia !== 'function' || window.matchMedia('(min-width: 1024px)').matches);
   const inDirectMessages = state.activeSpaceId === null;
 
   // Abrir a visão da chamada, uma transmissão ou uma conversa direta (por exemplo, tocando num membro) leva à tela cheia no celular.

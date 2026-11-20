@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { joinCall, openPerson, startScreen } from '../support/app';
+import { joinCall, openPerson, send, startScreen, uniqueName } from '../support/app';
 
 const PHONE = { width: 390, height: 844 };
 
@@ -64,6 +64,47 @@ test.describe('celular', () => {
     await ana.page.getByRole('button', { name: 'Voltar à lista' }).first().click();
     await expect(ana.page.getByRole('navigation', { name: 'Espaços' })).toBeVisible();
     await Promise.all([ana, bruno].map((p) => p.context.close()));
+  });
+
+  test('no celular, membros, busca e fixadas ocupam a tela inteira e Fechar volta à conversa', async ({ browser }) => {
+    const ana = await openPerson(browser, 'Ana', { viewport: PHONE });
+    const { page } = ana;
+    const box = page.getByRole('textbox', { name: 'Mensagem para #geral' });
+    await expect(page.getByRole('button', { name: 'Buscar mensagens' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Mensagens fixadas' })).toBeVisible();
+    await expect(page.getByRole('complementary', { name: 'Membros' })).toBeHidden();
+
+    await page.getByRole('button', { name: 'Mostrar membros' }).click();
+    await expect(page.getByRole('complementary', { name: 'Membros' })).toBeVisible();
+    await expect(box).toBeHidden();
+    await page.getByRole('button', { name: 'Fechar membros' }).click();
+    await expect(box).toBeVisible();
+
+    const text = uniqueName('procurada');
+    await send(page, text);
+    await page.getByRole('button', { name: 'Buscar mensagens' }).click();
+    await page.getByRole('textbox', { name: 'Buscar mensagens' }).fill(text);
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('complementary', { name: 'Busca' })).toContainText(text);
+    await expect(box).toBeHidden();
+    await page.getByRole('button', { name: 'Fechar busca' }).click();
+    await expect(box).toBeVisible();
+
+    await page.getByRole('button', { name: 'Mensagens fixadas' }).click();
+    await expect(page.getByRole('complementary', { name: 'Mensagens fixadas' })).toBeVisible();
+    await expect(box).toBeHidden();
+    await page.getByRole('button', { name: 'Fechar mensagens fixadas' }).click();
+    await expect(box).toBeVisible();
+    await ana.context.close();
+  });
+
+  test('no computador a lista de membros começa aberta ao lado da conversa', async ({ browser }) => {
+    const ana = await openPerson(browser, 'Ana');
+    const { page } = ana;
+    await expect(page.getByRole('complementary', { name: 'Membros' })).toBeVisible();
+    await expect(page.getByRole('textbox', { name: 'Mensagem para #geral' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Buscar mensagens' })).toBeHidden();
+    await ana.context.close();
   });
 
   test('no computador o botão Voltar à lista não aparece e as três colunas ficam juntas', async ({ browser }) => {

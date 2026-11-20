@@ -1,5 +1,5 @@
 import type { Id, Member, User } from '@shared/models';
-import { Trash2 } from 'lucide-react';
+import { Trash2, X } from 'lucide-react';
 import { useState } from 'react';
 import { useRealtime } from '../state/realtime';
 import { displayNameOf, roleColorOf } from '../state/selectors';
@@ -13,7 +13,7 @@ interface Entry {
   name: string;
 }
 
-export function MemberList() {
+export function MemberList({ onClose }: { onClose?: () => void }) {
   const { state, actions } = useRealtime();
   const [error, setError] = useState<string | null>(null);
   const { snapshot } = state;
@@ -30,7 +30,15 @@ export function MemberList() {
   const offline = entries.filter((e) => e.user.status === 'offline').sort(byName);
 
   return (
-    <aside aria-label="Membros" className="hidden w-60 shrink-0 overflow-y-auto bg-sidebar px-2 py-4 lg:block">
+    <aside aria-label="Membros" className="min-w-0 flex-1 overflow-y-auto bg-sidebar px-2 py-4 lg:w-60 lg:flex-none lg:shrink-0">
+      {onClose && (
+        <div className="mb-3 flex items-center justify-between px-2 lg:hidden">
+          <h2 className="text-sm font-semibold">Membros</h2>
+          <button type="button" onClick={onClose} aria-label="Fechar membros" className="rounded p-1 text-muted hover:bg-hover hover:text-fg">
+            <X size={18} />
+          </button>
+        </div>
+      )}
       {error && (
         <p role="alert" className="mb-3 px-2 text-xs text-dnd">
           {error}
