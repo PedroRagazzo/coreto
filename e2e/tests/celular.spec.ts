@@ -123,6 +123,37 @@ test.describe('celular', () => {
     await Promise.all([ana, bruno].map((p) => p.context.close()));
   });
 
+  test('no celular, as configurações abrem numa lista de categorias e cada uma ocupa a tela com Voltar', async ({ browser }) => {
+    const ana = await openPerson(browser, 'Ana', { viewport: PHONE });
+    const { page } = ana;
+    await page.getByRole('button', { name: 'Voltar à lista' }).click();
+    await page.getByRole('button', { name: 'Configurações' }).first().click();
+    const categories = page.getByRole('navigation', { name: 'Categorias' });
+    await expect(categories).toBeVisible();
+    await expect(page.getByRole('heading', { level: 2, name: 'Voz e vídeo' })).toBeHidden();
+
+    await categories.getByRole('button', { name: 'Sons' }).click();
+    await expect(page.getByRole('heading', { level: 2, name: 'Sons' })).toBeVisible();
+    await expect(categories).toBeHidden();
+
+    await page.getByRole('button', { name: 'Voltar', exact: true }).click();
+    await expect(categories).toBeVisible();
+
+    await page.getByRole('button', { name: 'Fechar configurações' }).click();
+    await expect(categories).toBeHidden();
+    await ana.context.close();
+  });
+
+  test('no computador as configurações mostram categorias e conteúdo lado a lado', async ({ browser }) => {
+    const ana = await openPerson(browser, 'Ana');
+    const { page } = ana;
+    await page.getByRole('button', { name: 'Configurações' }).first().click();
+    await expect(page.getByRole('navigation', { name: 'Categorias' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 2, name: 'Voz e vídeo' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Voltar', exact: true })).toBeHidden();
+    await ana.context.close();
+  });
+
   test('no computador a lista de membros começa aberta ao lado da conversa', async ({ browser }) => {
     const ana = await openPerson(browser, 'Ana');
     const { page } = ana;

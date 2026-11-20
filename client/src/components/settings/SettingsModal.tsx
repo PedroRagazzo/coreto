@@ -1,4 +1,4 @@
-import { Bell, Keyboard, Monitor, Palette, Settings2, Sparkles, Stethoscope, Volume2, X } from 'lucide-react';
+import { ArrowLeft, Bell, Keyboard, Monitor, Palette, Settings2, Sparkles, Stethoscope, Volume2, X } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { AppearanceSettings } from './AppearanceSettings';
 import { DesktopSettings } from './DesktopSettings';
@@ -26,9 +26,12 @@ const SECTIONS: { id: SettingsSection; label: string; icon: ReactNode; group: st
  * Configurações em tela cheia, como as Configurações de Usuário do Discord:
  * categorias à esquerda, conteúdo à direita, Esc ou o X para fechar.
  */
-export function SettingsModal({ initial = 'voice', onClose }: { initial?: SettingsSection; onClose: () => void }) {
+export function SettingsModal({ initial, onClose }: { initial?: SettingsSection; onClose: () => void }) {
   const ref = useRef<HTMLDialogElement>(null);
-  const [section, setSection] = useState<SettingsSection>(initial);
+  const [section, setSection] = useState<SettingsSection>(initial ?? 'voice');
+  // No celular, ou a lista de categorias ou o conteúdo de uma (no computador as duas colunas ficam juntas).
+  // Aberta numa categoria específica, já mostra o conteúdo dela.
+  const [phoneView, setPhoneView] = useState<'list' | 'section'>(initial ? 'section' : 'list');
 
   useEffect(() => {
     const dialog = ref.current;
@@ -46,8 +49,22 @@ export function SettingsModal({ initial = 'voice', onClose }: { initial?: Settin
       className="m-0 h-dvh max-h-none w-screen max-w-none bg-panel p-0 text-fg backdrop:bg-black/60"
     >
       <div className="flex h-full">
-        <nav aria-label="Categorias" className="flex w-60 shrink-0 justify-end overflow-y-auto bg-sidebar py-12 pr-2 pl-4">
-          <div className="w-48">
+        <nav
+          aria-label="Categorias"
+          className={`${phoneView === 'list' ? 'flex' : 'hidden'} w-full min-w-0 shrink-0 flex-col overflow-y-auto bg-sidebar py-4 md:flex md:w-60 md:flex-row md:justify-end md:py-12 md:pr-2 md:pl-4`}
+        >
+          <div className="mb-2 flex items-center justify-between px-4 md:hidden">
+            <h2 className="text-xl font-bold">Configurações</h2>
+            <button
+              type="button"
+              onClick={() => ref.current?.close()}
+              aria-label="Fechar configurações"
+              className="flex h-10 w-10 items-center justify-center rounded-full text-muted hover:bg-hover hover:text-fg"
+            >
+              <X size={20} />
+            </button>
+          </div>
+          <div className="w-full px-2 md:w-48 md:px-0">
             {groups.map((group) => (
               <div key={group} className="mb-4">
                 <p className="px-2.5 pb-1 text-[11px] font-bold tracking-wide text-faint uppercase">{group}</p>
@@ -56,7 +73,10 @@ export function SettingsModal({ initial = 'voice', onClose }: { initial?: Settin
                     key={s.id}
                     type="button"
                     aria-current={s.id === section ? 'page' : undefined}
-                    onClick={() => setSection(s.id)}
+                    onClick={() => {
+                      setSection(s.id);
+                      setPhoneView('section');
+                    }}
                     className={`mb-0.5 flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-[15px] ${
                       s.id === section ? 'bg-hover text-fg' : 'text-muted hover:bg-hover/60 hover:text-fg'
                     }`}
@@ -70,9 +90,16 @@ export function SettingsModal({ initial = 'voice', onClose }: { initial?: Settin
           </div>
         </nav>
 
-        <main className="relative min-w-0 flex-1 overflow-y-auto">
-          <div className="max-w-2xl px-10 py-12">
-            <h2 className="mb-6 text-xl font-bold">{current.label}</h2>
+        <main className={`${phoneView === 'section' ? 'block' : 'hidden'} relative min-w-0 flex-1 overflow-y-auto md:block`}>
+          <div className="max-w-2xl px-4 py-4 md:px-10 md:py-12">
+            <button
+              type="button"
+              onClick={() => setPhoneView('list')}
+              className="mb-3 -ml-1 flex items-center gap-1.5 rounded px-1 py-1.5 text-sm text-muted hover:text-fg md:hidden"
+            >
+              <ArrowLeft size={16} aria-hidden /> Voltar
+            </button>
+            <h2 className="mb-6 pr-12 text-xl font-bold md:pr-0">{current.label}</h2>
             {current.id === 'voice' && <VoiceVideoSettings />}
             {current.id === 'sounds' && <SoundSettings />}
             {current.id === 'notifications' && <NotificationSettings />}
@@ -82,7 +109,7 @@ export function SettingsModal({ initial = 'voice', onClose }: { initial?: Settin
             {current.id === 'desktop' && <DesktopSettings />}
             {current.id === 'news' && <NewsSettings />}
           </div>
-          <div className="absolute top-12 right-10 flex flex-col items-center gap-1 text-xs font-semibold text-faint">
+          <div className="absolute top-4 right-4 flex flex-col items-center gap-1 text-xs font-semibold text-faint md:top-12 md:right-10">
             <button
               type="button"
               onClick={() => ref.current?.close()}
@@ -91,7 +118,7 @@ export function SettingsModal({ initial = 'voice', onClose }: { initial?: Settin
             >
               <X size={18} />
             </button>
-            ESC
+            <span className="hidden md:inline">ESC</span>
           </div>
         </main>
       </div>
