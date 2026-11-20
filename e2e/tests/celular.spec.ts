@@ -154,6 +154,41 @@ test.describe('celular', () => {
     await ana.context.close();
   });
 
+  test('nenhuma tela do celular rola para os lados', async ({ browser }) => {
+    const ana = await openPerson(browser, 'Ana', { viewport: PHONE });
+    const bruno = await openPerson(browser, 'Bruno');
+    await joinCall(bruno.page);
+    const { page } = ana;
+    const fits = async (where: string) => {
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+      expect(overflow, `rolagem horizontal em: ${where}`).toBeLessThanOrEqual(0);
+    };
+    await fits('conversa');
+    await page.getByRole('button', { name: 'Mostrar membros' }).click();
+    await fits('membros');
+    await page.getByRole('button', { name: 'Fechar membros' }).click();
+    await page.getByRole('button', { name: 'Buscar mensagens' }).click();
+    await fits('busca');
+    await page.getByRole('button', { name: 'Fechar busca' }).click();
+    await page.getByRole('button', { name: 'Voltar à lista' }).click();
+    await fits('lista');
+    await page.getByRole('button', { name: 'Sala de estar', exact: true }).click();
+    await expect(page.getByRole('heading', { level: 2, name: 'Sala de estar' })).toBeVisible();
+    await fits('chamada');
+    await page.getByRole('button', { name: 'Voltar à lista' }).first().click();
+    await page.getByRole('button', { name: 'Configurações' }).first().click();
+    await fits('configurações (lista)');
+    await page.getByRole('navigation', { name: 'Categorias' }).getByRole('button', { name: 'Voz e vídeo' }).click();
+    await fits('configurações (voz e vídeo)');
+    await Promise.all([ana, bruno].map((p) => p.context.close()));
+  });
+
+  test('de lado (celular deitado) o campo de mensagem continua à vista', async ({ browser }) => {
+    const ana = await openPerson(browser, 'Ana', { viewport: { width: 844, height: 390 } });
+    await expect(ana.page.getByRole('textbox', { name: 'Mensagem para #geral' })).toBeVisible();
+    await ana.context.close();
+  });
+
   test('no computador a lista de membros começa aberta ao lado da conversa', async ({ browser }) => {
     const ana = await openPerson(browser, 'Ana');
     const { page } = ana;

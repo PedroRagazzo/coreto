@@ -56,10 +56,25 @@ body,
 
 body {
   margin: 0;
+  /* Puxar a tela para baixo no fim da lista não recarrega a página nem estica o app. */
+  overscroll-behavior: none;
   background: var(--color-panel);
   color: var(--color-fg);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+}
+
+/* Celular: o app não passa por baixo do entalhe da câmera nem da barra de gestos, e o iPhone não dá zoom ao tocar num campo. */
+@media (max-width: 767px) {
+  .app-backdrop {
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+
+  input:not([type='checkbox'], [type='radio'], [type='range'], [type='color'], [type='file']),
+  textarea,
+  select {
+    font-size: 16px;
+  }
 }
 
 /* Barras de rolagem discretas no tema escuro. */

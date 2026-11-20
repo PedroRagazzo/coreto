@@ -22,6 +22,20 @@ export interface ChangelogEntry {
 /** Da mais nova para a mais antiga. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-20-4',
+    title: 'O Coreto no celular',
+    items: [
+      {
+        title: 'Cabe na tela do celular',
+        text: 'Abra o Coreto no navegador do celular: agora ele cabe na tela, com a lista de canais, a conversa e a chamada em telas separadas. Use a seta no alto da conversa para voltar à lista.',
+      },
+      {
+        title: 'Feito para o toque',
+        text: 'As ações das mensagens ficam sempre à vista, e segurar o dedo numa pessoa da chamada abre o volume só seu. Busca, mensagens fixadas, membros e configurações ocupam a tela inteira.',
+      },
+    ],
+  },
+  {
     id: '2026-11-20-3',
     title: 'A transmissão volta sozinha',
     items: [
