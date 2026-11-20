@@ -83,7 +83,7 @@ test.describe('celular', () => {
     const text = uniqueName('procurada');
     await send(page, text);
     await page.getByRole('button', { name: 'Buscar mensagens' }).click();
-    await page.getByRole('textbox', { name: 'Buscar mensagens' }).fill(text);
+    await page.getByRole('searchbox', { name: 'Buscar mensagens' }).fill(text);
     await page.keyboard.press('Enter');
     await expect(page.getByRole('complementary', { name: 'Busca' })).toContainText(text);
     await expect(box).toBeHidden();
