@@ -25,6 +25,8 @@ test.describe('etiquetas dos membros', () => {
     await dialog.getByRole('button', { name: 'Salvar' }).click();
 
     // Na lista de membros e nas mensagens, a etiqueta (em maiúsculas) está ao lado do nome.
+    // O editor fecha ao salvar (enquanto isso a prévia também mostra a etiqueta), então espera ele sumir antes de contar.
+    await expect(dialog.getByRole('textbox', { name: `Etiqueta de ${ana.name}` })).toHaveCount(0);
     await expect(dialog.getByText('AMIGO')).toBeVisible();
     await dialog.getByRole('button', { name: 'Fechar', exact: true }).click();
     await expect(page.getByRole('complementary', { name: 'Membros' }).getByText('AMIGO')).toBeVisible();
