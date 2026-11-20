@@ -123,6 +123,54 @@ test.describe('chamada de voz', () => {
     await Promise.all([ana, bruno].map((p) => p.context.close()));
   });
 
+  test('recarregar a página (F5 ou Ctrl+F5) no meio da chamada volta para a mesma sala, ainda mutado', async ({ browser }) => {
+    const ana = await openPerson(browser, 'Ana');
+    const bruno = await openPerson(browser, 'Bruno');
+    await joinCall(ana.page);
+    await joinCall(bruno.page);
+    await ana.page.getByRole('button', { name: 'Desativar microfone' }).click();
+    await expect(ana.page.getByRole('button', { name: 'Ativar microfone' })).toBeVisible();
+
+    // Recarrega ignorando o cache, como o Ctrl+F5.
+    await ana.page.reload({ waitUntil: 'load' });
+    await expect(ana.page.getByText('Voz conectada')).toBeVisible({ timeout: 20_000 });
+    await expect(ana.page.getByRole('button', { name: 'Ativar microfone' })).toBeVisible();
+    await expect(bruno.page.getByRole('list', { name: 'Na sala Sala de estar' })).toContainText(ana.name);
+
+    // Quem saiu da chamada de propósito não é puxado de volta ao recarregar.
+    await ana.page.getByRole('button', { name: 'Sair da chamada' }).click();
+    await ana.page.reload({ waitUntil: 'load' });
+    await expect(ana.page.getByRole('button', { name: 'Criar um espaço' })).toBeVisible();
+    await expect(ana.page.getByText('Voz conectada')).toHaveCount(0);
+    await Promise.all([ana, bruno].map((p) => p.context.close()));
+  });
+
+  test('quando o site ganha versão nova, a aba recarrega sozinha e volta para a chamada (uma vez só por versão)', async ({ browser }) => {
+    const ana = await openPerson(browser, 'Ana');
+    await joinCall(ana.page);
+    await ana.page.evaluate(() => ((window as unknown as { __antes?: boolean }).__antes = true));
+
+    // O servidor passa a anunciar outro arquivo principal do site (só para a conferência de versão, não para a página em si).
+    await ana.page.route('**/', async (route) => {
+      if (route.request().resourceType() !== 'fetch') return route.continue();
+      const real = await route.fetch();
+      const html = (await real.text()).replace(/\/assets\/index-[\w-]+\.js/, '/assets/index-versaonova.js');
+      await route.fulfill({ response: real, body: html });
+    });
+    await ana.page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+
+    // Recarregou (a marca da página antiga some) e a chamada voltou.
+    await expect.poll(() => ana.page.evaluate(() => (window as unknown as { __antes?: boolean }).__antes)).toBeUndefined();
+    await expect(ana.page.getByText('Voz conectada')).toBeVisible({ timeout: 20_000 });
+
+    // Na mesma versão anunciada não recarrega de novo, mesmo com a conferência repetida.
+    await ana.page.evaluate(() => ((window as unknown as { __depois?: boolean }).__depois = true));
+    await ana.page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await ana.page.waitForTimeout(1500);
+    expect(await ana.page.evaluate(() => (window as unknown as { __depois?: boolean }).__depois)).toBe(true);
+    await ana.context.close();
+  });
+
   test('quem transmitia vê o botão para retomar a transmissão depois da queda, e um clique volta ao ar', async ({ browser }) => {
     const ana = await openPerson(browser, 'Ana', { screen: { color: '#7a2d9e', width: 1280, height: 720 } });
     const sockets: { close(): void }[] = [];

@@ -22,6 +22,20 @@ export interface ChangelogEntry {
 /** Da mais nova para a mais antiga. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-20',
+    title: 'Atualizações sem perder a chamada',
+    items: [
+      {
+        title: 'O Coreto se atualiza sozinho',
+        text: 'Quando sai uma versão nova, a página recarrega sozinha. Se você estava em uma chamada, volta para ela na hora, com o microfone como estava.',
+      },
+      {
+        title: 'F5 e Ctrl+F5 também voltam à chamada',
+        text: 'Recarregar a página no meio de uma chamada não tira mais você dela: você volta para a mesma sala. Se estava transmitindo a tela, aparece o botão Retomar transmissão.',
+      },
+    ],
+  },
+  {
     id: '2026-11-17-3',
     title: 'Som das transmissões mais alto',
     items: [

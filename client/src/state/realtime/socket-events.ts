@@ -6,6 +6,8 @@ import { toastFor } from '@shared/notify';
 import { ROULETTE_SPIN_MS } from '@shared/polls';
 import { INVALID_SESSION } from '@shared/protocol';
 import type { MutableRefObject } from 'react';
+import { alreadyReloadedFor, hasUnsentText, liveBundle, markReloadedFor, runningBundle } from '../../lib/appVersion';
+import { forgetCall, recallCall, rememberCall } from '../../lib/callMemory';
 import { isWindowActive } from '../../lib/focus';
 import { showToast } from '../../lib/notifications';
 import { createSocket } from '../../lib/socket';
@@ -17,8 +19,12 @@ import { IDLE_VOICE, type ResumableCall } from './state';
 import type { RealtimeActions } from './types';
 
 const TYPING_TTL_MS = 6_000;
-/** Depois de quanto tempo sem conexão a chamada não volta mais sozinha. */
-const RESUME_CALL_MS = 120_000;
+/** Depois de quanto tempo sem conexão (ou sem a página aberta) a chamada não volta mais sozinha. */
+const RESUME_CALL_MS = 300_000;
+/** De quanto em quanto tempo a aba confere se o site ganhou versão nova. */
+const UPDATE_CHECK_MS = 60_000;
+/** Com texto escrito e não enviado, a atualização espera até esse tempo para não perdê-lo. */
+const DRAFT_WAIT_MS = 180_000;
 
 export interface SocketOptions {
   token: string;
@@ -83,19 +89,71 @@ export function connectSocket({ token, ctx, actions, notificationPrefsRef, first
   voiceRef.current = voice;
   firstSessionRef.current = true;
   /** A chamada que caiu junto com a conexão, para voltar a ela quando a conexão voltar. */
-  let resumable: (ResumableCall & { droppedAt: number }) | null = null;
+  // Também vale para a chamada em que a pessoa estava quando recarregou a página (F5, Ctrl+F5 ou atualização automática).
+  let resumable: (ResumableCall & { droppedAt: number }) | null = recallCall(RESUME_CALL_MS);
+
+  // A aba confere se o servidor já entrega uma versão nova do site e, se sim, recarrega sozinha. A chamada em que a pessoa
+  // estava volta sozinha em seguida (ver `saveCallForReload`).
+  let updateSeenAt = 0;
+  let checking = false;
+  const checkForUpdate = async () => {
+    if (checking) return;
+    checking = true;
+    try {
+      const running = runningBundle();
+      if (!running) return;
+      const live = await liveBundle();
+      if (!live || live === running) {
+        updateSeenAt = 0;
+        return;
+      }
+      if (alreadyReloadedFor(live)) return;
+      updateSeenAt ||= Date.now();
+      if (hasUnsentText() && Date.now() - updateSeenAt < DRAFT_WAIT_MS) return;
+      markReloadedFor(live);
+      window.location.reload();
+    } finally {
+      checking = false;
+    }
+  };
+  const updateTimer = setInterval(() => void checkForUpdate(), UPDATE_CHECK_MS);
+  const onVisible = () => {
+    if (document.visibilityState === 'visible') void checkForUpdate();
+  };
+  document.addEventListener('visibilitychange', onVisible);
+
+  /** Ao sair da página (recarregar, atualizar), guarda a chamada para voltar a ela quando a página abrir de novo. */
+  const saveCallForReload = () => {
+    const { myVoice } = stateRef.current;
+    if (myVoice.channelId && myVoice.spaceId) {
+      rememberCall({
+        channelId: myVoice.channelId,
+        spaceId: myVoice.spaceId,
+        muted: myVoice.muted,
+        deafened: myVoice.deafened,
+        streaming: myVoice.streaming,
+      });
+    } else if (resumable) rememberCall(resumable, resumable.droppedAt);
+    else forgetCall();
+  };
+  window.addEventListener('pagehide', saveCallForReload);
 
   socket.on('unread:bump', ({ channelId, spaceId }) => dispatch({ type: 'unread:bump', channelId, spaceId }));
   socket.on('session:ready', ({ user, spaces, directs, directUsers, mentions, unread, superAdmin }) => {
     dispatch({ type: 'session', user, spaces, directs, directUsers, mentions, unread, superAdmin });
     // Na primeira conexão abre o primeiro espaço; nas reconexões, reabre o atual.
-    const target = firstSessionRef.current ? (spaces[0]?.id ?? null) : stateRef.current.activeSpaceId;
+    // Ao recarregar no meio de uma chamada, abre o espaço dela.
+    const callSpace = resumable && spaces.some((s) => s.id === resumable?.spaceId) ? resumable.spaceId : null;
+    const target = firstSessionRef.current ? (callSpace ?? spaces[0]?.id ?? null) : stateRef.current.activeSpaceId;
     firstSessionRef.current = false;
     actions.selectSpace(target);
 
-    // Reconectou depois de cair no meio de uma chamada (por exemplo, o servidor reiniciou numa atualização): volta para ela.
+    // Reconectou depois de cair no meio de uma chamada, ou recarregou a página nela (o servidor reiniciou numa atualização,
+    // a pessoa apertou Ctrl+F5): volta para a chamada.
     const call = resumable;
     resumable = null;
+    forgetCall();
+    void checkForUpdate();
     const { myVoice } = stateRef.current;
     if (call && Date.now() - call.droppedAt <= RESUME_CALL_MS && !myVoice.channelId && !myVoice.connecting) {
       void actions.rejoinVoice(call);
@@ -185,6 +243,9 @@ export function connectSocket({ token, ctx, actions, notificationPrefsRef, first
   socket.connect();
 
   return () => {
+    clearInterval(updateTimer);
+    document.removeEventListener('visibilitychange', onVisible);
+    window.removeEventListener('pagehide', saveCallForReload);
     voice.leave();
     socket.removeAllListeners();
     socket.disconnect();
