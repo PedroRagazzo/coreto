@@ -407,6 +407,7 @@ function StreamTile({
                     value={volume}
                     onChange={(e) => setVolume(Number(e.target.value))}
                     aria-valuetext={`${Math.round(volume * 100)}%`}
+                    title="Acima de 100% o som também é nivelado: o que chega baixo sobe"
                     className="w-28 accent-accent"
                   />
                   <span className="w-10 text-xs tabular-nums" aria-hidden>

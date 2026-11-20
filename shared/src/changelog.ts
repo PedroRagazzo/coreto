@@ -22,6 +22,16 @@ export interface ChangelogEntry {
 /** Da mais nova para a mais antiga. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-20-2',
+    title: 'Som das transmissões bem mais alto',
+    items: [
+      {
+        title: 'Volume acima de 100% de verdade',
+        text: 'Na barrinha de volume da tela de alguém, passar de 100% agora também sobe o som que chega baixo, e quanto mais alto, mais forte. Ao voltar para 100% ou menos, o som fica como chegou.',
+      },
+    ],
+  },
+  {
     id: '2026-11-20',
     title: 'Atualizações sem perder a chamada',
     items: [

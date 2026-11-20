@@ -6,6 +6,7 @@ import {
   LEVELER_TARGET_DB,
   levelerStep,
   LIMIT_HEADROOM,
+  streamLevelerParams,
   rmsDb,
   softLimit,
   softLimitCurve,
@@ -18,6 +19,32 @@ function run(level: number, seconds: number, from: LevelerState = initialLeveler
   for (let t = 0; t < seconds; t += 0.1) state = levelerStep(state, level, 0.1);
   return state;
 }
+
+describe('streamLevelerParams', () => {
+  it('quanto mais alto o volume acima de 100%, mais alto o nível buscado e mais ganho pode dar', () => {
+    const at200 = streamLevelerParams(2);
+    const at300 = streamLevelerParams(3);
+    expect(at300.targetDb).toBeGreaterThan(at200.targetDb);
+    expect(at300.maxBoostDb).toBeGreaterThan(at200.maxBoostDb);
+  });
+
+  it('um som que chega baixo (-34 dB) sobe bem mais que o da voz e mais ainda com o volume em 300%', () => {
+    let a = initialLeveler();
+    let b = initialLeveler();
+    for (let t = 0; t < 30; t += 0.1) {
+      a = levelerStep(a, -34, 0.1, streamLevelerParams(2));
+      b = levelerStep(b, -34, 0.1, streamLevelerParams(3));
+    }
+    expect(a.gainDb).toBeCloseTo(18, 0); // queria 20 dB (alvo -14 dB em 200%), mas o teto é 18
+    expect(b.gainDb).toBeCloseTo(24, 0); // queria 26 dB (alvo -8 dB em 300%), mas o teto é 24
+  });
+
+  it('um som já alto não é cortado mais que 6 dB', () => {
+    let s = initialLeveler();
+    for (let t = 0; t < 30; t += 0.1) s = levelerStep(s, -5, 0.1, streamLevelerParams(2));
+    expect(s.gainDb).toBeGreaterThanOrEqual(-6);
+  });
+});
 
 describe('levelerStep', () => {
   it('uma voz baixa sobe devagar até chegar perto do nível comum', () => {

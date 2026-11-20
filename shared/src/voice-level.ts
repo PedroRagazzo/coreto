@@ -18,6 +18,42 @@ const LEVEL_TIME_CONSTANT_S = 1.5;
 const CUT_RATE_DB_PER_S = 10;
 const BOOST_RATE_DB_PER_S = 2.5;
 
+/** Os números do nivelador: para onde leva o nível, até onde sobe e desce o ganho, e o quanto sobe por segundo. */
+export interface LevelerParams {
+  targetDb: number;
+  floorDb: number;
+  maxBoostDb: number;
+  maxCutDb: number;
+  boostRateDbPerS: number;
+}
+
+/** O nivelador das vozes. */
+export const VOICE_LEVELER: LevelerParams = {
+  targetDb: LEVELER_TARGET_DB,
+  floorDb: LEVELER_SPEECH_FLOOR_DB,
+  maxBoostDb: LEVELER_MAX_BOOST_DB,
+  maxCutDb: LEVELER_MAX_CUT_DB,
+  boostRateDbPerS: BOOST_RATE_DB_PER_S,
+};
+
+/** Acima de 100%, o volume de uma transmissão (o som dela costuma chegar mais baixo que a voz) passa a nivelar o som também. */
+export const STREAM_LEVELER_BASE_DB = -20;
+
+/**
+ * O nivelador do som de uma transmissão (jogo, música) para um volume acima de 100%: quanto mais alto o volume, mais alto o
+ * nível que ele busca e mais ganho ele pode dar. Em 100% (ou menos) não se usa: o som passa como chegou.
+ */
+export function streamLevelerParams(volume: number): LevelerParams {
+  const extra = Math.max(0, volume - 1);
+  return {
+    targetDb: STREAM_LEVELER_BASE_DB + 6 * extra,
+    floorDb: -55,
+    maxBoostDb: 12 + 6 * extra,
+    maxCutDb: -6,
+    boostRateDbPerS: 6,
+  };
+}
+
 export interface LevelerState {
   /** O nível da fala estimado (dB); `null` até ouvir a primeira fala. */
   levelDb: number | null;
@@ -31,15 +67,18 @@ export const initialLeveler = (): LevelerState => ({ levelDb: null, gainDb: 0 })
  * Um passo do nivelador. `rmsDb` é o nível medido agora, ANTES do ganho (para o ganho não realimentar a medida) e
  * `dt` o tempo desde o passo anterior (s). Em silêncio nada muda.
  */
-export function levelerStep(state: LevelerState, rmsDb: number, dt: number): LevelerState {
-  if (!Number.isFinite(rmsDb) || rmsDb < LEVELER_SPEECH_FLOOR_DB || dt <= 0) return state;
+export function levelerStep(state: LevelerState, rmsDb: number, dt: number, params: LevelerParams = VOICE_LEVELER): LevelerState {
+  if (!Number.isFinite(rmsDb) || rmsDb < params.floorDb || dt <= 0) return state;
   const alpha = 1 - Math.exp(-dt / LEVEL_TIME_CONSTANT_S);
   const levelDb = state.levelDb === null ? rmsDb : state.levelDb + (rmsDb - state.levelDb) * alpha;
-  const wanted = Math.min(LEVELER_MAX_BOOST_DB, Math.max(LEVELER_MAX_CUT_DB, LEVELER_TARGET_DB - levelDb));
-  const rate = wanted < state.gainDb ? CUT_RATE_DB_PER_S : BOOST_RATE_DB_PER_S;
+  const wanted = Math.min(params.maxBoostDb, Math.max(params.maxCutDb, params.targetDb - levelDb));
+  const rate = wanted < state.gainDb ? CUT_RATE_DB_PER_S : params.boostRateDbPerS;
   const move = Math.max(-rate * dt, Math.min(rate * dt, wanted - state.gainDb));
   return { levelDb, gainDb: state.gainDb + move };
 }
+
+/** Decibéis para ganho linear. */
+export const dbToLinear = (db: number): number => 10 ** (db / 20);
 
 /** Nível RMS de um bloco de amostras, em dB (-Infinity se for silêncio puro). */
 export function rmsDb(samples: ArrayLike<number>): number {
