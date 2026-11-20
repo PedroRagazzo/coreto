@@ -1,7 +1,9 @@
+import { describeDrop, explainDropReason, type ConnectionDrop } from '@shared/connection-drops';
 import { type DiagnosticCheck, type DiagnosticReport, formatReport, summarizeReport, type Verdict } from '@shared/diagnostics';
 import { Check, CircleCheck, CircleX, Copy, Info, LoaderCircle, Stethoscope, TriangleAlert } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { MIC_TEST_MS, runDiagnostics } from '../../lib/diagnostics';
+import { clearDrops, readDrops } from '../../lib/dropLog';
 import { useRealtime } from '../../state/realtime';
 import { useSettings } from '../../state/settings';
 import { SettingsGroup } from './SettingsModal';
@@ -77,6 +79,7 @@ export function DiagnosticsSettings() {
 
   return (
     <>
+      <DropLog />
       <SettingsGroup
         title="Teste de conexão"
         hint="Mede a sua internet, o servidor, o microfone e as chamadas, e diz o que está errado. Leva uns 10 segundos. Fale algo durante o teste do microfone."
@@ -139,6 +142,60 @@ export function DiagnosticsSettings() {
         </SettingsGroup>
       )}
     </>
+  );
+}
+
+/** As últimas quedas de conexão deste aparelho: a pessoa vê o motivo e dá para comparar com a de quem também cai. */
+function DropLog() {
+  const [drops, setDrops] = useState<ConnectionDrop[]>(readDrops);
+  const [copied, setCopied] = useState(false);
+  const lines = [...drops].reverse().map((d) => `${new Date(d.at).toLocaleString('pt-BR')} — ${describeDrop(d)}`);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(lines.join('\n'));
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  };
+
+  return (
+    <SettingsGroup
+      title="Quedas de conexão"
+      hint="Cada vez que o Coreto perde a conexão sem você pedir, o motivo fica anotado aqui, só neste aparelho. Se você cai da chamada do nada, mande estas linhas para quem está ajudando."
+    >
+      {drops.length === 0 ? (
+        <p className="text-sm text-muted">Nenhuma queda anotada neste aparelho.</p>
+      ) : (
+        <>
+          <ul aria-label="Quedas de conexão" className="space-y-2">
+            {[...drops].reverse().map((d) => (
+              <li key={d.at} className="rounded-md border border-line bg-rail p-3 text-sm">
+                <p className="font-medium">{new Date(d.at).toLocaleString('pt-BR')}</p>
+                <p className="text-muted">{explainDropReason(d.reason)}</p>
+                <p className="mt-1 text-xs text-faint">{describeDrop(d)}</p>
+              </li>
+            ))}
+          </ul>
+          <div className="mt-3 flex gap-2">
+            <button type="button" onClick={() => void copy()} className="flex items-center gap-2 rounded-md bg-elevated px-4 py-2 text-sm font-semibold hover:bg-hover">
+              {copied ? <Check size={16} /> : <Copy size={16} />}
+              {copied ? 'Copiado!' : 'Copiar quedas'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                clearDrops();
+                setDrops([]);
+              }}
+              className="rounded-md px-4 py-2 text-sm text-muted hover:text-fg"
+            >
+              Limpar
+            </button>
+          </div>
+        </>
+      )}
+    </SettingsGroup>
   );
 }
 

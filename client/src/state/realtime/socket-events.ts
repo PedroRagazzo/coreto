@@ -12,6 +12,7 @@ import { desktop } from '../../lib/desktop';
 import { isWindowActive } from '../../lib/focus';
 import { showToast } from '../../lib/notifications';
 import { createSocket } from '../../lib/socket';
+import { recordBack, recordDrop } from '../../lib/dropLog';
 import type { NotificationPrefs } from '../../lib/settings';
 import { VoiceManager } from '../../lib/voice';
 import { displayNameOf } from '../selectors';
@@ -142,6 +143,7 @@ export function connectSocket({ token, ctx, actions, notificationPrefsRef, first
   socket.on('unread:bump', ({ channelId, spaceId }) => dispatch({ type: 'unread:bump', channelId, spaceId }));
   socket.on('session:ready', ({ user, spaces, directs, directUsers, mentions, unread, superAdmin }) => {
     dispatch({ type: 'session', user, spaces, directs, directUsers, mentions, unread, superAdmin });
+    recordBack();
     // Na primeira conexão abre o primeiro espaço; nas reconexões, reabre o atual.
     // Ao recarregar no meio de uma chamada, abre o espaço dela.
     const callSpace = resumable && spaces.some((s) => s.id === resumable?.spaceId) ? resumable.spaceId : null;
@@ -229,6 +231,7 @@ export function connectSocket({ token, ctx, actions, notificationPrefsRef, first
     // servidor de propósito (conta excluída, sessão inválida) não retoma nada.
     const { myVoice } = stateRef.current;
     const dropped = reason !== 'io client disconnect' && reason !== 'io server disconnect';
+    if (dropped) recordDrop(reason, Boolean(myVoice.channelId));
     resumable =
       dropped && myVoice.channelId && myVoice.spaceId
         ? { channelId: myVoice.channelId, spaceId: myVoice.spaceId, muted: myVoice.muted, deafened: myVoice.deafened, streaming: myVoice.streaming, droppedAt: Date.now() }

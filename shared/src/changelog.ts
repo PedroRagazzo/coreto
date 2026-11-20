@@ -22,6 +22,24 @@ export interface ChangelogEntry {
 /** Da mais nova para a mais antiga. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-20-5',
+    title: 'Chamada mais firme no celular',
+    items: [
+      {
+        title: 'A tela não apaga na chamada',
+        text: 'No celular ou tablet, enquanto você está numa chamada a tela fica ligada. Se você sair do Coreto para outro app, ela volta a ficar ligada quando você retornar.',
+      },
+      {
+        title: 'Controles na tela de bloqueio',
+        text: 'A tela de bloqueio e as notificações do celular mostram "Coreto — em chamada", com botões para sair e para mutar o microfone. Com a tela bloqueada, o navegador pode cortar o seu microfone: depende do aparelho.',
+      },
+      {
+        title: 'Por que a conexão caiu',
+        text: 'Em Configurações, Diagnóstico, agora há a lista das últimas quedas de conexão deste aparelho, com o motivo e em quanto tempo voltou. Se você cai da chamada do nada, copie e mande para quem está ajudando.',
+      },
+    ],
+  },
+  {
     id: '2026-11-20-4',
     title: 'O Coreto no celular',
     items: [

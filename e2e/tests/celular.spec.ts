@@ -1,7 +1,38 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { joinCall, openPerson, send, startScreen, uniqueName } from '../support/app';
 
 const PHONE = { width: 390, height: 844 };
+
+/** Troca o pedido de "manter a tela ligada" por um contador, e anota o que a página pediu ao controle de mídia do sistema. */
+async function spyOnSystem(page: Page) {
+  await page.evaluate(() => {
+    const w = window as unknown as { __locks: number; __handlers: Record<string, unknown> };
+    w.__locks = 0;
+    w.__handlers = {};
+    Object.defineProperty(navigator, 'wakeLock', {
+      configurable: true,
+      value: {
+        request: async () => {
+          w.__locks++;
+          const lock = {
+            released: false,
+            release: async () => {
+              if (!lock.released) w.__locks--;
+              lock.released = true;
+            },
+          };
+          return lock;
+        },
+      },
+    });
+    const original = navigator.mediaSession.setActionHandler.bind(navigator.mediaSession);
+    navigator.mediaSession.setActionHandler = (action, handler) => {
+      w.__handlers[action] = handler;
+      original(action, handler);
+    };
+  });
+}
+const locks = (page: Page) => page.evaluate(() => (window as unknown as { __locks: number }).__locks);
 
 test.describe('celular', () => {
   test('abre na conversa; Voltar à lista mostra espaços e canais; tocar num canal volta à conversa', async ({ browser }) => {
@@ -186,6 +217,37 @@ test.describe('celular', () => {
   test('de lado (celular deitado) o campo de mensagem continua à vista', async ({ browser }) => {
     const ana = await openPerson(browser, 'Ana', { viewport: { width: 844, height: 390 } });
     await expect(ana.page.getByRole('textbox', { name: 'Mensagem para #geral' })).toBeVisible();
+    await ana.context.close();
+  });
+
+  test('no celular, a tela fica ligada durante a chamada e o sistema mostra "em chamada" com sair e microfone', async ({ browser }) => {
+    const ana = await openPerson(browser, 'Ana', { viewport: PHONE, touch: true });
+    const { page } = ana;
+    await spyOnSystem(page);
+    await page.getByRole('button', { name: 'Voltar à lista' }).click();
+    await page.getByRole('button', { name: 'Sala de estar', exact: true }).click();
+    await expect(page.getByRole('heading', { level: 2, name: 'Sala de estar' })).toBeVisible();
+
+    await expect.poll(() => locks(page)).toBe(1);
+    await expect.poll(() => page.evaluate(() => navigator.mediaSession.metadata?.title)).toBe('Sala de estar');
+    const handlers = await page.evaluate(() => Object.keys((window as unknown as { __handlers: object }).__handlers));
+    expect(handlers).toEqual(expect.arrayContaining(['hangup', 'togglemicrophone']));
+
+    // O botão "desligar" da notificação do sistema sai da chamada.
+    await page.evaluate(() => (window as unknown as { __handlers: Record<string, () => void> }).__handlers.hangup());
+    await expect(page.getByRole('region', { name: 'Chamada em andamento' })).toHaveCount(0);
+    await expect.poll(() => locks(page)).toBe(0);
+    await expect.poll(() => page.evaluate(() => navigator.mediaSession.metadata)).toBeNull();
+    await ana.context.close();
+  });
+
+  test('no computador a chamada não segura a tela ligada', async ({ browser }) => {
+    const ana = await openPerson(browser, 'Ana');
+    const { page } = ana;
+    await spyOnSystem(page);
+    await joinCall(page);
+    await page.waitForTimeout(500);
+    expect(await locks(page)).toBe(0);
     await ana.context.close();
   });
 

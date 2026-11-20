@@ -18,6 +18,7 @@ import { StreamStage } from '../StreamStage';
 import { UpdateBanner } from '../UpdateBanner';
 import { UserPanel } from '../UserPanel';
 import { VoiceStatusBar } from '../VoiceStatusBar';
+import { CallKeepAlive } from '../CallKeepAlive';
 import { CallSounds, Shortcuts } from '../VoiceEffects';
 
 export function AppShell() {
@@ -48,6 +49,7 @@ function Shell() {
   return (
     <div className="app-backdrop flex h-dvh overflow-hidden text-fg md:gap-3 md:p-3">
       <CallSounds />
+      <CallKeepAlive />
       <Shortcuts />
       <WhatsNew />
       {/* No celular, ou a lista (espaços e canais) ou a conversa: `contents` deixa os filhos como colunas do `flex` de fora. */}

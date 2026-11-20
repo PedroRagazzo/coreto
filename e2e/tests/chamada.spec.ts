@@ -120,6 +120,13 @@ test.describe('chamada de voz', () => {
     await expect(ana.page.getByText('Voz conectada')).toBeVisible({ timeout: 20_000 });
     await expect(ana.page.getByRole('button', { name: 'Ativar microfone' })).toBeVisible();
     await expect(room).toContainText(ana.name);
+
+    // A queda ficou anotada no Diagnóstico: numa chamada, com o motivo e o tempo que levou para voltar.
+    await ana.page.getByRole('button', { name: 'Configurações' }).first().click();
+    await ana.page.getByRole('navigation', { name: 'Categorias' }).getByRole('button', { name: 'Diagnóstico' }).click();
+    const drops = ana.page.getByRole('list', { name: 'Quedas de conexão' });
+    await expect(drops).toContainText('numa chamada');
+    await expect(drops).toContainText('voltou em');
     await Promise.all([ana, bruno].map((p) => p.context.close()));
   });
 
