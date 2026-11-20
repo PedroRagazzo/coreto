@@ -212,7 +212,7 @@ export function MessageList({ conversationId, welcome, messages }: MessageListPr
                       ) : (
                         <time
                           dateTime={message.createdAt}
-                          className="w-10 shrink-0 pt-1 text-right text-[10px] text-faint opacity-0 group-hover:opacity-100"
+                          className="w-10 shrink-0 pt-1 text-right text-[10px] text-faint opacity-0 group-hover:opacity-100 touch:opacity-100"
                         >
                           {formatShortTime(message.createdAt)}
                         </time>
@@ -328,7 +328,7 @@ function MessageRow({
       {picking && <ReactionPicker message={message} onClose={() => setPicking(false)} />}
 
       {!editing && (
-        <div className="absolute -top-3 right-4 flex gap-0.5 rounded-md border border-line bg-elevated p-0.5 opacity-0 shadow-lg group-hover:opacity-100 focus-within:opacity-100">
+        <div className="absolute -top-3 right-4 flex gap-0.5 rounded-md border border-line bg-elevated p-0.5 opacity-0 shadow-lg group-hover:opacity-100 focus-within:opacity-100 touch:opacity-100">
           <button
             type="button"
             title="Reagir"

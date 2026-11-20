@@ -1,6 +1,7 @@
 import type { VoiceParticipant } from '@shared/models';
 import { HeadphoneOff, MicOff } from 'lucide-react';
 import { useEffect, useRef } from 'react';
+import { useLongPress } from '../lib/useLongPress';
 import { useRealtime } from '../state/realtime';
 import { displayNameOf } from '../state/selectors';
 import { Avatar } from './Avatar';
@@ -29,11 +30,13 @@ export function ParticipantTile({ participant, isMe }: { participant: VoiceParti
   const speaking = Boolean(state.speaking[userId]) && !participant.muted;
   const quality = state.quality[userId];
   const volumeMenu = useUserVolumeMenu();
+  const press = useLongPress((point) => volumeMenu.open(point, userId, name));
 
   return (
     <li
       // Botão direito em alguém: volume só seu.
       onContextMenu={isMe ? undefined : (e) => volumeMenu.open(e, userId, name)}
+      {...(isMe ? {} : press)}
       className={`relative flex aspect-video items-center justify-center overflow-hidden rounded-2xl bg-panel ring-2 transition-shadow ${
         speaking ? 'ring-online' : 'ring-transparent'
       }`}

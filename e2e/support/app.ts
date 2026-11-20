@@ -95,13 +95,15 @@ export interface FakeScreen {
 export async function openPerson(
   browser: Browser,
   label: string,
-  options: { viewport?: { width: number; height: number }; screen?: FakeScreen; name?: string; gpu?: 'nenhuma' | 'ate-1080p60' } = {},
+  options: { viewport?: { width: number; height: number }; screen?: FakeScreen; name?: string; gpu?: 'nenhuma' | 'ate-1080p60'; touch?: boolean } = {},
 ): Promise<Person> {
   const name = options.name ?? uniqueName(label);
   const context = await browser.newContext({
     viewport: options.viewport ?? { width: 1280, height: 800 },
     locale: 'pt-BR',
     acceptDownloads: true,
+    // Celular de verdade: sem mouse (hover: none), com toque.
+    ...(options.touch && { hasTouch: true, isMobile: true }),
   });
   await context.addInitScript(TRACK_PEERS);
   await context.addInitScript(FAKE_GPU, { mode: options.gpu ?? 'nenhuma' });

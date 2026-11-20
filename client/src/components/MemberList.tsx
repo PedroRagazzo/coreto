@@ -98,7 +98,7 @@ function MemberGroup({ title, entries, onMessage, dimmed = false }: MemberGroupP
                   onClick={() => setDeleting({ userId: user.id, name })}
                   aria-label={`Excluir a conta de ${name}`}
                   title="Excluir a conta"
-                  className="absolute top-1/2 right-1 -translate-y-1/2 rounded p-1.5 text-faint opacity-0 hover:bg-dnd/15 hover:text-dnd focus:opacity-100 group-hover:opacity-100"
+                  className="absolute top-1/2 right-1 -translate-y-1/2 rounded p-1.5 text-faint opacity-0 hover:bg-dnd/15 hover:text-dnd focus:opacity-100 group-hover:opacity-100 touch:opacity-100"
                 >
                   <Trash2 size={14} aria-hidden />
                 </button>

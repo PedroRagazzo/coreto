@@ -354,7 +354,7 @@ function StreamTile({
             <span className="pointer-events-none absolute bottom-1 left-1 max-w-[70%] truncate rounded bg-black/65 px-1.5 py-0.5 text-xs text-white">
               {name}
             </span>
-            <div className="absolute top-1 right-1 flex items-center gap-0.5 rounded bg-black/65 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+            <div className="absolute top-1 right-1 flex items-center gap-0.5 rounded bg-black/65 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 touch:opacity-100">
               {soundButton}
               <button
                 type="button"
@@ -388,7 +388,7 @@ function StreamTile({
         ) : (
           live &&
           stream && (
-            <div className="absolute inset-x-0 bottom-0 flex items-center gap-3 bg-gradient-to-t from-black/80 to-transparent px-4 pt-10 pb-3 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+            <div className="absolute inset-x-0 bottom-0 flex items-center gap-3 bg-gradient-to-t from-black/80 to-transparent px-4 pt-10 pb-3 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 touch:opacity-100">
               {isMe && (
                 <button
                   type="button"

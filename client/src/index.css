@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* Aparelhos sem mouse (celular, tablet): o que só aparecia ao passar o mouse precisa estar sempre à vista. */
+@custom-variant touch (@media (hover: none));
+
 /*
  * Paleta azul: #005885 (azul petróleo), #00167D (azul profundo), #363636 e #0B0B0B (grafite e preto), com tons de
  * cinza entre os dois para os fundos escalonados e azul-claro para o que precisa ser lido sobre o escuro.

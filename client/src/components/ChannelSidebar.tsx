@@ -13,6 +13,7 @@ import { EditChannelDialog } from './EditChannelDialog';
 import { EditSpaceDialog } from './EditSpaceDialog';
 import { StreamPreviewCard } from './StreamPreviewCard';
 import { useUserVolumeMenu } from './UserVolumeMenu';
+import { useLongPress, type PressPoint } from '../lib/useLongPress';
 
 export function ChannelSidebar() {
   const { state } = useRealtime();
@@ -92,7 +93,7 @@ export function ChannelSidebar() {
                       title={`Criar canal em ${category.name}`}
                       aria-label={`Criar canal em ${category.name}`}
                       onClick={() => setCreatingIn({ categoryId: category.id })}
-                      className="rounded text-faint opacity-0 group-hover:opacity-100 hover:text-fg focus-visible:opacity-100"
+                      className="rounded text-faint opacity-0 group-hover:opacity-100 touch:opacity-100 hover:text-fg focus-visible:opacity-100"
                     >
                       <Plus size={16} />
                     </button>
@@ -141,7 +142,7 @@ function ChannelRow({ channel, onEdit, children }: { channel: Channel; onEdit?: 
           title="Editar canal"
           aria-label={`Editar ${channel.kind === 'text' ? '#' : ''}${channel.name}`}
           onClick={onEdit}
-          className="absolute top-1/2 right-1.5 -translate-y-1/2 rounded p-0.5 text-faint opacity-0 group-hover/row:opacity-100 hover:text-fg focus-visible:opacity-100"
+          className="absolute top-1/2 right-1.5 -translate-y-1/2 rounded p-0.5 text-faint opacity-0 group-hover/row:opacity-100 touch:opacity-100 hover:text-fg focus-visible:opacity-100"
         >
           <Settings size={15} />
         </button>
@@ -263,10 +264,10 @@ function VoiceChannelItem({ channel, onEdit }: ChannelItemProps) {
             );
             const rowClass = 'flex w-full items-center gap-2 rounded px-1.5 py-1 text-sm text-muted';
             return (
-              <li
+              <ParticipantItem
                 key={p.userId}
-                // Botão direito em alguém da sua chamada: volume só seu.
-                onContextMenu={isMine && p.userId !== state.me?.id ? (e) => volumeMenu.open(e, p.userId, name) : undefined}
+                // Botão direito (ou pressão longa) em alguém da sua chamada: volume só seu.
+                onMenu={isMine && p.userId !== state.me?.id ? (e) => volumeMenu.open(e, p.userId, name) : undefined}
               >
                 {p.streaming ? (
                   // Como no Discord: clicar em quem está ao vivo abre a transmissão; passar o mouse mostra a prévia.
@@ -284,12 +285,22 @@ function VoiceChannelItem({ channel, onEdit }: ChannelItemProps) {
                 ) : (
                   <div className={rowClass}>{row}</div>
                 )}
-              </li>
+              </ParticipantItem>
             );
           })}
         </ul>
       )}
       {volumeMenu.menu}
+    </li>
+  );
+}
+
+/** Uma pessoa na lista da chamada: o menu de volume abre com o botão direito do mouse ou segurando o dedo. */
+function ParticipantItem({ onMenu, children }: { onMenu?: (e: PressPoint | MouseEvent) => void; children: ReactNode }) {
+  const press = useLongPress((point) => onMenu?.(point));
+  return (
+    <li onContextMenu={onMenu} {...(onMenu ? press : {})}>
+      {children}
     </li>
   );
 }

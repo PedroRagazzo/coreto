@@ -290,7 +290,7 @@ function ClipButton({
           )}
         </button>
       )}
-      <div className={`absolute top-0.5 right-0.5 flex ${adjusting ? '' : 'opacity-0 group-focus-within:opacity-100 group-hover:opacity-100'}`}>
+      <div className={`absolute top-0.5 right-0.5 flex ${adjusting ? '' : 'opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 touch:opacity-100'}`}>
         <button
           type="button"
           onClick={onAdjust}

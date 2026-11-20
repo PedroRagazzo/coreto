@@ -98,6 +98,31 @@ test.describe('celular', () => {
     await ana.context.close();
   });
 
+  test('ao toque, as ações da mensagem aparecem sem passar o mouse', async ({ browser }) => {
+    const ana = await openPerson(browser, 'Ana', { viewport: PHONE, touch: true });
+    const { page } = ana;
+    const text = uniqueName('toque');
+    await send(page, text);
+    const row = page.locator('[data-message-id]').filter({ hasText: text });
+    await expect(row.getByRole('button', { name: 'Reagir' })).toHaveCSS('opacity', '1');
+    await expect(row.getByRole('button', { name: 'Responder' })).toHaveCSS('opacity', '1');
+    await ana.context.close();
+  });
+
+  test('tocar e segurar numa pessoa da chamada abre o volume só seu', async ({ browser }) => {
+    const ana = await openPerson(browser, 'Ana', { viewport: PHONE, touch: true });
+    const bruno = await openPerson(browser, 'Bruno');
+    await joinCall(bruno.page);
+    await ana.page.getByRole('button', { name: 'Voltar à lista' }).click();
+    await ana.page.getByRole('button', { name: 'Sala de estar', exact: true }).click();
+    await expect(ana.page.getByRole('heading', { level: 2, name: 'Sala de estar' })).toBeVisible();
+    const tile = ana.page.getByRole('listitem').filter({ hasText: bruno.name }).first();
+    await tile.dispatchEvent('pointerdown', { pointerType: 'touch', clientX: 120, clientY: 300 });
+    await ana.page.waitForTimeout(650);
+    await expect(ana.page.getByRole('dialog', { name: `Volume de ${bruno.name}` })).toBeVisible();
+    await Promise.all([ana, bruno].map((p) => p.context.close()));
+  });
+
   test('no computador a lista de membros começa aberta ao lado da conversa', async ({ browser }) => {
     const ana = await openPerson(browser, 'Ana');
     const { page } = ana;

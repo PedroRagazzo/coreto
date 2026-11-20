@@ -1,8 +1,9 @@
 import type { Id } from '@shared/models';
 import { Volume2, VolumeX } from 'lucide-react';
-import { useEffect, useRef, useState, type MouseEvent } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { DEFAULT_USER_VOLUME, USER_VOLUME_MAX, type UserVolume } from '../lib/settings';
+import type { PressPoint } from '../lib/useLongPress';
 import { useSettings } from '../state/settings';
 
 interface Target {
@@ -18,7 +19,7 @@ interface Target {
  */
 export function useUserVolumeMenu() {
   const [target, setTarget] = useState<Target | null>(null);
-  const open = (event: MouseEvent, userId: Id, name: string) => {
+  const open = (event: Pick<MouseEvent, 'clientX' | 'clientY' | 'preventDefault'> | PressPoint, userId: Id, name: string) => {
     event.preventDefault();
     setTarget({ userId, name, x: event.clientX, y: event.clientY });
   };
@@ -41,7 +42,10 @@ function UserVolumeMenu({ target, onClose }: { target: Target; onClose: () => vo
 
   useEffect(() => {
     const close = () => closeRef.current();
+    const openedAt = Date.now();
     const away = (e: Event) => {
+      // Ao soltar o dedo de uma pressão longa, o navegador ainda manda um toque "de mouse" para o que estava embaixo.
+      if (Date.now() - openedAt < 400) return;
       if (!ref.current?.contains(e.target as Node)) close();
     };
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && close();
